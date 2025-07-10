@@ -31,7 +31,7 @@ function calculatePocketDistance(num1, num2, rouletteWheel) {
     return Math.min(directDistance, wrapAroundDistance);
 }
 
-function getHitZone(baseNumber, terminals, winningNumber, useDynamicTerminalNeighbourCountBool, terminalMapping, rouletteWheel) {
+export function getHitZone(baseNumber, terminals, winningNumber, useDynamicTerminalNeighbourCountBool, terminalMapping, rouletteWheel) {
     if (baseNumber < 0 || baseNumber > 36) return [];
     const hitZone = new Set([baseNumber]);
     const numTerminals = terminals ? terminals.length : 0;
