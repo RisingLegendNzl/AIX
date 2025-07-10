@@ -1,6 +1,6 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
-importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs');
+import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs';
 
 // --- ENSEMBLE CONFIGURATION ---
 const ENSEMBLE_CONFIG = [
