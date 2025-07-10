@@ -294,8 +294,8 @@ async function predictWithEnsemble(historyData) {
 async function loadModelsFromStorage() {
     const loadPromises = ensemble.map(async (member) => {
         try {
-            // Updated path to reflect saving model.json in a sub-folder
-            member.model = await tf.loadLayersModel(`indexeddb://${member.path}/model.json`);
+            // The path for loadLayersModel must match the path used in `save`.
+            member.model = await tf.loadLayersModel(`indexeddb://${member.path}`);
             console.log(`TF.js Model ${member.name} loaded from IndexedDB.`);
             return true;
         } catch (error) {
