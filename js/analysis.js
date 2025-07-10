@@ -62,6 +62,7 @@ function runSimulationOnHistory(spinsToProcess) {
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory,
+            activePredictionTypes: state.activePredictionTypes,
             useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
             terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
@@ -108,6 +109,7 @@ export function runAllAnalyses() {
             lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady, useTrendConfirmationBool: state.useTrendConfirmation,
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+            activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
