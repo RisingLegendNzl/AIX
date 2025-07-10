@@ -27,18 +27,18 @@ export let adaptiveFactorInfluences = {
 
 // --- Global Toggle States ---
 export let useTrendConfirmation = config.DEFAULT_PARAMETERS.TOGGLES.useTrendConfirmation;
-export let useWeightedZone = DEFAULT_PARAMETERS.TOGGLES.useWeightedZone;
-export let useProximityBoost = DEFAULT_PARAMETERS.TOGGLES.useProximityBoost;
-export let usePocketDistance = DEFAULT_PARAMETERS.TOGGLES.usePocketDistance;
-export let useLowestPocketDistance = DEFAULT_PARAMETERS.TOGGLES.useLowestPocketDistance;
-export let useAdvancedCalculations = DEFAULT_PARAMETERS.TOGGLES.useAdvancedCalculations;
-export let useDynamicStrategy = DEFAULT_PARAMETERS.TOGGLES.useDynamicStrategy;
-export let useAdaptivePlay = DEFAULT_PARAMETERS.TOGGLES.useAdaptivePlay;
-export let useTableChangeWarnings = DEFAULT_PARAMETERS.TOGGLES.useTableChangeWarnings;
-export let useDueForHit = DEFAULT_PARAMETERS.TOGGLES.useDueForHit;
-export let useNeighbourFocus = DEFAULT_PARAMETERS.TOGGLES.useNeighbourFocus;
-export let useLessStrict = DEFAULT_PARAMETERS.TOGGLES.useLessStrict;
-export let useDynamicTerminalNeighbourCount = DEFAULT_PARAMETERS.TOGGLES.useDynamicTerminalNeighbourCount;
+export let useWeightedZone = config.DEFAULT_PARAMETERS.TOGGLES.useWeightedZone;
+export let useProximityBoost = config.DEFAULT_PARAMETERS.TOGGLES.useProximityBoost;
+export let usePocketDistance = config.DEFAULT_PARAMETERS.TOGGLES.usePocketDistance;
+export let useLowestPocketDistance = config.DEFAULT_PARAMETERS.TOGGLES.useLowestPocketDistance;
+export let useAdvancedCalculations = config.DEFAULT_PARAMETERS.TOGGLES.useAdvancedCalculations;
+export let useDynamicStrategy = config.DEFAULT_PARAMETERS.TOGGLES.useDynamicStrategy;
+export let useAdaptivePlay = config.DEFAULT_PARAMETERS.TOGGLES.useAdaptivePlay;
+export let useTableChangeWarnings = config.DEFAULT_PARAMETERS.TOGGLES.useTableChangeWarnings;
+export let useDueForHit = config.DEFAULT_PARAMETERS.TOGGLES.useDueForHit;
+export let useNeighbourFocus = config.DEFAULT_PARAMETERS.TOGGLES.useNeighbourFocus;
+export let useLessStrict = config.DEFAULT_PARAMETERS.TOGGLES.useLessStrict;
+export let useDynamicTerminalNeighbourCount = config.DEFAULT_PARAMETERS.TOGGLES.useDynamicTerminalNeighbourCount;
 
 // --- State Modifying Functions ---
 export function setHistory(newHistory) { history = newHistory; }
@@ -79,7 +79,7 @@ export function saveState() {
             useAdvancedCalculations, useDynamicStrategy, useAdaptivePlay, useTableChangeWarnings,
             useDueForHit, useNeighbourFocus, useLessStrict, useDynamicTerminalNeighbourCount
         },
-        STRATEGY_CONFIG: STRATEGY_CONFIG,
-        ADAPTIVE_LEARNING_RATES: ADAPTIVE_LEARNING_RATES
+        STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES
     }));
 }
