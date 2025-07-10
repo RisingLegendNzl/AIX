@@ -2,6 +2,8 @@
 
 import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core';
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl';
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu';
+import * as config from './config.js';
 
 // --- ENSEMBLE CONFIGURATION ---
 const ENSEMBLE_CONFIG = [
@@ -25,8 +27,7 @@ const SEQUENCE_LENGTH = 5;
 const TRAINING_MIN_HISTORY = 10;
 const failureModes = ['none', 'normalLoss', 'streakBreak', 'sectionShift'];
 
-let ensemble = ENSEMBLE_CONFIG.map(config => ({ ...config, model: null, scaler: null }));
-let allPredictionTypes = []; // This will be the clonable version without functions
+let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
 let terminalMapping = {};
 let rouletteWheel = [];
 let isTraining = false;
@@ -73,7 +74,7 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
             ...Object.values(props),
-            ...allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
+            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
         ];
     };
     
@@ -108,11 +109,11 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         const xs_row = sequence.map(item => getFeatures(item).map((val, idx) => scaleFeature(val, idx)));
         rawFeatures.push(xs_row);
         
-        rawGroupLabels.push(allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
+        rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
         rawFailureLabels.push(failureModes.map(mode => (targetItem.failureMode === mode ? 1 : 0)));
         
         // Create the label for streak lengths
-        const streakLengthLabel = allPredictionTypes.map(type => {
+        const streakLengthLabel = config.allPredictionTypes.map(type => {
             const streaks = historicalStreakData[type.id] || [];
             // Predict the average streak length for this type based on historical data
             return streaks.length > 0 ? streaks.reduce((a, b) => a + b, 0) / streaks.length : 0;
@@ -177,9 +178,9 @@ async function trainEnsemble(historyData, historicalStreakData) {
     self.postMessage({ type: 'saveScaler', payload: JSON.stringify(scaler) });
     ensemble.forEach(member => member.scaler = scaler);
 
-    const groupLabelCount = allPredictionTypes.length;
+    const groupLabelCount = config.allPredictionTypes.length;
     const failureLabelCount = failureModes.length;
-    const streakLabelCount = allPredictionTypes.length;
+    const streakLabelCount = config.allPredictionTypes.length;
 
     for (const member of ensemble) {
         try {
@@ -232,7 +233,7 @@ async function predictWithEnsemble(historyData) {
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
             ...Object.values(props),
-            ...allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
+            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
         ];
     };
     
@@ -252,9 +253,9 @@ async function predictWithEnsemble(historyData) {
         const allPredictions = await Promise.all(activeModels.map(m => m.model.predict(inputTensor)));
 
         // Average the predictions
-        const averagedGroupProbs = new Float32Array(allPredictionTypes.length).fill(0);
+        const averagedGroupProbs = new Float32Array(config.allPredictionTypes.length).fill(0);
         const averagedFailureProbs = new Float32Array(failureModes.length).fill(0);
-        const averagedStreakPreds = new Float32Array(allPredictionTypes.length).fill(0);
+        const averagedStreakPreds = new Float32Array(config.allPredictionTypes.length).fill(0);
 
         for (const prediction of allPredictions) {
             const groupProbs = await prediction[0].data();
@@ -275,9 +276,9 @@ async function predictWithEnsemble(historyData) {
         averagedStreakPreds.forEach((p, i) => averagedStreakPreds[i] /= allPredictions.length);
 
         const finalResult = { groups: {}, failures: {}, streakPredictions: {} };
-        allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
+        config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
-        allPredictionTypes.forEach((type, i) => finalResult.streakPredictions[type.id] = averagedStreakPreds[i]);
+        config.allPredictionTypes.forEach((type, i) => finalResult.streakPredictions[type.id] = averagedStreakPreds[i]);
         
         return finalResult;
 
@@ -330,7 +331,6 @@ self.onmessage = async (event) => {
     const { type, payload } = event.data;
     switch (type) {
         case 'init':
-            allPredictionTypes = payload.allPredictionTypes;
             terminalMapping = payload.terminalMapping;
             rouletteWheel = payload.rouletteWheel;
             const loadedScaler = payload.scaler ? JSON.parse(payload.scaler) : null;
@@ -357,7 +357,6 @@ self.onmessage = async (event) => {
             break;
         case 'update_config':
             // Only update clonable parts if needed. Actual functions are in shared-logic.
-            allPredictionTypes = payload.allPredictionTypes;
             terminalMapping = payload.terminalMapping;
             rouletteWheel = payload.rouletteWheel;
             break;
