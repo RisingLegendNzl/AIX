@@ -69,8 +69,11 @@ export function setToggles(toggles) {
 
 export function saveState() {
     localStorage.setItem('terminalCalculatorState', JSON.stringify({
-        history, confirmedWinsLog,
-        strategyStates, patternMemory, adaptiveFactorInfluences,
+        history,
+        confirmedWinsLog,
+        strategyStates,
+        patternMemory,
+        adaptiveFactorInfluences,
         TOGGLES: {
             useTrendConfirmation, useWeightedZone, useProximityBoost, usePocketDistance, useLowestPocketDistance,
             useAdvancedCalculations, useDynamicStrategy, useAdaptivePlay, useTableChangeWarnings,
@@ -78,6 +81,5 @@ export function saveState() {
         },
         STRATEGY_CONFIG: STRATEGY_CONFIG,
         ADAPTIVE_LEARNING_RATES: ADAPTIVE_LEARNING_RATES
-    }) // Close the main object here
-    ); // Close the JSON.stringify() and setItem() calls here
-}//
+    }));
+}
