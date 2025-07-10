@@ -136,7 +136,7 @@ export function updateActivePredictionTypes() {
         aiWorker.postMessage({ 
             type: 'update_config', 
             payload: { 
-                allPredictionTypes: config.clonablePredictionTypes, 
+                allPredictionTypes: config.allPredictionTypes, 
                 terminalMapping: config.terminalMapping,
                 rouletteWheel: config.rouletteWheel
             } 
