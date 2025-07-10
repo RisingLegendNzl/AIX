@@ -99,7 +99,7 @@ function evaluateCalculationStatus(historyItem, winningNumber, useDynamicTermina
     }
 }
 
-function calculateTrendStats(currentHistory, current_STRATEGY_CONFIG, activeTypesArr, allPredictionTypes, terminalMapping, rouletteWheel) {
+export function calculateTrendStats(currentHistory, current_STRATEGY_CONFIG, activeTypesArr, allPredictionTypes, terminalMapping, rouletteWheel) {
     const sortedHistory = [...currentHistory].sort((a, b) => a.id - b.id);
     const streakData = {};
     const currentStreaks = {};
