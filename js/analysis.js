@@ -44,10 +44,10 @@ function runSimulationOnHistory(spinsToProcess) {
     };
     if (spinsToProcess.length < 3) return [];
 
-    for (let i = 0; i <= spinsToProcess.length - 3; i++) {
-        const num1 = spinsToProcess[i];
-        const num2 = spinsToProcess[i + 1];
-        const winningNumber = spinsToProcess[i + 2];
+    for (let i = 2; i < spinsToProcess.length; i++) {
+        const num1 = spinsToProcess[i - 2];
+        const num2 = spinsToProcess[i - 1];
+        const winningNumber = spinsToProcess[i];
         
         const trendStats = calculateTrendStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
         // **TYPO FIXED HERE**
@@ -136,7 +136,6 @@ export function updateActivePredictionTypes() {
         aiWorker.postMessage({ 
             type: 'update_config', 
             payload: { 
-                allPredictionTypes: config.allPredictionTypes, 
                 terminalMapping: config.terminalMapping,
                 rouletteWheel: config.rouletteWheel
             } 
