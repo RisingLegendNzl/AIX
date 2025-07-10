@@ -237,14 +237,14 @@ self.onmessage = (event) => {
             currentGaConfig = payload.GA_CONFIG; // Receive config from main thread
             // Store the data needed by the shared functions and current toggle states
             sharedData = {
-                allPredictionTypes: payload.allPredictionTypes, // Renamed from helpers.allPredictionTypes
                 terminalMapping: payload.terminalMapping,      // Renamed from helpers.terminalMapping
                 rouletteWheel: payload.rouletteWheel,          // Renamed from helpers.rouletteWheel
                 useDynamicTerminalNeighbourCount: payload.useDynamicTerminalNeighbourCount, // New
                 useProximityBoost: payload.useProximityBoost,   // New
                 useWeightedZone: payload.useWeightedZone,       // New
                 useNeighbourFocus: payload.useNeighbourFocus,   // New
-                useTrendConfirmation: payload.useTrendConfirmation // New
+                useTrendConfirmation: payload.useTrendConfirmation, // New
+                allPredictionTypes: payload.allPredictionTypes    // NEW: The crucial missing data
             };
             runEvolution();
             break;
