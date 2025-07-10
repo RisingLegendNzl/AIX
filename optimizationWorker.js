@@ -133,6 +133,7 @@ function calculateFitness(individual) {
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES,
             currentHistoryForTrend: simulatedHistory, // Pass current simulation history for trend
             useDynamicTerminalNeighbourCount: sharedData.useDynamicTerminalNeighbourCount, // Pass this toggle
+            activePredictionTypes: sharedData.allPredictionTypes,
             allPredictionTypes: sharedData.allPredictionTypes, // Pass necessary global data
             terminalMapping: sharedData.terminalMapping,
             rouletteWheel: sharedData.rouletteWheel
