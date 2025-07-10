@@ -1,7 +1,7 @@
 // optimizationWorker.js - Genetic Algorithm for Parameter Optimization
 
 // Import the shared logic file. This is MUCH more robust than rebuilding functions from strings.
-importScripts('shared-logic.js');
+import * as shared from './shared-logic.js';
 
 // This variable will hold the config passed from the main thread.
 let currentGaConfig = {};
@@ -109,12 +109,12 @@ function calculateFitness(individual) {
         if (rawItem.winningNumber === null) continue; // Skip items without a winning number
 
         // Use the imported shared functions directly
-        const trendStats = calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.allPredictionTypes, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const boardStats = getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.allPredictionTypes, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const neighbourScores = runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.allPredictionTypes, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.allPredictionTypes, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
 
         // Get recommendation for the current simulated spin
-        const recommendation = getRecommendation({
+        const recommendation = shared.getRecommendation({
             trendStats,
             boardStats,
             neighbourScores,
@@ -143,7 +143,7 @@ function calculateFitness(individual) {
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
 
         // Evaluate the status of this simulated spin using shared logic
-        evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
 
         // Update wins/losses based on the recommendation
         if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
