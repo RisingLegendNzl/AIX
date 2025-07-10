@@ -201,3 +201,26 @@ export function handleStrategyChange() {
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
     ui.drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
 }
+
+export function initializeAiWithHistory() {
+    if (!aiWorker) return; // Make sure the worker is ready
+
+    const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
+    if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
+        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
+        return;
+    }
+
+    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+
+    const savedScaler = localStorage.getItem('roulette-ml-scaler');
+
+    aiWorker.postMessage({
+        type: 'train',
+        payload: {
+            history: state.history,
+            historicalStreakData: trendStats.streakData,
+            scaler: savedScaler,
+        }
+    });
+}
