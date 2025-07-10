@@ -13,8 +13,8 @@ export let optimizationWorker;
 
 export function initializeWorkers() {
     // Ensure workers are in the root directory relative to index.html
-    aiWorker = new Worker('aiWorker.js');
-    optimizationWorker = new Worker('optimizationWorker.js');
+    aiWorker = new Worker('aiWorker.js', { type: 'module' });
+    optimizationWorker = new Worker('optimizationWorker.js', { type: 'module' });
 
     // --- WORKER MESSAGE HANDLERS ---
     aiWorker.onmessage = (event) => {
