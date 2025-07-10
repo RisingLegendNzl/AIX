@@ -59,7 +59,7 @@ function getHitZone(baseNumber, terminals, winningNumber, useDynamicTerminalNeig
     return Array.from(hitZone);
 }
 
-function evaluateCalculationStatus(historyItem, winningNumber, useDynamicTerminalNeighbourCountBool, activePredictionTypes, terminalMapping, rouletteWheel) {
+export function evaluateCalculationStatus(historyItem, winningNumber, useDynamicTerminalNeighbourCountBool, activePredictionTypes, terminalMapping, rouletteWheel) {
     historyItem.winningNumber = winningNumber;
     historyItem.hitTypes = [];
     historyItem.typeSuccessStatus = {};
@@ -149,7 +149,7 @@ export function calculateTrendStats(currentHistory, current_STRATEGY_CONFIG, act
     return { averages, currentStreaks, lastSuccessState, streakData };
 }
 
-function getBoardStateStats(simulatedHistory, current_STRATEGY_CONFIG, activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel) {
+export function getBoardStateStats(simulatedHistory, current_STRATEGY_CONFIG, activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel) {
     const stats = {};
     activePredictionTypes.forEach(type => {
         stats[type.id] = { success: 0, total: 0 };
@@ -174,7 +174,7 @@ function getBoardStateStats(simulatedHistory, current_STRATEGY_CONFIG, activePre
     return stats;
 }
 
-function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, useDynamicTerminalNeighbourCountBool, allPredictionTypes, terminalMapping, rouletteWheel) {
+export function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, useDynamicTerminalNeighbourCountBool, allPredictionTypes, terminalMapping, rouletteWheel) {
     const analysis = {};
     for (let i = 0; i <= 36; i++) analysis[i] = { success: 0 };
     simulatedHistory.forEach((item, i) => {
@@ -198,7 +198,7 @@ function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, useDyna
     return analysis;
 }
 
-function getRecommendation(context) {
+export function getRecommendation(context) {
     const {
         trendStats, boardStats, neighbourScores,
         inputNum1, inputNum2,
