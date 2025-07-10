@@ -3,7 +3,7 @@
 // --- IMPORTS ---
 import * as state from './state.js';
 import * as config from './config.js';
-import { calculateTrendStats } from '../shared-logic.js';
+
 // Import specific UI functions needed, NOT the whole module
 import { updateAiStatus, updateOptimizationStatus, showOptimizationComplete, showOptimizationStopped } from './ui.js';
 
@@ -58,21 +58,5 @@ export function initializeWorkers() {
                 break;
         }
     };
-
-    // --- INITIAL MESSAGE TO WORKER ---
-    const savedScaler = localStorage.getItem('roulette-ml-scaler'); 
-    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    
-    aiWorker.postMessage({ 
-        type: 'init', 
-        payload: { 
-            history: state.history,
-            allPredictionTypes: config.clonablePredictionTypes,
-            terminalMapping: config.terminalMapping,
-            rouletteWheel: config.rouletteWheel,
-            scaler: savedScaler, 
-            historicalStreakData: trendStats.streakData
-        } 
-    });
 
 } //
