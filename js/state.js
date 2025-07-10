@@ -80,4 +80,4 @@ export function saveState() {
         ADAPTIVE_LEARNING_RATES: ADAPTIVE_LEARNING_RATES
     }) // Close the main object here
     ); // Close the JSON.stringify() and setItem() calls here
-}
+}//
