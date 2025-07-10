@@ -323,7 +323,17 @@ export function getRecommendation(context) {
         details.primaryDrivingFactor = mostInfluentialFactor;
         details.adaptiveInfluenceUsed = currentAdaptiveInfluences[mostInfluentialFactor] || 1.0;
 
-        return { type, score: details.finalScore, details };
+        return {
+            type: {
+                id: type.id,
+                label: type.label,
+                displayLabel: type.displayLabel,
+                colorClass: type.colorClass,
+                textColor: type.textColor
+            },
+            score: details.finalScore,
+            details
+        };
     }).filter(c => c && !isNaN(c.score));
 
     if (candidates.length === 0) {
