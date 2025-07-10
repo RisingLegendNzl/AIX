@@ -1,5 +1,5 @@
 // js/state.js
-import { DEFAULT_PARAMETERS, STRATEGY_CONFIG, ADAPTIVE_LEARNING_RATES } from './config.js';
+import * as config from './config.js';
 
 // --- Application State ---
 export let history = [];
@@ -26,7 +26,7 @@ export let adaptiveFactorInfluences = {
 };
 
 // --- Global Toggle States ---
-export let useTrendConfirmation = DEFAULT_PARAMETERS.TOGGLES.useTrendConfirmation;
+export let useTrendConfirmation = config.DEFAULT_PARAMETERS.TOGGLES.useTrendConfirmation;
 export let useWeightedZone = DEFAULT_PARAMETERS.TOGGLES.useWeightedZone;
 export let useProximityBoost = DEFAULT_PARAMETERS.TOGGLES.useProximityBoost;
 export let usePocketDistance = DEFAULT_PARAMETERS.TOGGLES.usePocketDistance;
