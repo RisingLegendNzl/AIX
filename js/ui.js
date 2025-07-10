@@ -745,7 +745,7 @@ document.getElementById('advancedSettingsHeader').addEventListener('click', () =
             type: 'start', 
             payload: { 
                 history: state.history,
-                allPredictionTypes: config.clonablePredictionTypes,
+                allPredictionTypes: config.allPredictionTypes,
                 terminalMapping: config.terminalMapping,
                 rouletteWheel: config.rouletteWheel,
                 GA_CONFIG: config.GA_CONFIG,
