@@ -387,18 +387,21 @@ export function getRecommendation(context) {
 
     // Use useNeighbourFocusBool parameter
     if (useNeighbourFocusBool && (signal === 'Play' || signal === 'Strong Play')) {
-        const baseNum = bestCandidate.type.calculateBase(currentNum1, currentNum2);
-        const terminals = terminalMapping?.[baseNum] || [];
-        // Use context.useDynamicTerminalNeighbourCount
-        const hotNumbers = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel)
-            .map(num => ({num, score: neighbourScores[num]?.success || 0 }))
-            .filter(n => n.score > 0)
-            .sort((a,b) => b.score - a.score)
-            .slice(0,5)
-            .map(n => n.num);
+        const fullPredictionType = allPredictionTypes.find(t => t.id === bestCandidate.type.id);
+        if (fullPredictionType) {
+            const baseNum = fullPredictionType.calculateBase(currentNum1, currentNum2);
+            const terminals = terminalMapping?.[baseNum] || [];
+            // Use context.useDynamicTerminalNeighbourCount
+            const hotNumbers = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel)
+                .map(num => ({num, score: neighbourScores[num]?.success || 0 }))
+                .filter(n => n.score > 0)
+                .sort((a,b) => b.score - a.score)
+                .slice(0,5)
+                .map(n => n.num);
 
-        if (hotNumbers.length > 0) {
-            finalHtml += `<br><span class="text-xs text-gray-600">Focus on hot neighbours: <strong>${hotNumbers.join(', ')}</strong></span>`;
+            if (hotNumbers.length > 0) {
+                finalHtml += `<br><span class="text-xs text-gray-600">Focus on hot neighbours: <strong>${hotNumbers.join(', ')}</strong></span>`;
+            }
         }
     }
 
