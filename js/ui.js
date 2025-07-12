@@ -30,6 +30,7 @@ function toggleGuide(contentId) {
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
 export function updateAllTogglesUI() {
+    if (!dom.trendConfirmationToggle) return;
     dom.trendConfirmationToggle.checked = state.useTrendConfirmation;
     dom.weightedZoneToggle.checked = state.useWeightedZone;
     dom.proximityBoostToggle.checked = state.useProximityBoost;
@@ -58,9 +59,8 @@ export function updateWinLossCounter() {
             }
         }
     });
-
-    dom.winCount.textContent = wins;
-    dom.lossCount.textContent = losses;
+    if (dom.winCount) dom.winCount.textContent = wins;
+    if (dom.lossCount) dom.lossCount.textContent = losses;
 }
 
 export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) {
@@ -91,7 +91,7 @@ export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) 
     const highlightedNumbers = new Set();
     const hitZoneClasses = {};
 
-    if (currentDiff !== null && !isNaN(currentDiff)) {
+    if (currentDiff !== null && !isNaN(currentDiff) && dom.number1 && dom.number2) {
         const num1 = parseInt(dom.number1.value, 10);
         const num2 = parseInt(dom.number2.value, 10);
 
@@ -386,7 +386,7 @@ export function updateAiStatus(message) {
 // --- EVENT HANDLERS (Private to this module) ---
 
 async function handleCalculation() {
-    // Add a check to ensure the DOM elements exist before accessing their properties.
+    // This is the new defensive check from our previous conversation.
     if (!dom.number1 || !dom.number2 || !dom.resultDisplay || !dom.winningNumberInput) {
         console.error("UI elements not found. Cannot perform calculation.");
         return;
@@ -505,7 +505,7 @@ function handleClearHistory() {
     runAllAnalyses();
     renderHistory();
     
-    dom.historicalAnalysisMessage.textContent = 'History cleared.';
+    if (dom.historicalAnalysisMessage) dom.historicalAnalysisMessage.textContent = 'History cleared.';
     drawRouletteWheel(); 
     
     aiWorker.postMessage({ type: 'clear_model' });
@@ -520,20 +520,20 @@ function handleVideoUpload(event) {
     }
     state.setCurrentVideoURL(URL.createObjectURL(file));
 
-    dom.videoPlayer.src = state.currentVideoURL;
-    dom.videoPlayer.classList.remove('hidden');
-    dom.videoUploadContainer.classList.add('hidden');
-    dom.videoControlsContainer.classList.remove('hidden');
-    dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
+    if (dom.videoPlayer) dom.videoPlayer.src = state.currentVideoURL;
+    if (dom.videoPlayer) dom.videoPlayer.classList.remove('hidden');
+    if (dom.videoUploadContainer) dom.videoUploadContainer.classList.add('hidden');
+    if (dom.videoControlsContainer) dom.videoControlsContainer.classList.remove('hidden');
+    if (dom.videoStatus) dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
 }
 
 function startVideoAnalysis() {
-    dom.analyzeVideoButton.disabled = true;
-    dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
+    if (dom.analyzeVideoButton) dom.analyzeVideoButton.disabled = true;
+    if (dom.videoStatus) dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
     console.log("Video analysis initiated.");
     setTimeout(() => {
-        dom.analyzeVideoButton.disabled = false;
-        dom.videoStatus.textContent = 'Analysis complete (simulation).';
+        if (dom.analyzeVideoButton) dom.analyzeVideoButton.disabled = false;
+        if (dom.videoStatus) dom.videoStatus.textContent = 'Analysis complete (simulation).';
     }, 2000);
 }
 
@@ -542,14 +542,14 @@ function clearVideoState() {
         URL.revokeObjectURL(state.currentVideoURL);
         state.setCurrentVideoURL(null);
     }
-    dom.videoPlayer.src = '';
-    dom.videoUpload.value = ''; 
+    if (dom.videoPlayer) dom.videoPlayer.src = '';
+    if (dom.videoUpload) dom.videoUpload.value = ''; 
 
-    dom.videoPlayer.classList.add('hidden');
-    dom.frameCanvas.classList.add('hidden');
-    dom.videoControlsContainer.classList.add('hidden');
-    dom.videoUploadContainer.classList.remove('hidden');
-    dom.videoStatus.textContent = '';
+    if (dom.videoPlayer) dom.videoPlayer.classList.add('hidden');
+    if (dom.frameCanvas) dom.frameCanvas.classList.add('hidden');
+    if (dom.videoControlsContainer) dom.videoControlsContainer.classList.add('hidden');
+    if (dom.videoUploadContainer) dom.videoUploadContainer.classList.remove('hidden');
+    if (dom.videoStatus) dom.videoStatus.textContent = '';
 }
 
 function handlePresetSelection(presetName) {
@@ -596,12 +596,12 @@ function createSlider(containerId, label, paramObj, paramName, min, max, step) {
         paramObj[paramName] = val;
 
         state.saveState(); 
-        dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
+        if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
         handleStrategyChange(); 
     };
 
-    slider.addEventListener('input', (e) => updateValue(e.target.value)); 
-    numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
+    if(slider) slider.addEventListener('input', (e) => updateValue(e.target.value)); 
+    if(numberInput) numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
 }
 
 export function initializeAdvancedSettingsUI() {
@@ -622,7 +622,7 @@ function resetAllParameters() {
     state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
     updateAllTogglesUI(); 
     initializeAdvancedSettingsUI(); 
-    dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
+    if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
     handleStrategyChange();
 }
 
@@ -647,7 +647,7 @@ function saveParametersToFile() {
     a.download = 'roulette_parameters.json';
     a.click();
     URL.revokeObjectURL(a.href);
-    dom.parameterStatusMessage.textContent = 'Parameters saved.';
+    if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameters saved.';
 }
 
 function loadParametersFromFile(event) {
@@ -662,10 +662,10 @@ function loadParametersFromFile(event) {
             if (loaded.TOGGLES) state.setToggles(loaded.TOGGLES);
             updateAllTogglesUI(); 
             initializeAdvancedSettingsUI(); 
-            dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
+            if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
             handleStrategyChange();
         } catch (error) {
-            dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
+            if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
         }
     };
     reader.readAsText(file);
@@ -680,23 +680,38 @@ export function toggleParameterSliders(enable) {
             control.disabled = !enable;
         }
     });
-    dom.setHighestWinRatePreset.disabled = !enable;
-    dom.setBalancedSafePreset.disabled = !enable;
-    dom.setAggressiveSignalsPreset.disabled = !enable;
-    dom.resetParametersButton.disabled = !enable;
-    dom.saveParametersButton.disabled = !enable;
-    dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
-    dom.loadParametersInput.disabled = !enable;
+    if (dom.setHighestWinRatePreset) dom.setHighestWinRatePreset.disabled = !enable;
+    if (dom.setBalancedSafePreset) dom.setBalancedSafePreset.disabled = !enable;
+    if (dom.setAggressiveSignalsPreset) dom.setAggressiveSignalsPreset.disabled = !enable;
+    if (dom.resetParametersButton) dom.resetParametersButton.disabled = !enable;
+    if (dom.saveParametersButton) dom.saveParametersButton.disabled = !enable;
+    if (dom.loadParametersLabel) dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
+    if (dom.loadParametersInput) dom.loadParametersInput.disabled = !enable;
 }
 
 // --- UI INITIALIZATION HELPERS ---
+const CRITICAL_DOM_ELEMENTS = [
+    'number1', 'number2', 'winningNumberInput', 'calculateButton', 'resultDisplay', 'historyList', 
+    'predictionGroups', 'recalculateAnalysisButton', 'clearInputsButton', 'swapButton'
+];
+
+function getRequiredElements() {
+    for (const id of CRITICAL_DOM_ELEMENTS) {
+        const element = document.getElementById(id);
+        if (!element) {
+            console.error(`Initialization Error: Required DOM element with ID "${id}" was not found.`);
+            return false;
+        }
+        dom[id] = element;
+    }
+    return true;
+}
 
 function attachMainActionListeners() {
-    if (!dom.calculateButton || !dom.clearInputsButton || !dom.swapButton || !dom.historyList || !dom.recalculateAnalysisButton || !dom.number1 || !dom.number2) return;
-    document.getElementById('calculateButton').addEventListener('click', handleCalculation);
-    document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
-    document.getElementById('swapButton').addEventListener('click', handleSwap);
-    document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
+    dom.calculateButton.addEventListener('click', handleCalculation);
+    dom.clearInputsButton.addEventListener('click', handleClearInputs);
+    dom.swapButton.addEventListener('click', handleSwap);
+    if(dom.clearHistoryButton) dom.clearHistoryButton.addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
     dom.recalculateAnalysisButton.addEventListener('click', runAllAnalyses);
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
@@ -768,49 +783,61 @@ function attachGuideAndInfoListeners() {
     if(dom.historyInfoToggle) {
         dom.historyInfoToggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            dom.historyInfoDropdown.classList.toggle('hidden');
+            if (dom.historyInfoDropdown) dom.historyInfoDropdown.classList.toggle('hidden');
         });
     }
 }
 // --- INITIALIZATION ---
 export function initializeUI() {
-    const elementIds = [
-        'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
-        'boardStateConclusion', 'historicalNumbersInput', 'imageUpload', 'imageUploadLabel',
-        'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 'aiModelStatus', 'recalculateAnalysisButton',
-        'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
-        'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
-        'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
-        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
-        'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
-        'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
-        'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
-        'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 'optimizationStatus',
-        'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 'applyBestParamsButton',
-        'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
-        'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
-        'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
-        'loadParametersLabel', 'parameterStatusMessage', 'predictionGroups'
+    // Step 1: Explicitly get all critical DOM elements and check for their existence.
+    const allElementsFound = getRequiredElements();
+    if (!allElementsFound) {
+        console.error("Application cannot start. Please check the console for missing elements.");
+        return; // Halt initialization if critical elements are missing
+    }
+
+    // Step 2: Get non-critical DOM elements. This part can fail gracefully.
+    const optionalElementIds = [
+        'analysisList', 'boardStateAnalysis', 'boardStateConclusion', 'historicalNumbersInput', 
+        'imageUpload', 'imageUploadLabel', 'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 
+        'aiModelStatus', 'recalculateAnalysisButton', 'trendConfirmationToggle', 'weightedZoneToggle', 
+        'proximityBoostToggle', 'pocketDistanceToggle', 'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 
+        'dynamicStrategyToggle', 'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 
+        'neighbourFocusToggle', 'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 
+        'videoUploadLabel', 'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 
+        'setBalancedSafePreset', 'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 
+        'strategyWeightsDisplay', 'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 
+        'clearVideoButton', 'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 
+        'optimizationStatus', 'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 
+        'applyBestParamsButton', 'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader', 
+        'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders', 
+        'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput', 
+        'loadParametersLabel', 'parameterStatusMessage', 'clearHistoryButton', 'advancedSettingsHeader'
     ];
-    elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
+    optionalElementIds.forEach(id => {
+        dom[id] = document.getElementById(id);
+    });
     
+    // Step 3: Attach event listeners and run initial functions.
     attachMainActionListeners();
     attachToggleListeners();
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
     
     // Guide toggles
-    if (document.getElementById('advancedSettingsHeader')) document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+    if (dom.advancedSettingsHeader) {
+        dom.advancedSettingsHeader.addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+    }
 
 
     if(dom.startOptimizationButton && dom.stopOptimizationButton && dom.optimizationResult) {
         dom.startOptimizationButton.addEventListener('click', () => {
             if (state.history.length < 20) {
-                updateOptimizationStatus('Error: Need at least 20 history items.');
+                if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Error: Need at least 20 history items.';
                 return;
             }
-            updateOptimizationStatus('Starting optimization...');
-            dom.optimizationResult.classList.add('hidden');
+            if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Starting optimization...';
+            if (dom.optimizationResult) dom.optimizationResult.classList.add('hidden');
             toggleParameterSliders(false);
             dom.startOptimizationButton.disabled = true;
             dom.stopOptimizationButton.disabled = false;
@@ -856,7 +883,7 @@ export function initializeUI() {
                     MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence
                 });
                 initializeAdvancedSettingsUI();
-                updateOptimizationStatus('Best parameters applied!');
+                if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Best parameters applied!';
                 handleStrategyChange();
             }
         });
