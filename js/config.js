@@ -53,6 +53,50 @@ export const DEFAULT_PARAMETERS = {
     }
 };
 
+// --- STRATEGY PRESETS ---
+export const STRATEGY_PRESETS = {
+    highestWinRate: {
+        STRATEGY_CONFIG: {
+            learningRate_success: 0.35,
+            learningRate_failure: 0.05,
+            maxWeight: 6.0,
+            minWeight: 0.03,
+            decayFactor: 0.88,
+            patternMinAttempts: 5,
+            patternSuccessThreshold: 68,
+            triggerMinAttempts: 5,
+            triggerSuccessThreshold: 63,
+        },
+        ADAPTIVE_LEARNING_RATES: {
+            SUCCESS: 0.15,
+            FAILURE: 0.1,
+            MIN_INFLUENCE: 0.2,
+            MAX_INFLUENCE: 2.5,
+        },
+        TOGGLES: {
+            ...DEFAULT_PARAMETERS.TOGGLES,
+            useTrendConfirmation: true,
+            useWeightedZone: true,
+            useProximityBoost: false,
+            useAdvancedCalculations: true,
+            useDynamicStrategy: true,
+            useAdaptivePlay: true,
+            useNeighbourFocus: true,
+            useDynamicTerminalNeighbourCount: true
+        }
+    },
+    balancedSafe: {
+        STRATEGY_CONFIG: DEFAULT_PARAMETERS.STRATEGY_CONFIG,
+        ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+        TOGGLES: { ...DEFAULT_PARAMETERS.TOGGLES, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: true }
+    },
+    aggressiveSignals: {
+        STRATEGY_CONFIG: DEFAULT_PARAMETERS.STRATEGY_CONFIG,
+        ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+        TOGGLES: { ...DEFAULT_PARAMETERS.TOGGLES, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: true, useLessStrict: true }
+    }
+};
+
 // --- Core Roulette Data ---
 export const terminalMapping = {
     0: [4, 6], 1: [8], 2: [7, 9], 3: [8], 4: [11], 5: [12, 10], 6: [11], 7: [14, 2],
