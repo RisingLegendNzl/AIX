@@ -86,7 +86,7 @@ function runSimulationOnHistory(spinsToProcess) {
     return localHistory;
 }
 
-export function runAllAnalyses() {
+export function runAllAnalyses(winningNumber = null) {
     state.saveState();
 
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -120,6 +120,20 @@ export function runAllAnalyses() {
             const lastItem = state.history[state.history.length - 1];
             lastItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
             lastItem.recommendationDetails = recommendation.details;
+
+            // If a winning number was provided, evaluate the pending item immediately
+            if (winningNumber !== null) {
+                evaluateCalculationStatus(lastItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+
+                // If the winning number was successfully added, update the log
+                if (lastItem.winningNumber !== null) {
+                    const newLog = state.history
+                        .filter(item => item.winningNumber !== null)
+                        .sort((a, b) => a.id - b.id) // ensure chronological order
+                        .map(item => item.winningNumber);
+                    state.setConfirmedWinsLog(newLog);
+                }
+            }
         }
     }
 }
@@ -176,7 +190,9 @@ export async function handleHistoricalAnalysis() {
             type: 'train', 
             payload: { 
                 history: state.history,
-                historicalStreakData: trendStats.streakData
+                historicalStreakData: trendStats.streakData,
+                terminalMapping: config.terminalMapping,
+                rouletteWheel: config.rouletteWheel
             } 
         });
     } else {
@@ -223,6 +239,8 @@ export function initializeAiWithHistory() {
             history: state.history,
             historicalStreakData: trendStats.streakData,
             scaler: savedScaler,
+            terminalMapping: config.terminalMapping,
+            rouletteWheel: config.rouletteWheel
         }
     });
 }
