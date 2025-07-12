@@ -332,6 +332,12 @@ export function updateAiStatus(message) {
 // --- EVENT HANDLERS (Private to this module) ---
 
 async function handleCalculation() {
+    // Add a check to ensure the DOM elements exist before accessing their properties.
+    if (!dom.number1 || !dom.number2 || !dom.resultDisplay || !dom.winningNumberInput) {
+        console.error("UI elements not found. Cannot perform calculation.");
+        return;
+    }
+
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
     const winningNumberVal = dom.winningNumberInput.value;
