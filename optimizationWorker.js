@@ -2,6 +2,7 @@
 
 // Import the shared logic file. This is MUCH more robust than rebuilding functions from strings.
 import * as shared from './shared-logic.js';
+import * as config from './config.js';
 
 // This variable will hold the config passed from the main thread.
 let currentGaConfig = {};
@@ -109,9 +110,9 @@ function calculateFitness(individual) {
         if (rawItem.winningNumber === null) continue; // Skip items without a winning number
 
         // Use the imported shared functions directly
-        const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.allPredictionTypes, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.allPredictionTypes, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
 
         // Get recommendation for the current simulated spin
         const recommendation = shared.getRecommendation({
@@ -133,8 +134,8 @@ function calculateFitness(individual) {
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES,
             currentHistoryForTrend: simulatedHistory, // Pass current simulation history for trend
             useDynamicTerminalNeighbourCount: sharedData.useDynamicTerminalNeighbourCount, // Pass this toggle
-            activePredictionTypes: sharedData.allPredictionTypes,
-            allPredictionTypes: sharedData.allPredictionTypes, // Pass necessary global data
+            activePredictionTypes: config.allPredictionTypes,
+            allPredictionTypes: config.allPredictionTypes, // Pass necessary global data
             terminalMapping: sharedData.terminalMapping,
             rouletteWheel: sharedData.rouletteWheel
         });
@@ -144,7 +145,7 @@ function calculateFitness(individual) {
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
 
         // Evaluate the status of this simulated spin using shared logic
-        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, sharedData.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
 
         // Update wins/losses based on the recommendation
         if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
@@ -244,7 +245,6 @@ self.onmessage = (event) => {
                 useWeightedZone: payload.useWeightedZone,       // New
                 useNeighbourFocus: payload.useNeighbourFocus,   // New
                 useTrendConfirmation: payload.useTrendConfirmation, // New
-                allPredictionTypes: payload.allPredictionTypes    // NEW: The crucial missing data
             };
             runEvolution();
             break;
