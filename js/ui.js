@@ -334,11 +334,22 @@ export function updateAiStatus(message) {
 async function handleCalculation() {
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
+    const winningNumberVal = dom.winningNumberInput.value;
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
         dom.resultDisplay.classList.remove('hidden');
         return;
+    }
+
+    let winningNumber = null;
+    if (winningNumberVal.trim() !== '') {
+        winningNumber = parseInt(winningNumberVal, 10);
+        if (isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
+            dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Winning number must be between 0 and 36.</p>`;
+            dom.resultDisplay.classList.remove('hidden');
+            return;
+        }
     }
 
     dom.resultDisplay.classList.add('hidden');
@@ -358,15 +369,17 @@ async function handleCalculation() {
     };
 
     state.history.push(newHistoryItem);
-    runAllAnalyses();
+    runAllAnalyses(winningNumber);
     renderHistory();
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
     drawRouletteWheel(newHistoryItem.difference, lastWinning);
+    dom.winningNumberInput.value = ''; // Clear the optional input
 }
 
 function handleClearInputs() { 
     dom.number1.value = '';
     dom.number2.value = '';
+    dom.winningNumberInput.value = '';
     dom.resultDisplay.classList.add('hidden');
     dom.number1.focus();
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
@@ -466,32 +479,19 @@ function clearVideoState() {
     dom.videoStatus.textContent = '';
 }
 
-function handlePresetSelection(preset) {
-    if (preset === 'highestWinRate') {
-        Object.assign(config.STRATEGY_CONFIG, {
-            learningRate_success: 0.35, learningRate_failure: 0.05, maxWeight: 6.0, minWeight: 0.03,
-            decayFactor: 0.88, patternMinAttempts: 5, patternSuccessThreshold: 68,
-            triggerMinAttempts: 5, triggerSuccessThreshold: 63,
-        });
-        Object.assign(config.ADAPTIVE_LEARNING_RATES, {
-            SUCCESS: 0.15, FAILURE: 0.1, MIN_INFLUENCE: 0.2, MAX_INFLUENCE: 2.5,
-        });
-        state.setToggles({
-            ...state, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: false,
-            useAdvancedCalculations: true, useDynamicStrategy: true, useAdaptivePlay: true,
-            useNeighbourFocus: true, useDynamicTerminalNeighbourCount: true
-        });
-    } else if (preset === 'balancedSafe') {
-        Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG); 
-        Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES); 
-        state.setToggles({ ...config.DEFAULT_PARAMETERS.TOGGLES, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: true });
-    } else if (preset === 'aggressiveSignals') {
-        Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG); 
-        Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES); 
-        state.setToggles({ ...config.DEFAULT_PARAMETERS.TOGGLES, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: true, useLessStrict: true });
+function handlePresetSelection(presetName) {
+    const preset = config.STRATEGY_PRESETS[presetName];
+    if (!preset) {
+        console.error(`Preset "${presetName}" not found.`);
+        return;
     }
-    updateAllTogglesUI(); 
-    initializeAdvancedSettingsUI(); 
+
+    Object.assign(config.STRATEGY_CONFIG, preset.STRATEGY_CONFIG);
+    Object.assign(config.ADAPTIVE_LEARNING_RATES, preset.ADAPTIVE_LEARNING_RATES);
+    state.setToggles(preset.TOGGLES);
+
+    updateAllTogglesUI();
+    initializeAdvancedSettingsUI();
     updateActivePredictionTypes();
     handleStrategyChange();
 }
@@ -707,7 +707,7 @@ export function initializeUI() {
         'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
         'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
         'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
-        'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay',
+        'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
         'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
         'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 'optimizationStatus',
         'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 'applyBestParamsButton',
@@ -740,20 +740,24 @@ document.getElementById('advancedSettingsHeader').addEventListener('click', () =
         toggleParameterSliders(false);
         dom.startOptimizationButton.disabled = true;
         dom.stopOptimizationButton.disabled = false;
+        
+        const togglesForWorker = {
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+            useProximityBoost: state.useProximityBoost,
+            useWeightedZone: state.useWeightedZone,
+            useNeighbourFocus: state.useNeighbourFocus,
+            useTrendConfirmation: state.useTrendConfirmation,
+        };
 
-        optimizationWorker.postMessage({ 
-            type: 'start', 
-            payload: { 
+        optimizationWorker.postMessage({
+            type: 'start',
+            payload: {
                 history: state.history,
                 terminalMapping: config.terminalMapping,
                 rouletteWheel: config.rouletteWheel,
                 GA_CONFIG: config.GA_CONFIG,
-                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
-                useProximityBoost: state.useProximityBoost,
-                useWeightedZone: state.useWeightedZone,
-                useNeighbourFocus: state.useNeighbourFocus,
-                useTrendConfirmation: state.useTrendConfirmation,
-            } 
+                toggles: togglesForWorker
+            }
         });
     });
 
