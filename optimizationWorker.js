@@ -125,15 +125,15 @@ function calculateFitness(individual) {
             aiPredictionData: null, // AI not used in GA fitness for now
             currentAdaptiveInfluences: localAdaptiveFactorInfluences, // Use local influences
             lastWinningNumber: tempConfirmedWinsLog.length > 0 ? tempConfirmedWinsLog[tempConfirmedWinsLog.length - 1] : null,
-            useProximityBoostBool: sharedData.useProximityBoost, // Use the actual toggle states passed from main
-            useWeightedZoneBool: sharedData.useWeightedZone,
-            useNeighbourFocusBool: sharedData.useNeighbourFocus,
+            useProximityBoostBool: sharedData.toggles.useProximityBoost, // Use the actual toggle states passed from main
+            useWeightedZoneBool: sharedData.toggles.useWeightedZone,
+            useNeighbourFocusBool: sharedData.toggles.useNeighbourFocus,
             isAiReadyBool: false, // AI not used in GA fitness for now
-            useTrendConfirmationBool: sharedData.useTrendConfirmation,
+            useTrendConfirmationBool: sharedData.toggles.useTrendConfirmation,
             current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES,
             currentHistoryForTrend: simulatedHistory, // Pass current simulation history for trend
-            useDynamicTerminalNeighbourCount: sharedData.useDynamicTerminalNeighbourCount, // Pass this toggle
+            useDynamicTerminalNeighbourCount: sharedData.toggles.useDynamicTerminalNeighbourCount, // Pass this toggle
             activePredictionTypes: config.allPredictionTypes,
             allPredictionTypes: config.allPredictionTypes, // Pass necessary global data
             terminalMapping: sharedData.terminalMapping,
@@ -240,11 +240,7 @@ self.onmessage = (event) => {
             sharedData = {
                 terminalMapping: payload.terminalMapping,      // Renamed from helpers.terminalMapping
                 rouletteWheel: payload.rouletteWheel,          // Renamed from helpers.rouletteWheel
-                useDynamicTerminalNeighbourCount: payload.useDynamicTerminalNeighbourCount, // New
-                useProximityBoost: payload.useProximityBoost,   // New
-                useWeightedZone: payload.useWeightedZone,       // New
-                useNeighbourFocus: payload.useNeighbourFocus,   // New
-                useTrendConfirmation: payload.useTrendConfirmation, // New
+                toggles: payload.toggles
             };
             runEvolution();
             break;
