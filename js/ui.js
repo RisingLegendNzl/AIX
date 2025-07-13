@@ -246,45 +246,14 @@ export function renderAnalysisList(neighbourScores) {
     }
 }
 
-export function renderBoardState(boardStats, trendStats, num1, num2) {
+export function renderBoardState(boardStats) {
     dom.boardStateAnalysis.innerHTML = '';
-    
-    // Check for valid numbers to prevent "NaN" in the display
-    const inputsExist = !isNaN(num1) && !isNaN(num2);
-
-    for (const typeId in boardStats) {
+    for(const typeId in boardStats) {
         const type = config.allPredictionTypes.find(t => t.id === typeId);
         if (!type) continue;
         const stats = boardStats[typeId];
         const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
-        
-        let baseNumberDisplay = 'N/A';
-        let terminalsDisplay = 'N/A';
-        
-        // Only calculate and display base and terminals if inputs exist
-        if (inputsExist) {
-            const baseNum = type.calculateBase(num1, num2);
-            const terminals = config.terminalMapping?.[baseNum] || [];
-            baseNumberDisplay = baseNum;
-            terminalsDisplay = terminals.length > 0 ? terminals.join(', ') : 'None';
-        }
-        
-        const avgTrend = trendStats.averages[typeId]?.toFixed(1) || '0.0';
-        const aiProb = '0.0%'; // Placeholder, as AI data is not in this data set.
-        
-        // Construct the new, detailed HTML string
-        dom.boardStateAnalysis.innerHTML += `
-            <div class="text-sm border-b border-gray-200 py-2">
-                <span class="font-semibold" style="color:${type.textColor || '#1f2937'};">${type.displayLabel}:</span>
-                <span class="font-medium">${baseNumberDisplay}</span>
-                <span class="text-xs text-gray-500">(Terminals: ${terminalsDisplay})</span>
-                <div class="grid grid-cols-3 gap-2 mt-1 text-xs text-gray-600">
-                    <div><span class="font-semibold">Avg Trend:</span> ${avgTrend}</div>
-                    <div><span class="font-semibold">Hit Rate:</span> ${hitRate.toFixed(2)}%</div>
-                    <div><span class="font-semibold">AI:</span> ${aiProb}</div>
-                </div>
-            </div>
-        `;
+        dom.boardStateAnalysis.innerHTML += `<div class="text-sm"><span class="font-semibold" style="color:${type.textColor || '#1f2937'};">${type.displayLabel}:</span><span class="float-right font-medium">${hitRate.toFixed(2)}%</span></div>`;
     }
 }
 
