@@ -30,7 +30,6 @@ function toggleGuide(contentId) {
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
 export function updateAllTogglesUI() {
-    if (!dom.trendConfirmationToggle) return;
     dom.trendConfirmationToggle.checked = state.useTrendConfirmation;
     dom.weightedZoneToggle.checked = state.useWeightedZone;
     dom.proximityBoostToggle.checked = state.useProximityBoost;
@@ -59,8 +58,9 @@ export function updateWinLossCounter() {
             }
         }
     });
-    if (dom.winCount) dom.winCount.textContent = wins;
-    if (dom.lossCount) dom.lossCount.textContent = losses;
+
+    dom.winCount.textContent = wins;
+    dom.lossCount.textContent = losses;
 }
 
 export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) {
@@ -91,15 +91,12 @@ export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) 
     const highlightedNumbers = new Set();
     const hitZoneClasses = {};
 
-    if (currentDiff !== null && !isNaN(currentDiff) && dom.number1 && dom.number2) {
+    if (currentDiff !== null && !isNaN(currentDiff)) {
         const num1 = parseInt(dom.number1.value, 10);
         const num2 = parseInt(dom.number2.value, 10);
 
         state.activePredictionTypes.forEach(type => {
-            const typeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
-            if (!typeDefinition) return;
-
-            const baseNum = typeDefinition.calculateBase(num1, num2);
+            const baseNum = config.allPredictionTypes.find(t => t.id === type.id).calculateBase(num1, num2);
             if (baseNum < 0 || baseNum > 36) return;
             
             const terminals = config.terminalMapping?.[baseNum] || [];
@@ -147,7 +144,7 @@ export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) 
 
 export function renderHistory() {
     updateWinLossCounter(); 
-    if (!dom.historyList) return;
+
     dom.historyList.innerHTML = `<li class="text-center text-gray-500 py-4">No calculations yet.</li>`;
     if (state.history.length === 0) return;
     dom.historyList.innerHTML = '';
@@ -238,7 +235,6 @@ export function renderHistory() {
 }
 
 export function renderAnalysisList(neighbourScores) {
-    if (!dom.analysisList) return;
     dom.analysisList.innerHTML = '';
     const sortedAnalysis = Object.entries(neighbourScores).map(([num, scores]) => ({ num: parseInt(num), score: scores.success })).sort((a, b) => b.score - a.score);
     if (sortedAnalysis.length > 0 && !sortedAnalysis.every(a => a.score === 0)) {
@@ -250,20 +246,49 @@ export function renderAnalysisList(neighbourScores) {
     }
 }
 
-export function renderBoardState(boardStats) {
-    if (!dom.boardStateAnalysis) return;
+export function renderBoardState(boardStats, trendStats, num1, num2) {
     dom.boardStateAnalysis.innerHTML = '';
-    for(const typeId in boardStats) {
+    
+    // Check for valid numbers to prevent "NaN" in the display
+    const inputsExist = !isNaN(num1) && !isNaN(num2);
+
+    for (const typeId in boardStats) {
         const type = config.allPredictionTypes.find(t => t.id === typeId);
         if (!type) continue;
         const stats = boardStats[typeId];
         const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
-        dom.boardStateAnalysis.innerHTML += `<div class="text-sm"><span class="font-semibold" style="color:${type.textColor || '#1f2937'};">${type.displayLabel}:</span><span class="float-right font-medium">${hitRate.toFixed(2)}%</span></div>`;
+        
+        let baseNumberDisplay = 'N/A';
+        let terminalsDisplay = 'N/A';
+        
+        // Only calculate and display base and terminals if inputs exist
+        if (inputsExist) {
+            const baseNum = type.calculateBase(num1, num2);
+            const terminals = config.terminalMapping?.[baseNum] || [];
+            baseNumberDisplay = baseNum;
+            terminalsDisplay = terminals.length > 0 ? terminals.join(', ') : 'None';
+        }
+        
+        const avgTrend = trendStats.averages[typeId]?.toFixed(1) || '0.0';
+        const aiProb = '0.0%'; // Placeholder, as AI data is not in this data set.
+        
+        // Construct the new, detailed HTML string
+        dom.boardStateAnalysis.innerHTML += `
+            <div class="text-sm border-b border-gray-200 py-2">
+                <span class="font-semibold" style="color:${type.textColor || '#1f2937'};">${type.displayLabel}:</span>
+                <span class="font-medium">${baseNumberDisplay}</span>
+                <span class="text-xs text-gray-500">(Terminals: ${terminalsDisplay})</span>
+                <div class="grid grid-cols-3 gap-2 mt-1 text-xs text-gray-600">
+                    <div><span class="font-semibold">Avg Trend:</span> ${avgTrend}</div>
+                    <div><span class="font-semibold">Hit Rate:</span> ${hitRate.toFixed(2)}%</div>
+                    <div><span class="font-semibold">AI:</span> ${aiProb}</div>
+                </div>
+            </div>
+        `;
     }
 }
 
 export function renderRecommendation(recommendation) {
-    if (!dom.resultDisplay) return;
     dom.resultDisplay.innerHTML = recommendation.html;
     dom.resultDisplay.classList.remove('hidden');
 }
@@ -309,54 +334,6 @@ export function updateRouletteLegend() {
     `;
 }
 
-export function renderPredictionGroups(num1, num2, lastWinningNumber) {
-    if (!dom.predictionGroups) return;
-
-    dom.predictionGroups.innerHTML = '';
-    const activeGroupsContent = [];
-    const invalidGroupsContent = [];
-
-    state.activePredictionTypes.forEach(type => {
-        const typeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
-        if (!typeDefinition) return;
-        
-        const baseNum = typeDefinition.calculateBase(num1, num2);
-        
-        if (baseNum < 0 || baseNum > 36) {
-            invalidGroupsContent.push(`
-                <li class="flex items-center gap-2">
-                    <span class="font-bold text-gray-400">${typeDefinition.displayLabel}</span>
-                    <span class="text-xs text-gray-500">(Invalid Base: ${baseNum})</span>
-                </li>
-            `);
-            return;
-        }
-
-        const terminals = config.terminalMapping?.[baseNum] || [];
-        const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
-
-        activeGroupsContent.push(`
-            <li class="flex items-center gap-2">
-                <span class="font-bold" style="color: ${typeDefinition.textColor || '#1f2937'};">${typeDefinition.displayLabel}:</span>
-                <span class="text-gray-700">${hitZone.sort((a, b) => a - b).join(', ')}</span>
-            </li>
-        `);
-    });
-    
-    if (activeGroupsContent.length > 0) {
-        dom.predictionGroups.innerHTML += `<ul class="list-none p-0 m-0">${activeGroupsContent.join('')}</ul>`;
-        dom.predictionGroups.classList.remove('hidden');
-    } else {
-        dom.predictionGroups.classList.add('hidden');
-    }
-
-    if (invalidGroupsContent.length > 0) {
-        dom.predictionGroups.innerHTML += `<p class="mt-4 text-xs text-gray-500">The following groups were not displayed due to an invalid calculation:</p><ul class="list-disc list-inside p-0 m-0 text-xs text-gray-500">${invalidGroupsContent.join('')}</ul>`;
-        dom.predictionGroups.classList.remove('hidden');
-    }
-}
-
-
 // --- Worker UI Update Functions ---
 export function updateOptimizationStatus(htmlContent) {
     if (dom.optimizationStatus) dom.optimizationStatus.innerHTML = htmlContent;
@@ -386,7 +363,7 @@ export function updateAiStatus(message) {
 // --- EVENT HANDLERS (Private to this module) ---
 
 async function handleCalculation() {
-    // This is the new defensive check from our previous conversation.
+    // Add a check to ensure the DOM elements exist before accessing their properties.
     if (!dom.number1 || !dom.number2 || !dom.resultDisplay || !dom.winningNumberInput) {
         console.error("UI elements not found. Cannot perform calculation.");
         return;
@@ -413,11 +390,6 @@ async function handleCalculation() {
     }
 
     dom.resultDisplay.classList.add('hidden');
-    
-    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
-
-    // Call the new function to display the prediction groups
-    renderPredictionGroups(num1Val, num2Val, lastWinning);
 
     const newHistoryItem = {
         id: Date.now(),
@@ -436,19 +408,12 @@ async function handleCalculation() {
     state.history.push(newHistoryItem);
     runAllAnalyses(winningNumber);
     renderHistory();
-    
+    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
     drawRouletteWheel(newHistoryItem.difference, lastWinning);
-
-    // Feature: Auto-shift inputs based on winning number
-    if (winningNumber !== null) {
-        dom.number1.value = dom.number2.value;
-        dom.number2.value = winningNumber;
-        dom.winningNumberInput.value = ''; // Clear the optional input
-    }
+    dom.winningNumberInput.value = ''; // Clear the optional input
 }
 
 function handleClearInputs() { 
-    if (!dom.number1 || !dom.number2 || !dom.winningNumberInput || !dom.resultDisplay) return;
     dom.number1.value = '';
     dom.number2.value = '';
     dom.winningNumberInput.value = '';
@@ -462,7 +427,6 @@ function handleClearInputs() {
 }
 
 function handleSwap() { 
-    if (!dom.number1 || !dom.number2) return;
     const v = dom.number1.value; 
     dom.number1.value = dom.number2.value; 
     dom.number2.value = v; 
@@ -505,7 +469,7 @@ function handleClearHistory() {
     runAllAnalyses();
     renderHistory();
     
-    if (dom.historicalAnalysisMessage) dom.historicalAnalysisMessage.textContent = 'History cleared.';
+    dom.historicalAnalysisMessage.textContent = 'History cleared.';
     drawRouletteWheel(); 
     
     aiWorker.postMessage({ type: 'clear_model' });
@@ -520,20 +484,20 @@ function handleVideoUpload(event) {
     }
     state.setCurrentVideoURL(URL.createObjectURL(file));
 
-    if (dom.videoPlayer) dom.videoPlayer.src = state.currentVideoURL;
-    if (dom.videoPlayer) dom.videoPlayer.classList.remove('hidden');
-    if (dom.videoUploadContainer) dom.videoUploadContainer.classList.add('hidden');
-    if (dom.videoControlsContainer) dom.videoControlsContainer.classList.remove('hidden');
-    if (dom.videoStatus) dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
+    dom.videoPlayer.src = state.currentVideoURL;
+    dom.videoPlayer.classList.remove('hidden');
+    dom.videoUploadContainer.classList.add('hidden');
+    dom.videoControlsContainer.classList.remove('hidden');
+    dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
 }
 
 function startVideoAnalysis() {
-    if (dom.analyzeVideoButton) dom.analyzeVideoButton.disabled = true;
-    if (dom.videoStatus) dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
+    dom.analyzeVideoButton.disabled = true;
+    dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
     console.log("Video analysis initiated.");
     setTimeout(() => {
-        if (dom.analyzeVideoButton) dom.analyzeVideoButton.disabled = false;
-        if (dom.videoStatus) dom.videoStatus.textContent = 'Analysis complete (simulation).';
+        dom.analyzeVideoButton.disabled = false;
+        dom.videoStatus.textContent = 'Analysis complete (simulation).';
     }, 2000);
 }
 
@@ -542,14 +506,14 @@ function clearVideoState() {
         URL.revokeObjectURL(state.currentVideoURL);
         state.setCurrentVideoURL(null);
     }
-    if (dom.videoPlayer) dom.videoPlayer.src = '';
-    if (dom.videoUpload) dom.videoUpload.value = ''; 
+    dom.videoPlayer.src = '';
+    dom.videoUpload.value = ''; 
 
-    if (dom.videoPlayer) dom.videoPlayer.classList.add('hidden');
-    if (dom.frameCanvas) dom.frameCanvas.classList.add('hidden');
-    if (dom.videoControlsContainer) dom.videoControlsContainer.classList.add('hidden');
-    if (dom.videoUploadContainer) dom.videoUploadContainer.classList.remove('hidden');
-    if (dom.videoStatus) dom.videoStatus.textContent = '';
+    dom.videoPlayer.classList.add('hidden');
+    dom.frameCanvas.classList.add('hidden');
+    dom.videoControlsContainer.classList.add('hidden');
+    dom.videoUploadContainer.classList.remove('hidden');
+    dom.videoStatus.textContent = '';
 }
 
 function handlePresetSelection(presetName) {
@@ -596,16 +560,15 @@ function createSlider(containerId, label, paramObj, paramName, min, max, step) {
         paramObj[paramName] = val;
 
         state.saveState(); 
-        if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
+        dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
         handleStrategyChange(); 
     };
 
-    if(slider) slider.addEventListener('input', (e) => updateValue(e.target.value)); 
-    if(numberInput) numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
+    slider.addEventListener('input', (e) => updateValue(e.target.value)); 
+    numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
 }
 
 export function initializeAdvancedSettingsUI() {
-    if (!dom.strategyLearningRatesSliders || !dom.patternThresholdsSliders || !dom.adaptiveInfluenceSliders) return;
     dom.strategyLearningRatesSliders.innerHTML = '';
     dom.patternThresholdsSliders.innerHTML = '';
     dom.adaptiveInfluenceSliders.innerHTML = '';
@@ -622,7 +585,7 @@ function resetAllParameters() {
     state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
     updateAllTogglesUI(); 
     initializeAdvancedSettingsUI(); 
-    if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
+    dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
     handleStrategyChange();
 }
 
@@ -647,7 +610,7 @@ function saveParametersToFile() {
     a.download = 'roulette_parameters.json';
     a.click();
     URL.revokeObjectURL(a.href);
-    if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameters saved.';
+    dom.parameterStatusMessage.textContent = 'Parameters saved.';
 }
 
 function loadParametersFromFile(event) {
@@ -662,10 +625,10 @@ function loadParametersFromFile(event) {
             if (loaded.TOGGLES) state.setToggles(loaded.TOGGLES);
             updateAllTogglesUI(); 
             initializeAdvancedSettingsUI(); 
-            if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
+            dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
             handleStrategyChange();
         } catch (error) {
-            if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
+            dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
         }
     };
     reader.readAsText(file);
@@ -680,38 +643,22 @@ export function toggleParameterSliders(enable) {
             control.disabled = !enable;
         }
     });
-    if (dom.setHighestWinRatePreset) dom.setHighestWinRatePreset.disabled = !enable;
-    if (dom.setBalancedSafePreset) dom.setBalancedSafePreset.disabled = !enable;
-    if (dom.setAggressiveSignalsPreset) dom.setAggressiveSignalsPreset.disabled = !enable;
-    if (dom.resetParametersButton) dom.resetParametersButton.disabled = !enable;
-    if (dom.saveParametersButton) dom.saveParametersButton.disabled = !enable;
-    if (dom.loadParametersLabel) dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
-    if (dom.loadParametersInput) dom.loadParametersInput.disabled = !enable;
+    dom.setHighestWinRatePreset.disabled = !enable;
+    dom.setBalancedSafePreset.disabled = !enable;
+    dom.setAggressiveSignalsPreset.disabled = !enable;
+    dom.resetParametersButton.disabled = !enable;
+    dom.saveParametersButton.disabled = !enable;
+    dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
+    dom.loadParametersInput.disabled = !enable;
 }
 
 // --- UI INITIALIZATION HELPERS ---
-const CRITICAL_DOM_ELEMENTS = [
-    'number1', 'number2', 'winningNumberInput', 'calculateButton', 'resultDisplay', 'historyList', 
-    'predictionGroups', 'recalculateAnalysisButton', 'clearInputsButton', 'swapButton'
-];
-
-function getRequiredElements() {
-    for (const id of CRITICAL_DOM_ELEMENTS) {
-        const element = document.getElementById(id);
-        if (!element) {
-            console.error(`Initialization Error: Required DOM element with ID "${id}" was not found.`);
-            return false;
-        }
-        dom[id] = element;
-    }
-    return true;
-}
 
 function attachMainActionListeners() {
-    dom.calculateButton.addEventListener('click', handleCalculation);
-    dom.clearInputsButton.addEventListener('click', handleClearInputs);
-    dom.swapButton.addEventListener('click', handleSwap);
-    if(dom.clearHistoryButton) dom.clearHistoryButton.addEventListener('click', handleClearHistory);
+    document.getElementById('calculateButton').addEventListener('click', handleCalculation);
+    document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
+    document.getElementById('swapButton').addEventListener('click', handleSwap);
+    document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
     dom.recalculateAnalysisButton.addEventListener('click', runAllAnalyses);
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
@@ -729,9 +676,8 @@ function attachToggleListeners() {
         neighbourFocusToggle: 'useNeighbourFocus', lessStrictModeToggle: 'useLessStrict',
         dynamicTerminalNeighbourCountToggle: 'useDynamicTerminalNeighbourCount'
     };
-    if (!dom.trendConfirmationToggle) return;
+
     for (const [toggleId, stateKey] of Object.entries(toggles)) {
-        if (!dom[toggleId]) continue;
         dom[toggleId].addEventListener('change', () => {
             const newToggleStates = { ...state };
             newToggleStates[stateKey] = dom[toggleId].checked;
@@ -755,17 +701,17 @@ function attachToggleListeners() {
 
 function attachAdvancedSettingsListeners() {
     // Presets
-    if(dom.setHighestWinRatePreset) dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
-    if(dom.setBalancedSafePreset) dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
-    if(dom.setAggressiveSignalsPreset) dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
+    dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
+    dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
+    dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
 
     // Parameter Management
-    if(dom.resetParametersButton) dom.resetParametersButton.addEventListener('click', resetAllParameters);
-    if(dom.saveParametersButton) dom.saveParametersButton.addEventListener('click', saveParametersToFile);
-    if(dom.loadParametersInput) dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
+    dom.resetParametersButton.addEventListener('click', resetAllParameters);
+    dom.saveParametersButton.addEventListener('click', saveParametersToFile);
+    dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
 
     // Historical Analysis
-    if(dom.analyzeHistoricalDataButton) dom.analyzeHistoricalDataButton.addEventListener('click', handleHistoricalAnalysis);
+    dom.analyzeHistoricalDataButton.addEventListener('click', handleHistoricalAnalysis);
 
     // Video Analysis
     if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
@@ -775,125 +721,111 @@ function attachAdvancedSettingsListeners() {
 
 function attachGuideAndInfoListeners() {
     // Guide toggles
-    if (document.getElementById('presetStrategyGuideHeader')) document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
-    if (document.getElementById('baseStrategyGuideHeader')) document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
-    if (document.getElementById('advancedStrategyGuideHeader')) document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
+    document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
+    document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
+    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
 
     // History Info Dropdown
     if(dom.historyInfoToggle) {
         dom.historyInfoToggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (dom.historyInfoDropdown) dom.historyInfoDropdown.classList.toggle('hidden');
+            dom.historyInfoDropdown.classList.toggle('hidden');
         });
     }
 }
 // --- INITIALIZATION ---
 export function initializeUI() {
-    // Step 1: Explicitly get all critical DOM elements and check for their existence.
-    const allElementsFound = getRequiredElements();
-    if (!allElementsFound) {
-        console.error("Application cannot start. Please check the console for missing elements.");
-        return; // Halt initialization if critical elements are missing
-    }
-
-    // Step 2: Get non-critical DOM elements. This part can fail gracefully.
-    const optionalElementIds = [
-        'analysisList', 'boardStateAnalysis', 'boardStateConclusion', 'historicalNumbersInput', 
-        'imageUpload', 'imageUploadLabel', 'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 
-        'aiModelStatus', 'recalculateAnalysisButton', 'trendConfirmationToggle', 'weightedZoneToggle', 
-        'proximityBoostToggle', 'pocketDistanceToggle', 'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 
-        'dynamicStrategyToggle', 'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 
-        'neighbourFocusToggle', 'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 
-        'videoUploadLabel', 'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 
-        'setBalancedSafePreset', 'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 
-        'strategyWeightsDisplay', 'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 
-        'clearVideoButton', 'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 
-        'optimizationStatus', 'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 
-        'applyBestParamsButton', 'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader', 
-        'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders', 
-        'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput', 
-        'loadParametersLabel', 'parameterStatusMessage', 'clearHistoryButton', 'advancedSettingsHeader'
+    const elementIds = [
+        'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
+        'boardStateConclusion', 'historicalNumbersInput', 'imageUpload', 'imageUploadLabel',
+        'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 'aiModelStatus', 'recalculateAnalysisButton',
+        'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
+        'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
+        'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
+        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
+        'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
+        'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
+        'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
+        'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 'optimizationStatus',
+        'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 'applyBestParamsButton',
+        'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
+        'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
+        'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
+        'loadParametersLabel', 'parameterStatusMessage'
     ];
-    optionalElementIds.forEach(id => {
-        dom[id] = document.getElementById(id);
-    });
+    elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
-    // Step 3: Attach event listeners and run initial functions.
     attachMainActionListeners();
     attachToggleListeners();
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
     
     // Guide toggles
-    if (dom.advancedSettingsHeader) {
-        dom.advancedSettingsHeader.addEventListener('click', () => toggleGuide('advancedSettingsContent'));
-    }
+document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
+document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
+document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
+document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
 
 
-    if(dom.startOptimizationButton && dom.stopOptimizationButton && dom.optimizationResult) {
-        dom.startOptimizationButton.addEventListener('click', () => {
-            if (state.history.length < 20) {
-                if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Error: Need at least 20 history items.';
-                return;
+    dom.startOptimizationButton.addEventListener('click', () => {
+        if (state.history.length < 20) {
+            updateOptimizationStatus('Error: Need at least 20 history items.');
+            return;
+        }
+        updateOptimizationStatus('Starting optimization...');
+        dom.optimizationResult.classList.add('hidden');
+        toggleParameterSliders(false);
+        dom.startOptimizationButton.disabled = true;
+        dom.stopOptimizationButton.disabled = false;
+        
+        const togglesForWorker = {
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+            useProximityBoost: state.useProximityBoost,
+            useWeightedZone: state.useWeightedZone,
+            useNeighbourFocus: state.useNeighbourFocus,
+            useTrendConfirmation: state.useTrendConfirmation,
+        };
+
+        optimizationWorker.postMessage({
+            type: 'start',
+            payload: {
+                history: state.history,
+                terminalMapping: config.terminalMapping,
+                rouletteWheel: config.rouletteWheel,
+                GA_CONFIG: config.GA_CONFIG,
+                toggles: togglesForWorker
             }
-            if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Starting optimization...';
-            if (dom.optimizationResult) dom.optimizationResult.classList.add('hidden');
-            toggleParameterSliders(false);
-            dom.startOptimizationButton.disabled = true;
-            dom.stopOptimizationButton.disabled = false;
-            
-            const togglesForWorker = {
-                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
-                useProximityBoost: state.useProximityBoost,
-                useWeightedZone: state.useWeightedZone,
-                useNeighbourFocus: state.useNeighbourFocus,
-                useTrendConfirmation: state.useTrendConfirmation,
-            };
+        });
+    });
 
-            optimizationWorker.postMessage({
-                type: 'start',
-                payload: {
-                    history: state.history,
-                    terminalMapping: config.terminalMapping,
-                    rouletteWheel: config.rouletteWheel,
-                    GA_CONFIG: config.GA_CONFIG,
-                    toggles: togglesForWorker
-                }
+    dom.stopOptimizationButton.addEventListener('click', () => {
+        optimizationWorker.postMessage({ type: 'stop' });
+    });
+
+    dom.applyBestParamsButton.addEventListener('click', () => {
+        if (state.bestFoundParams) {
+            const params = state.bestFoundParams;
+            Object.assign(config.STRATEGY_CONFIG, {
+                learningRate_success: params.learningRate_success, decayFactor: params.decayFactor,
+                learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
+                minWeight: params.minWeight, patternMinAttempts: params.patternMinAttempts,
+                patternSuccessThreshold: params.patternSuccessThreshold, triggerMinAttempts: params.triggerMinAttempts,
+                triggerSuccessThreshold: params.triggerSuccessThreshold
             });
-        });
+            Object.assign(config.ADAPTIVE_LEARNING_RATES, {
+                SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
+                MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence
+            });
+            initializeAdvancedSettingsUI();
+            updateOptimizationStatus('Best parameters applied!');
+            handleStrategyChange();
+        }
+    });
 
-        dom.stopOptimizationButton.addEventListener('click', () => {
-            optimizationWorker.postMessage({ type: 'stop' });
-        });
-    }
+    document.addEventListener('click', (e) => {
+        if (dom.historyInfoDropdown && !dom.historyInfoDropdown.contains(e.target) && !dom.historyInfoToggle.contains(e.target)) {
+            dom.historyInfoDropdown.classList.add('hidden');
+        }
+    });
 
-    if(dom.applyBestParamsButton) {
-        dom.applyBestParamsButton.addEventListener('click', () => {
-            if (state.bestFoundParams) {
-                const params = state.bestFoundParams;
-                Object.assign(config.STRATEGY_CONFIG, {
-                    learningRate_success: params.learningRate_success, decayFactor: params.decayFactor,
-                    learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
-                    minWeight: params.minWeight, patternMinAttempts: params.patternMinAttempts,
-                    patternSuccessThreshold: params.patternSuccessThreshold, triggerMinAttempts: params.triggerMinAttempts,
-                    triggerSuccessThreshold: params.triggerSuccessThreshold
-                });
-                Object.assign(config.ADAPTIVE_LEARNING_RATES, {
-                    SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
-                    MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence
-                });
-                initializeAdvancedSettingsUI();
-                if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Best parameters applied!';
-                handleStrategyChange();
-            }
-        });
-    }
-    
-    if (dom.historyInfoDropdown && dom.historyInfoToggle) {
-        document.addEventListener('click', (e) => {
-            if (!dom.historyInfoDropdown.contains(e.target) && !dom.historyInfoToggle.contains(e.target)) {
-                dom.historyInfoDropdown.classList.add('hidden');
-            }
-        });
-    }
-}
+} //
