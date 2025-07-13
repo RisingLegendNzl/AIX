@@ -96,10 +96,11 @@ export function runAllAnalyses(winningNumber = null) {
     // Call UI functions instead of direct DOM manipulation
     ui.renderAnalysisList(neighbourScores);
     ui.renderStrategyWeights();
-    ui.renderBoardState(boardStats);
 
     const num1Val = parseInt(document.getElementById('number1').value, 10);
     const num2Val = parseInt(document.getElementById('number2').value, 10);
+
+    ui.renderBoardState(boardStats, trendStats, num1Val, num2Val);
 
     if (!isNaN(num1Val) && !isNaN(num2Val)) {
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
