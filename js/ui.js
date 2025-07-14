@@ -44,7 +44,7 @@ const parameterMap = {
     patternMinAttempts: { obj: config.STRATEGY_CONFIG, label: 'Pattern Min Attempts', container: 'patternThresholdsSliders' },
     patternSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Pattern Success %', container: 'patternThresholdsSliders' },
     triggerMinAttempts: { obj: config.STRATEGY_CONFIG, label: 'Trigger Min Attempts', container: 'patternThresholdsSliders' },
-    triggerSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Trigger Success %', container: 'patternThresholdsSliders' },
+    triggerSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Trigger Success %', container: 'patternThresholdsSliders' }, // FIX: Corrected container
     // Adaptive Influence Rates
     SUCCESS: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Success Rate', container: 'adaptiveInfluenceSliders' },
     FAILURE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
@@ -52,23 +52,23 @@ const parameterMap = {
     MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' }
 };
 
-// Define strategy toggles with their labels and corresponding state keys
+// Define strategy toggles with their labels, corresponding state keys, and GROUP
 const strategyTogglesDefinitions = [
     // Base Strategies
-    { id: 'trendConfirmationToggle', label: 'Wait for Trend Confirmation', stateKey: 'useTrendConfirmation' },
-    { id: 'weightedZoneToggle', label: 'Use Neighbour Score Weighting', stateKey: 'useWeightedZone' },
-    { id: 'proximityBoostToggle', label: 'Use Proximity Boost', stateKey: 'useProximityBoost' },
-    { id: 'pocketDistanceToggle', label: 'Show Pocket Distance', stateKey: 'usePocketDistance' },
-    { id: 'lowestPocketDistanceToggle', label: 'Prioritize Lowest Pocket Distance', stateKey: 'useLowestPocketDistance' },
-    { id: 'advancedCalculationsToggle', label: 'Enable Advanced Calculations', stateKey: 'useAdvancedCalculations' },
+    { id: 'trendConfirmationToggle', label: 'Wait for Trend Confirmation', stateKey: 'useTrendConfirmation', group: 'base' },
+    { id: 'weightedZoneToggle', label: 'Use Neighbour Score Weighting', stateKey: 'useWeightedZone', group: 'base' },
+    { id: 'proximityBoostToggle', label: 'Use Proximity Boost', stateKey: 'useProximityBoost', group: 'base' },
+    { id: 'pocketDistanceToggle', label: 'Show Pocket Distance', stateKey: 'usePocketDistance', group: 'base' },
+    { id: 'lowestPocketDistanceToggle', label: 'Prioritize Lowest Pocket Distance', stateKey: 'useLowestPocketDistance', group: 'base' },
+    { id: 'advancedCalculationsToggle', label: 'Enable Advanced Calculations', stateKey: 'useAdvancedCalculations', group: 'base' },
     // Advanced Strategies
-    { id: 'dynamicStrategyToggle', label: 'Dynamic Best Strategy', stateKey: 'useDynamicStrategy' },
-    { id: 'adaptivePlayToggle', label: 'Adaptive Play Signals', stateKey: 'useAdaptivePlay' },
-    { id: 'tableChangeWarningsToggle', label: 'Table Change Warnings', stateKey: 'useTableChangeWarnings' },
-    { id: 'dueForHitToggle', label: 'Due for a Hit (Contrarian)', stateKey: 'useDueForHit' },
-    { id: 'neighbourFocusToggle', label: 'Neighbour Focus', stateKey: 'useNeighbourFocus' },
-    { id: 'lessStrictModeToggle', label: 'Less Strict Mode', stateKey: 'useLessStrict' },
-    { id: 'dynamicTerminalNeighbourCountToggle', label: 'Dynamic Terminal Neighbour Count', stateKey: 'useDynamicTerminalNeighbourCount' }
+    { id: 'dynamicStrategyToggle', label: 'Dynamic Best Strategy', stateKey: 'useDynamicStrategy', group: 'advanced' },
+    { id: 'adaptivePlayToggle', label: 'Adaptive Play Signals', stateKey: 'useAdaptivePlay', group: 'advanced' },
+    { id: 'tableChangeWarningsToggle', label: 'Table Change Warnings', stateKey: 'useTableChangeWarnings', group: 'advanced' },
+    { id: 'dueForHitToggle', label: 'Due for a Hit (Contrarian)', stateKey: 'useDueForHit', group: 'advanced' },
+    { id: 'neighbourFocusToggle', label: 'Neighbour Focus', stateKey: 'useNeighbourFocus', group: 'advanced' },
+    { id: 'lessStrictModeToggle', label: 'Less Strict Mode', stateKey: 'useLessStrict', group: 'advanced' },
+    { id: 'dynamicTerminalNeighbourCountToggle', label: 'Dynamic Terminal Neighbour Count', stateKey: 'useDynamicTerminalNeighbourCount', group: 'advanced' }
 ];
 
 // --- HELPER FUNCTIONS ---
@@ -84,9 +84,19 @@ function toggleGuide(contentId) {
     if (content) {
         content.classList.toggle('open');
         // Rotate SVG arrow if present (assuming it's the last child of the header's button)
-        const headerButton = content.previousElementSibling; // Get the header div
-        if (headerButton && headerButton.querySelector('svg')) {
-             const svg = headerButton.querySelector('svg');
+        // Adjust for button being the target directly
+        let svg = null;
+        const targetElement = document.getElementById(contentId);
+        if (targetElement) {
+            const header = targetElement.previousElementSibling; // This is the header div
+            if (header && header.tagName === 'DIV') { // Main strategies header (div)
+                svg = header.querySelector('button svg');
+            } else if (header && header.tagName === 'BUTTON') { // Nested strategy descriptions button
+                svg = header.querySelector('svg');
+            }
+        }
+        
+        if (svg) {
              svg.classList.toggle('rotate-180');
         }
     }
@@ -325,7 +335,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1  0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -773,7 +783,7 @@ export function initializeAdvancedSettingsUI() {
     createSlider('patternThresholdsSliders', 'Pattern Min Attempts', config.STRATEGY_CONFIG, 'patternMinAttempts');
     createSlider('patternThresholdsSliders', 'Pattern Success %', config.STRATEGY_CONFIG, 'patternSuccessThreshold');
     createSlider('patternThresholdsSliders', 'Trigger Min Attempts', config.STRATEGY_CONFIG, 'triggerMinAttempts');
-    createSlider('triggerThresholdsSliders', 'Trigger Success %', config.STRATEGY_CONFIG, 'triggerSuccessThreshold');
+    createSlider('patternThresholdsSliders', 'Trigger Success %', config.STRATEGY_CONFIG, 'triggerSuccessThreshold'); // FIX: Corrected to patternThresholdsSliders
 
     // Create sliders for Adaptive Influence Learning
     createSlider('adaptiveInfluenceSliders', 'Adaptive Success Rate', config.ADAPTIVE_LEARNING_RATES, 'SUCCESS');
@@ -784,19 +794,17 @@ export function initializeAdvancedSettingsUI() {
 
 // NEW: Function to render all strategy toggles and their guide text
 function renderStrategyToggles() {
-    if (!dom.strategiesContent || !dom.strategiesToggles) return;
+    if (!dom.strategiesContent) return; // strategiesToggles is now inside strategiesContent
 
     // Clear existing content from the main strategiesContent div
     dom.strategiesContent.innerHTML = ''; 
     
-    // Create the "What do these do?" header and its associated content container
+    // Create the "What do these do?" header as a button and its associated content container
     const descriptionsHeaderHtml = `
-        <div id="strategyDescriptionsHeader" class="flex justify-between items-center cursor-pointer mb-4">
-            <h3 class="font-bold text-gray-700 text-lg">What do these do?</h3>
-            <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">
-                <svg class="inline-block w-5 h-5 ml-1 -mt-0.5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-            </button>
-        </div>
+        <button id="strategyDescriptionsToggleButton" class="w-full btn btn-secondary mt-2 mb-4">
+            <h3 class="font-bold text-gray-700 text-lg inline-block mr-2">What do these do?</h3>
+            <svg class="inline-block w-5 h-5 ml-1 -mt-0.5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        </button>
         <div id="strategyDescriptionsContent" class="strategy-guide-content space-y-4">
             <h4 class="font-bold text-gray-800">Base Strategies</h4>
             <p class="text-sm text-gray-600">Fundamental toggles that define the core behavior of your prediction system.</p>
@@ -844,7 +852,7 @@ function renderStrategyToggles() {
                     <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
                 </div>
                 <div>
-                    <h5 class="font-bold text-800">Neighbour Focus</h5>
+                    <h5 class="font-bold text-gray-800">Neighbour Focus</h5>
                     <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
                 </div>
                 <div>
@@ -860,11 +868,21 @@ function renderStrategyToggles() {
     `;
     dom.strategiesContent.innerHTML += descriptionsHeaderHtml; // Append the new descriptions header and content
 
-    // Create a div for the actual toggles
+    // Create a div for the actual toggles (pt-2 divide-y divide-gray-200)
     const togglesContainer = document.createElement('div');
-    togglesContainer.className = 'pt-2 divide-y divide-gray-200'; // Apply the styles for toggles
-
+    togglesContainer.className = 'pt-2 divide-y divide-gray-200';
+    
+    let currentGroup = '';
     strategyTogglesDefinitions.forEach(toggleDef => {
+        // Add group headers if changing group
+        if (toggleDef.group !== currentGroup) {
+            currentGroup = toggleDef.group;
+            const groupHeader = document.createElement('h4');
+            groupHeader.className = 'font-bold text-gray-800 mt-4 mb-2';
+            groupHeader.textContent = currentGroup === 'base' ? 'Base Strategies' : 'Advanced Strategies';
+            togglesContainer.appendChild(groupHeader);
+        }
+
         const labelElement = document.createElement('label');
         labelElement.className = 'toggle-label';
         labelElement.innerHTML = `
@@ -1047,23 +1065,23 @@ function attachGuideAndInfoListeners() {
     // Guide toggles
 
     // Presets header no longer toggles guide content
-    if (dom.presetsHeader) { // Ensure presetsHeader exists to avoid error if HTML is not loaded yet
+    if (dom.presetsHeader) { 
         // No click listener needed for presetsHeader as it's not collapsible
     }
 
 
     // New Strategies header toggle
-    if (dom.strategiesHeader) { // Ensure strategiesHeader exists
+    if (dom.strategiesHeader) { 
         dom.strategiesHeader.addEventListener('click', () => toggleGuide('strategiesContent'));
     }
     
-    // NEW: Listener for the nested "What do these do?" dropdown inside Strategies
-    if (dom.strategyDescriptionsHeader) {
-        dom.strategyDescriptionsHeader.addEventListener('click', () => toggleGuide('strategyDescriptionsContent'));
+    // NEW: Listener for the nested "What do these do?" button inside Strategies
+    if (dom.strategyDescriptionsToggleButton) { // Use the new button ID
+        dom.strategyDescriptionsToggleButton.addEventListener('click', () => toggleGuide('strategyDescriptionsContent'));
     }
 
     // Advanced Settings header toggle
-    if (dom.advancedSettingsHeader) { // Ensure advancedSettingsHeader exists
+    if (dom.advancedSettingsHeader) { 
         dom.advancedSettingsHeader.addEventListener('click', () => toggleGuide('advancedSettingsContent'));
     }
 
@@ -1095,10 +1113,10 @@ export function initializeUI() {
         // New category toggle IDs
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
         // New combined strategies section IDs
-        'strategiesHeader', 'strategiesContent', 'strategiesToggles', // strategyToggles is where the toggles themselves go
-        'presetsHeader', // Add this to grab the new presets header (though it doesn't toggle guide content)
+        'strategiesHeader', 'strategiesContent', // strategiesToggles is now a container within strategiesContent, not directly grabbed here
+        'presetsHeader',
         // NEW: Nested dropdown IDs for strategy descriptions
-        'strategyDescriptionsHeader', 'strategyDescriptionsContent'
+        'strategyDescriptionsHeader', 'strategyDescriptionsContent', 'strategyDescriptionsToggleButton' // Add the new button ID
     ];
     // Add all individual toggle IDs to the list for DOM collection
     strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id));
@@ -1106,12 +1124,12 @@ export function initializeUI() {
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
     // NEW: Render strategy toggles before attaching their listeners
-    renderStrategyToggles();
+    renderStrategyToggles(); // This now populates strategiesContent and strategyDescriptionsContent
 
     attachMainActionListeners();
     attachToggleListeners(); // Now attaches to dynamically created toggles
     attachAdvancedSettingsListeners();
-    attachGuideAndInfoListeners();
+    attachGuideAndInfoListeners(); // Attach listener to the new strategyDescriptionsToggleButton
     
     dom.startOptimizationButton.addEventListener('click', () => {
         if (state.history.length < 20) {
