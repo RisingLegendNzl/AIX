@@ -13,6 +13,46 @@ import { aiWorker, optimizationWorker } from './workers.js';
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
 
+// --- PARAMETER DEFINITIONS for UI (matches optimizationWorker's parameterSpace) ---
+// Centralize min/max/step for all numerical parameters for slider generation
+const parameterDefinitions = {
+    // Core Strategy Parameters
+    learningRate_success: { min: 0.01, max: 1.0, step: 0.01, category: 'coreStrategy' },
+    learningRate_failure: { min: 0.01, max: 0.5, step: 0.01, category: 'coreStrategy' },
+    maxWeight: { min: 1.0, max: 10.0, step: 0.1, category: 'coreStrategy' },
+    minWeight: { min: 0.0, max: 1.0, step: 0.01, category: 'coreStrategy' },
+    decayFactor: { min: 0.7, max: 0.99, step: 0.01, category: 'coreStrategy' },
+    patternMinAttempts: { min: 1, max: 20, step: 1, category: 'coreStrategy' },
+    patternSuccessThreshold: { min: 50, max: 100, step: 1, category: 'coreStrategy' },
+    triggerMinAttempts: { min: 1, max: 20, step: 1, category: 'coreStrategy' },
+    triggerSuccessThreshold: { min: 50, max: 100, step: 1, category: 'coreStrategy' },
+    // Adaptive Influence Rates
+    SUCCESS: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' }, // Corresponds to adaptiveSuccessRate in GA
+    FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },  // Corresponds to adaptiveFailureRate in GA
+    MIN_INFLUENCE: { min: 0.0, max: 1.0, step: 0.01, category: 'adaptiveRates' },
+    MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' }
+};
+
+// Map parameter names to their respective config objects and display labels
+const parameterMap = {
+    // Strategy Core Settings
+    learningRate_success: { obj: config.STRATEGY_CONFIG, label: 'Success Learn Rate', container: 'strategyLearningRatesSliders' },
+    learningRate_failure: { obj: config.STRATEGY_CONFIG, label: 'Failure Learn Rate', container: 'strategyLearningRatesSliders' },
+    maxWeight: { obj: config.STRATEGY_CONFIG, label: 'Max Weight', container: 'strategyLearningRatesSliders' },
+    minWeight: { obj: config.STRATEGY_CONFIG, label: 'Min Weight', container: 'strategyLearningRatesSliders' },
+    decayFactor: { obj: config.STRATEGY_CONFIG, label: 'Decay Factor', container: 'strategyLearningRatesSliders' },
+    patternMinAttempts: { obj: config.STRATEGY_CONFIG, label: 'Pattern Min Attempts', container: 'patternThresholdsSliders' },
+    patternSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Pattern Success %', container: 'patternThresholdsSliders' },
+    triggerMinAttempts: { obj: config.STRATEGY_CONFIG, label: 'Trigger Min Attempts', container: 'patternThresholdsSliders' },
+    triggerSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Trigger Success %', container: 'patternThresholdsSliders' },
+    // Adaptive Influence Rates
+    SUCCESS: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Success Rate', container: 'adaptiveInfluenceSliders' },
+    FAILURE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
+    MIN_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Min Adaptive Influence', container: 'adaptiveInfluenceSliders' },
+    MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' }
+};
+
+
 // --- HELPER FUNCTIONS ---
 function getRouletteNumberColor(n) {
     if (n === 0) return 'green';
@@ -410,7 +450,7 @@ function handleNewCalculation() {
     // --- Gather all necessary stats before calling getRecommendation ---
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); // Need this for recommendation
+    const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const lastWinningNumber = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
     const newHistoryItem = {
@@ -418,7 +458,7 @@ function handleNewCalculation() {
         num1: num1Val,
         num2: num2Val,
         difference: Math.abs(num2Val - num1Val),
-        status: 'pending', // Initially pending
+        status: 'pending',
         hitTypes: [],
         typeSuccessStatus: {},
         winningNumber: null,
@@ -426,11 +466,8 @@ function handleNewCalculation() {
         recommendedGroupId: null,
         recommendationDetails: null
     };
-    state.history.push(newHistoryItem); // Add to history before getting recommendation so it's part of context
+    state.history.push(newHistoryItem);
 
-    // --- Get the recommendation immediately for display ---
-    // Note: getAiPrediction is async, but for initial display, we'll get sync recommendation
-    // The AI prediction part will update it later in runAllAnalyses().
     const aiPredictionData = null; // AI prediction will come later via runAllAnalyses
     const recommendation = getRecommendation({
         trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
@@ -444,11 +481,9 @@ function handleNewCalculation() {
         terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
     });
 
-    // Store recommendation in the history item immediately
     newHistoryItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
     newHistoryItem.recommendationDetails = recommendation.details;
 
-    // Build the full result HTML, starting with the main recommendation
     let fullResultHtml = `
         <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
         <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
@@ -458,12 +493,11 @@ function handleNewCalculation() {
         <div class="space-y-2">
     `;
 
-    // Now append the details for each prediction type (from renderCalculationDetails's logic)
     state.activePredictionTypes.forEach(type => {
         const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
         if (!predictionTypeDefinition) return;
 
-        const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val); // Use num1Val, num2Val directly
+        const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val);
         if (baseNum < 0 || baseNum > 36) return;
 
         const terminals = config.terminalMapping?.[baseNum] || [];
@@ -504,25 +538,19 @@ function handleNewCalculation() {
         `;
     });
 
-    fullResultHtml += '</div>'; // Close the space-y-2 div
+    fullResultHtml += '</div>';
     dom.resultDisplay.innerHTML = fullResultHtml;
     dom.resultDisplay.classList.remove('hidden');
 
-    // Trigger full analysis for other UI elements (like AI prediction, history updates etc.)
     runAllAnalyses();
     renderHistory();
     drawRouletteWheel(newHistoryItem.difference, lastWinningNumber);
 }
 
 
-/**
- * Handles the "Submit Result" button click. Evaluates the last pending
- * calculation and triggers the auto-calculation for the next round.
- */
 function handleSubmitResult() {
     if (!dom.winningNumberInput || !dom.number1 || !dom.number2) return;
 
-    // Find the most recent pending item to evaluate
     const lastItem = [...state.history].reverse().find(item => item.status === 'pending');
     if (!lastItem) {
         alert("Please perform a calculation first before submitting a winning number.");
@@ -540,30 +568,21 @@ function handleSubmitResult() {
         return;
     }
 
-    // Evaluate the pending item with the winning number
     runAllAnalyses(winningNumber);
     renderHistory();
 
     dom.winningNumberInput.value = '';
 
-    // --- AUTO-CALCULATION LOGIC ---
-    // Ensure lastItem.num2 is treated as a number
     const prevNum2 = parseInt(lastItem.num2, 10);
 
-    // Set up the next calculation in the chain, only if prevNum2 is a valid number
     if (!isNaN(prevNum2)) {
-        dom.number1.value = prevNum2; // The previous "Subtract From" number
-        dom.number2.value = winningNumber;  // The new winning number
-
-        // Programmatically click the "Calculate" button to start the next round.
-        // A small timeout can sometimes help ensure the DOM has updated, though often not strictly necessary.
+        dom.number1.value = prevNum2;
+        dom.number2.value = winningNumber;
         setTimeout(() => {
             document.getElementById('calculateButton').click();
-        }, 50); // Small delay to allow DOM update
+        }, 50);
     } else {
         console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', lastItem.num2);
-        // Optionally alert the user or provide feedback if auto-calculation fails
-        // alert("Could not auto-set next calculation: Invalid previous numbers.");
     }
 }
 
@@ -688,10 +707,20 @@ function handlePresetSelection(presetName) {
     handleStrategyChange();
 }
 
-function createSlider(containerId, label, paramObj, paramName, min, max, step) {
+// MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
+function createSlider(containerId, label, paramObj, paramName) {
     const container = document.getElementById(containerId);
-    if (!container) return;
+    if (!container) {
+        console.warn(`Slider container ${containerId} not found.`);
+        return;
+    }
     const id = `${paramName}Slider`;
+    const paramDef = parameterDefinitions[paramName];
+    if (!paramDef) {
+        console.error(`Parameter definition for ${paramName} not found.`);
+        return;
+    }
+    const { min, max, step } = paramDef;
 
     const sliderGroup = document.createElement('div');
     sliderGroup.className = 'slider-group';
@@ -723,16 +752,44 @@ function createSlider(containerId, label, paramObj, paramName, min, max, step) {
     numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
 }
 
+// MODIFIED: initializeAdvancedSettingsUI to add all sliders (THIS WAS THE KEY CHANGE)
 export function initializeAdvancedSettingsUI() {
+    // Clear previous sliders
     dom.strategyLearningRatesSliders.innerHTML = '';
     dom.patternThresholdsSliders.innerHTML = '';
     dom.adaptiveInfluenceSliders.innerHTML = '';
 
-    createSlider('strategyLearningRatesSliders', 'Success Learn Rate', config.STRATEGY_CONFIG, 'learningRate_success', 0.01, 1.0, 0.01);
-    createSlider('strategyLearningRatesSliders', 'Failure Learn Rate', config.STRATEGY_CONFIG, 'learningRate_failure', 0.01, 0.5, 0.01);
-    createSlider('patternThresholdsSliders', 'Pattern Min Attempts', config.STRATEGY_CONFIG, 'patternMinAttempts', 1, 20, 1);
-    createSlider('adaptiveInfluenceSliders', 'Adaptive Success Rate', config.ADAPTIVE_LEARNING_RATES, 'SUCCESS', 0.01, 0.5, 0.01);
+    // Separate containers for logical grouping
+    const strategyLearningRatesContainer = document.getElementById('strategyLearningRatesSliders');
+    const patternThresholdsContainer = document.getElementById('patternThresholdsSliders');
+    const adaptiveInfluenceContainer = document.getElementById('adaptiveInfluenceSliders');
+
+    // Headers for each sub-category
+    strategyLearningRatesContainer.innerHTML = '<h3>Strategy Learning Rates</h3>';
+    patternThresholdsContainer.innerHTML = '<h3>Pattern & Trigger Thresholds</h3>';
+    adaptiveInfluenceContainer.innerHTML = '<h3>Adaptive Influence Learning</h3>';
+
+
+    // Create sliders for Core Strategy Parameters
+    createSlider('strategyLearningRatesSliders', 'Success Learn Rate', config.STRATEGY_CONFIG, 'learningRate_success');
+    createSlider('strategyLearningRatesSliders', 'Failure Learn Rate', config.STRATEGY_CONFIG, 'learningRate_failure');
+    createSlider('strategyLearningRatesSliders', 'Max Weight', config.STRATEGY_CONFIG, 'maxWeight');
+    createSlider('strategyLearningRatesSliders', 'Min Weight', config.STRATEGY_CONFIG, 'minWeight');
+    createSlider('strategyLearningRatesSliders', 'Decay Factor', config.STRATEGY_CONFIG, 'decayFactor');
+
+    // Create sliders for Pattern & Trigger Thresholds
+    createSlider('patternThresholdsSliders', 'Pattern Min Attempts', config.STRATEGY_CONFIG, 'patternMinAttempts');
+    createSlider('patternThresholdsSliders', 'Pattern Success %', config.STRATEGY_CONFIG, 'patternSuccessThreshold');
+    createSlider('patternThresholdsSliders', 'Trigger Min Attempts', config.STRATEGY_CONFIG, 'triggerMinAttempts');
+    createSlider('patternThresholdsSliders', 'Trigger Success %', config.STRATEGY_CONFIG, 'triggerSuccessThreshold');
+
+    // Create sliders for Adaptive Influence Learning
+    createSlider('adaptiveInfluenceSliders', 'Adaptive Success Rate', config.ADAPTIVE_LEARNING_RATES, 'SUCCESS');
+    createSlider('adaptiveInfluenceSliders', 'Adaptive Failure Rate', config.ADAPTIVE_LEARNING_RATES, 'FAILURE');
+    createSlider('adaptiveInfluenceSliders', 'Min Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MIN_INFLUENCE');
+    createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
 }
+
 
 function resetAllParameters() {
     Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
@@ -792,12 +849,8 @@ function loadParametersFromFile(event) {
 
 export function toggleParameterSliders(enable) {
     if (!dom.advancedSettingsContent) return;
-    const controls = dom.advancedSettingsContent.querySelectorAll('input, button');
-    controls.forEach(control => {
-        if (!control.closest('.flex.justify-between.items-center.cursor-pointer')) {
-            control.disabled = !enable;
-        }
-    });
+
+    // Toggle main action buttons
     dom.setHighestWinRatePreset.disabled = !enable;
     dom.setBalancedSafePreset.disabled = !enable;
     dom.setAggressiveSignalsPreset.disabled = !enable;
@@ -805,6 +858,27 @@ export function toggleParameterSliders(enable) {
     dom.saveParametersButton.disabled = !enable;
     dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
     dom.loadParametersInput.disabled = !enable;
+
+    // Toggle individual parameter sliders based on their categories' optimization toggles
+    for (const paramName in parameterMap) {
+        const sliderElement = document.getElementById(`${paramName}Slider`);
+        const numberInput = document.getElementById(`${paramName}SliderInput`);
+
+        if (sliderElement && numberInput) {
+            let categoryToggleChecked = true; // Assume enabled by default
+
+            if (parameterDefinitions[paramName].category === 'coreStrategy') {
+                categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
+            } else if (parameterDefinitions[paramName].category === 'adaptiveRates') {
+                categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
+            }
+            
+            // A slider/input is enabled if the main `enable` is true AND its category toggle is checked
+            const shouldBeEnabled = enable && categoryToggleChecked;
+            sliderElement.disabled = !shouldBeEnabled;
+            numberInput.disabled = !shouldBeEnabled;
+        }
+    }
 }
 
 // --- UI INITIALIZATION HELPERS ---
@@ -882,6 +956,10 @@ function attachAdvancedSettingsListeners() {
     if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
     if (dom.analyzeVideoButton) dom.analyzeVideoButton.addEventListener('click', startVideoAnalysis);
     if (dom.clearVideoButton) dom.clearVideoButton.addEventListener('click', clearVideoState);
+
+    // NEW: Category Toggle Listeners
+    dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
+    dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
 }
 
 function attachGuideAndInfoListeners() {
@@ -918,7 +996,9 @@ export function initializeUI() {
         'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
-        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton'
+        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton',
+        // NEW: Add new category toggle IDs here
+        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
@@ -934,7 +1014,7 @@ export function initializeUI() {
         }
         updateOptimizationStatus('Starting optimization...');
         dom.optimizationResult.classList.add('hidden');
-        toggleParameterSliders(false);
+        toggleParameterSliders(false); // Disable all sliders initially for optimization
         dom.startOptimizationButton.disabled = true;
         dom.stopOptimizationButton.disabled = false;
         
@@ -953,7 +1033,12 @@ export function initializeUI() {
                 terminalMapping: config.terminalMapping,
                 rouletteWheel: config.rouletteWheel,
                 GA_CONFIG: config.GA_CONFIG,
-                toggles: togglesForWorker
+                toggles: togglesForWorker,
+                // NEW: Pass which categories are enabled for optimization
+                optimizeCategories: {
+                    coreStrategy: dom.optimizeCoreStrategyToggle.checked,
+                    adaptiveRates: dom.optimizeAdaptiveRatesToggle.checked
+                }
             }
         });
     });
