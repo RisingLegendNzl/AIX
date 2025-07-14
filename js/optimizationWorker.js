@@ -1,4 +1,4 @@
-// optimizationWorker.js - Genetic Algorithm for Parameter Optimization
+// js/optimizationWorker.js
 
 // Corrected import paths for being inside the /js folder
 import * as shared from './shared-logic.js';
@@ -173,6 +173,16 @@ function calculateFitness(individual) {
         simulatedHistory.push(simItem);
         if (simItem.winningNumber !== null) tempConfirmedWinsLog.push(simItem.winningNumber);
     }
+
+    // --- ADDED LOGGING START ---
+    console.log(`--- Optimization Worker Fitness Calculation ---`);
+    console.log(`Individual Params: ${JSON.stringify(individual)}`);
+    console.log(`Simulated Wins: ${wins}, Losses: ${losses}`);
+    console.log(`Calculated Fitness (W/L Ratio): ${losses === 0 ? (wins > 0 ? wins * 10 : 0) : (wins / losses)}`);
+    // console.log(`Final Adaptive Influences (Sim): ${JSON.stringify(localAdaptiveFactorInfluences)}`); // Uncomment if you want to inspect these for each individual
+    console.log(`-----------------------------------------------`);
+    // --- ADDED LOGGING END ---
+
     if (losses === 0) return wins > 0 ? wins * 10 : 0;
     return wins / losses;
 }
