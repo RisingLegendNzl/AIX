@@ -7,7 +7,7 @@ import { handleLiveSpin } from './analysis.js'; // Function to process each new 
 // If you are trying to connect to the 'logauto.js' server, you would use 'http://54.38.159.96'.
 // However, direct access to this server for your own app might be restricted or require authentication.
 // For development, if you set up a local Node.js server, it might be 'http://localhost:3000'.
-const socket = io('YOUR_BACKEND_WEBSOCKET_URL'); 
+const socket = io('http://54.38.159.96'); 
 
 export function connectLiveDataSource() {
     socket.on('connect', () => {
