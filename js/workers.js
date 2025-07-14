@@ -51,11 +51,11 @@ export function initializeWorkers() {
                     <br>Best W/L Ratio: <strong>${payload.bestFitness}</strong>
                 `;
                 updateOptimizationStatus(progressHtml);
-                state.setBestFoundParams(payload.bestIndividual);
+                state.setBestFoundParams(payload); // Store the entire payload to include bestIndividual and togglesUsed
                 break;
             case 'complete':
                 showOptimizationComplete(payload);
-                state.setBestFoundParams(payload.bestIndividual);
+                state.setBestFoundParams(payload); // Store the entire payload here as well
                 break;
             case 'stopped':
                 showOptimizationStopped();
