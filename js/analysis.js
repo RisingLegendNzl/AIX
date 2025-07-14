@@ -274,7 +274,7 @@ async function processSingleSpin(num1, num2, winningNumber = null) {
 }
 
 // MODIFIED: handleNewCalculation now calls unified processSingleSpin
-function handleNewCalculation() {
+export function handleNewCalculation() {
     // Removed state.useLiveData check as the card is not implemented
     
     const num1Val = parseInt(document.getElementById('number1').value, 10);
@@ -289,7 +289,7 @@ function handleNewCalculation() {
 }
 
 // MODIFIED: handleSubmitResult now updates existing item and triggers re-analysis
-function handleSubmitResult() {
+export function handleSubmitResult() {
     // Removed state.useLiveData check as the card is not implemented
 
     const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending');
