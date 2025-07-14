@@ -1,4 +1,3 @@
-
 // js/ui.js
 
 // --- IMPORTS ---
@@ -290,12 +289,6 @@ export function renderBoardState(boardStats) {
     }
 }
 
-export function renderRecommendation(recommendation) {
-    dom.resultDisplay.innerHTML = recommendation.html;
-    dom.resultDisplay.classList.remove('hidden');
-}
-
-
 export function renderStrategyWeights() {
     if (!dom.strategyWeightsDisplay) return;
     dom.strategyWeightsDisplay.innerHTML = '';
@@ -364,16 +357,15 @@ export function updateAiStatus(message) {
 
 // --- EVENT HANDLERS (Private to this module) ---
 
-async function handleCalculation() {
-    // Add a check to ensure the DOM elements exist before accessing their properties.
-    if (!dom.number1 || !dom.number2 || !dom.resultDisplay || !dom.winningNumberInput) {
-        console.error("UI elements not found. Cannot perform calculation.");
-        return;
-    }
+/**
+ * Handles the "Calculate" button click. Renders the calculation groups
+ * and creates a new pending item in the history.
+ */
+function handleNewCalculation() {
+    if (!dom.number1 || !dom.number2 || !dom.resultDisplay) return;
 
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
-    const winningNumberVal = dom.winningNumberInput.value;
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
@@ -381,19 +373,8 @@ async function handleCalculation() {
         return;
     }
 
-    // Call the new function to render the calculation details immediately.
     renderCalculationDetails(num1Val, num2Val);
 
-    let winningNumber = null;
-    if (winningNumberVal.trim() !== '') {
-        winningNumber = parseInt(winningNumberVal, 10);
-        if (isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
-            dom.resultDisplay.innerHTML += `<p class="text-red-600 font-medium text-center mt-2">Winning number must be between 0 and 36.</p>`;
-            return;
-        }
-    }
-
-    // The rest of the function remains the same to correctly log history and run analysis.
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
@@ -409,22 +390,50 @@ async function handleCalculation() {
     };
 
     state.history.push(newHistoryItem);
-    runAllAnalyses(winningNumber);
+    runAllAnalyses(); // Run analysis to get recommendation for the new item
     renderHistory();
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
     drawRouletteWheel(newHistoryItem.difference, lastWinning);
-    dom.winningNumberInput.value = ''; // Clear the optional input
+}
 
-    // --- NEW LOGIC FOR AUTO-CALCULATION ---
-    if (winningNumber !== null) {
-        // Set up the next calculation: winning number becomes the new "Subtract From",
-        // and the old "Subtract From" becomes the new "Number to Subtract".
-        dom.number1.value = num2Val; // Old "Subtract From" number
-        dom.number2.value = winningNumber; // The winning number
+/**
+ * Handles the "Submit Result" button click. Evaluates the last pending
+ * calculation and triggers the auto-calculation for the next round.
+ */
+function handleSubmitResult() {
+    if (!dom.winningNumberInput || !dom.number1 || !dom.number2) return;
 
-        // Programmatically click the calculate button to trigger the next calculation in the chain.
-        document.getElementById('calculateButton').click();
+    // Find the most recent pending item to evaluate
+    const lastItem = [...state.history].reverse().find(item => item.status === 'pending');
+    if (!lastItem) {
+        alert("Please perform a calculation first before submitting a winning number.");
+        return;
     }
+
+    const winningNumberVal = dom.winningNumberInput.value;
+    let winningNumber = null;
+    if (winningNumberVal.trim() !== '') {
+        winningNumber = parseInt(winningNumberVal, 10);
+    }
+
+    if (winningNumber === null || isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
+        alert("Please enter a valid winning number (0-36).");
+        return;
+    }
+
+    // Evaluate the pending item with the winning number
+    runAllAnalyses(winningNumber);
+    renderHistory();
+
+    dom.winningNumberInput.value = '';
+
+    // --- AUTO-CALCULATION LOGIC ---
+    // Set up the next calculation in the chain.
+    dom.number1.value = lastItem.num2; // The previous "Subtract From" number
+    dom.number2.value = winningNumber;  // The new winning number
+
+    // Programmatically click the "Calculate" button to start the next round.
+    document.getElementById('calculateButton').click();
 }
 
 
@@ -670,15 +679,25 @@ export function toggleParameterSliders(enable) {
 // --- UI INITIALIZATION HELPERS ---
 
 function attachMainActionListeners() {
-    document.getElementById('calculateButton').addEventListener('click', handleCalculation);
+    // Connect the new functions to the correct buttons
+    document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
+    document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
+
     document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
     document.getElementById('swapButton').addEventListener('click', handleSwap);
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', runAllAnalyses);
+    dom.recalculateAnalysisButton.addEventListener('click', () => runAllAnalyses()); // Use arrow func for simplicity
+    
+    // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleCalculation();
+        if (e.key === 'Enter') handleNewCalculation();
     }));
+
+    // Add Enter key listener for the winning number input
+    dom.winningNumberInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleSubmitResult();
+    });
 }
 
 function attachToggleListeners() {
@@ -766,7 +785,7 @@ export function initializeUI() {
         'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
-        'loadParametersLabel', 'parameterStatusMessage'
+        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
