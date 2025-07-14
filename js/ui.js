@@ -1024,6 +1024,15 @@ export function initializeUI() {
             useWeightedZone: state.useWeightedZone,
             useNeighbourFocus: state.useNeighbourFocus,
             useTrendConfirmation: state.useTrendConfirmation,
+            // Include other toggles if they influence the fitness calculation within the worker
+            usePocketDistance: state.usePocketDistance,
+            useLowestPocketDistance: state.useLowestPocketDistance,
+            useAdvancedCalculations: state.useAdvancedCalculations,
+            useDynamicStrategy: state.useDynamicStrategy,
+            useAdaptivePlay: state.useAdaptivePlay,
+            useTableChangeWarnings: state.useTableChangeWarnings,
+            useDueForHit: state.useDueForHit,
+            useLessStrict: state.useLessStrict
         };
 
         optimizationWorker.postMessage({
@@ -1033,7 +1042,7 @@ export function initializeUI() {
                 terminalMapping: config.terminalMapping,
                 rouletteWheel: config.rouletteWheel,
                 GA_CONFIG: config.GA_CONFIG,
-                toggles: togglesForWorker,
+                toggles: togglesForWorker, // Pass the current UI toggle states to the worker
                 // NEW: Pass which categories are enabled for optimization
                 optimizeCategories: {
                     coreStrategy: dom.optimizeCoreStrategyToggle.checked,
@@ -1049,7 +1058,9 @@ export function initializeUI() {
 
     dom.applyBestParamsButton.addEventListener('click', () => {
         if (state.bestFoundParams) {
-            const params = state.bestFoundParams;
+            const params = state.bestFoundParams.bestIndividual; // Correctly reference bestIndividual
+            const toggles = state.bestFoundParams.togglesUsed; // Get the toggles used for this best result
+
             Object.assign(config.STRATEGY_CONFIG, {
                 learningRate_success: params.learningRate_success, decayFactor: params.decayFactor,
                 learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
@@ -1061,6 +1072,13 @@ export function initializeUI() {
                 SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
                 MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence
             });
+
+            // --- ADDED: Apply the toggles as well ---
+            if (toggles) { // Ensure toggles were sent
+                state.setToggles(toggles);
+                updateAllTogglesUI(); // Update UI to reflect new toggle states
+            }
+            
             initializeAdvancedSettingsUI();
             updateOptimizationStatus('Best parameters applied!');
             handleStrategyChange();
