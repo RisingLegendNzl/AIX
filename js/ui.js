@@ -1,7 +1,6 @@
 // js/ui.js
 
 // --- IMPORTS ---
-// Added getBoardStateStats and calculatePocketDistance
 import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance } from '../shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
@@ -393,7 +392,7 @@ export function updateAiStatus(message) {
  * Handles the "Calculate" button click. Gathers all necessary stats and renders
  * the detailed calculation groups display.
  */
-function handleNewCalculation() {
+async function handleNewCalculation() {
     if (!dom.number1 || !dom.number2 || !dom.resultDisplay) return;
 
     const num1Val = parseInt(dom.number1.value, 10);
@@ -427,7 +426,7 @@ function handleNewCalculation() {
     };
 
     state.history.push(newHistoryItem);
-    runAllAnalyses(); // Run analysis to get recommendation for the new item
+    await runAllAnalyses(); // <-- Added await
     renderHistory();
     drawRouletteWheel(newHistoryItem.difference, lastWinningNumber);
 }
@@ -436,7 +435,7 @@ function handleNewCalculation() {
  * Handles the "Submit Result" button click. Evaluates the last pending
  * calculation and triggers the auto-calculation for the next round.
  */
-function handleSubmitResult() {
+async function handleSubmitResult() { // <-- Made async
     if (!dom.winningNumberInput || !dom.number1 || !dom.number2) return;
 
     // Find the most recent pending item to evaluate
@@ -458,7 +457,7 @@ function handleSubmitResult() {
     }
 
     // Evaluate the pending item with the winning number
-    runAllAnalyses(winningNumber);
+    await runAllAnalyses(winningNumber); // <-- Added await
     renderHistory();
 
     dom.winningNumberInput.value = '';
@@ -492,7 +491,7 @@ function handleSwap() {
     dom.number2.value = v; 
 }
 
-function handleHistoryAction(event) { 
+async function handleHistoryAction(event) { // <-- Made async
     const button = event.target.closest('.delete-btn');
     if (!button) return;
     
@@ -504,7 +503,7 @@ function handleHistoryAction(event) {
     
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
     
-    runAllAnalyses();
+    await runAllAnalyses(); // <-- Added await
     renderHistory();
     drawRouletteWheel();
     
@@ -515,7 +514,7 @@ function handleHistoryAction(event) {
     }
 }
 
-function handleClearHistory() { 
+async function handleClearHistory() { // <-- Made async
     state.setHistory([]);
     state.setConfirmedWinsLog([]);
     state.setPatternMemory({});
@@ -526,7 +525,7 @@ function handleClearHistory() {
     state.setIsAiReady(false);
     updateAiStatus(`AI Model: Need at least ${config.TRAINING_MIN_HISTORY} confirmed spins to train.`);
     
-    runAllAnalyses();
+    await runAllAnalyses(); // <-- Added await
     renderHistory();
     
     dom.historicalAnalysisMessage.textContent = 'History cleared.';
@@ -714,7 +713,7 @@ export function toggleParameterSliders(enable) {
 
 // --- UI INITIALIZATION HELPERS ---
 
-function attachMainActionListeners() {
+async function attachMainActionListeners() { // <-- Made async
     // Connect the new functions to the correct buttons
     document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
     document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
@@ -723,8 +722,8 @@ function attachMainActionListeners() {
     document.getElementById('swapButton').addEventListener('click', handleSwap);
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', () => runAllAnalyses()); // Use arrow func for simplicity
-    
+    dom.recalculateAnalysisButton.addEventListener('click', async () => await runAllAnalyses()); // <-- Added async/await
+
     // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') handleNewCalculation();
@@ -736,7 +735,7 @@ function attachMainActionListeners() {
     });
 }
 
-function attachToggleListeners() {
+async function attachToggleListeners() { // <-- Made async
     const toggles = {
         trendConfirmationToggle: 'useTrendConfirmation', weightedZoneToggle: 'useWeightedZone',
         proximityBoostToggle: 'useProximityBoost', pocketDistanceToggle: 'usePocketDistance',
@@ -748,7 +747,7 @@ function attachToggleListeners() {
     };
 
     for (const [toggleId, stateKey] of Object.entries(toggles)) {
-        dom[toggleId].addEventListener('change', () => {
+        dom[toggleId].addEventListener('change', async () => { // <-- Made async
             const newToggleStates = { ...state };
             newToggleStates[stateKey] = dom[toggleId].checked;
             state.setToggles(newToggleStates);
@@ -757,31 +756,31 @@ function attachToggleListeners() {
                 renderHistory();
             } else if (stateKey === 'useAdvancedCalculations' || stateKey === 'useDynamicTerminalNeighbourCount') {
                 updateActivePredictionTypes();
-                handleStrategyChange();
+                await handleStrategyChange(); // <-- Added await
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(dom.number2.value, 10);
                 const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
                 drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
             } else {
-                handleStrategyChange();
+                await handleStrategyChange(); // <-- Added await
             }
         });
     }
 }
 
-function attachAdvancedSettingsListeners() {
+async function attachAdvancedSettingsListeners() { // <-- Made async
     // Presets
     dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
     dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
     dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
 
     // Parameter Management
-    dom.resetParametersButton.addEventListener('click', resetAllParameters);
+    dom.resetParametersButton.addEventListener('click', () => resetAllParameters());
     dom.saveParametersButton.addEventListener('click', saveParametersToFile);
-    dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
+    dom.loadParametersInput.addEventListener('change', (e) => loadParametersFromFile(e));
 
     // Historical Analysis
-    dom.analyzeHistoricalDataButton.addEventListener('click', handleHistoricalAnalysis);
+    dom.analyzeHistoricalDataButton.addEventListener('click', () => handleHistoricalAnalysis());
 
     // Video Analysis
     if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
@@ -804,7 +803,7 @@ function attachGuideAndInfoListeners() {
     }
 }
 // --- INITIALIZATION ---
-export function initializeUI() {
+export async function initializeUI() { // <-- Made async
     const elementIds = [
         'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
         'boardStateConclusion', 'historicalNumbersInput', 'imageUpload', 'imageUploadLabel',
@@ -825,9 +824,9 @@ export function initializeUI() {
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
-    attachMainActionListeners();
-    attachToggleListeners();
-    attachAdvancedSettingsListeners();
+    await attachMainActionListeners(); // <-- Added await
+    await attachToggleListeners(); // <-- Added await
+    await attachAdvancedSettingsListeners(); // <-- Added await
     attachGuideAndInfoListeners();
     
     // Guide toggles
@@ -898,4 +897,4 @@ document.getElementById('advancedSettingsHeader').addEventListener('click', () =
         }
     });
 
-} //
+}
