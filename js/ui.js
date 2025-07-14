@@ -73,7 +73,7 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
                 });
             }
             if(minDistance !== Infinity) {
-                 pocketDistanceHtml = `<span>Dist: <strong>${minDistance}</strong></span>`;
+                 pocketDistanceHtml = `<span class="text-pink-500">Dist: <strong>${minDistance}</strong></span>`;
             }
         }
 
@@ -251,7 +251,7 @@ export function renderHistory() {
 
         // "Pocket Distance" detail
         if (state.usePocketDistance && item.status !== 'pending' && item.pocketDistance !== null) {
-            detailsParts.push(`Pocket Distance: <strong>${item.pocketDistance}</strong>`);
+            detailsParts.push(`<span class="text-pink-500">Pocket Distance: <strong>${item.pocketDistance}</strong></span>`);
         }
 
         if (detailsParts.length > 0) {
