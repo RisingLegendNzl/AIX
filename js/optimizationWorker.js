@@ -155,7 +155,8 @@ function calculateFitness(individual) {
         });
         const simItem = { ...rawItem };
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
-        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
+        simItem.recommendationDetails = recommendation.bestCandidate?.details || null; // Ensure details are copied if needed for later inspection
+        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
             wins++;
         } else if (simItem.recommendedGroupId) {
