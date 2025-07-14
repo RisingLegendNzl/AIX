@@ -182,51 +182,64 @@ async function runEvolution() {
         population.push({ individual: createIndividual(), fitness: 0 });
     }
 
-    while (isRunning && generationCount < currentGaConfig.maxGenerations) {
-        generationCount++;
-        for (const p of population) {
+    try { // <-- ADDED TRY
+        while (isRunning && generationCount < currentGaConfig.maxGenerations) {
+            generationCount++;
+            for (const p of population) {
+                if (!isRunning) return;
+                p.fitness = calculateFitness(p.individual);
+            }
             if (!isRunning) return;
-            p.fitness = calculateFitness(p.individual);
-        }
-        if (!isRunning) return;
 
-        population.sort((a, b) => b.fitness - a.fitness);
+            population.sort((a, b) => b.fitness - a.fitness);
+            self.postMessage({
+                type: 'progress',
+                payload: {
+                    generation: generationCount,
+                    maxGenerations: currentGaConfig.maxGenerations,
+                    bestFitness: population[0].fitness.toFixed(3),
+                    bestIndividual: population[0].individual,
+                    processedCount: generationCount * currentGaConfig.populationSize,
+                    populationSize: currentGaConfig.populationSize
+                }
+            });
+
+            const newPopulation = [];
+            for (let i = 0; i < currentGaConfig.eliteCount; i++) {
+                newPopulation.push(population[i]);
+            }
+            while (newPopulation.length < currentGaConfig.populationSize) {
+                if (!isRunning) return;
+                const parent1 = selectParent(population);
+                const parent2 = selectParent(population);
+                let child = (Math.random() < currentGaConfig.crossoverRate) ? crossover(parent1.individual, parent2.individual) : { ...parent1.individual };
+                child = mutate(child);
+                newPopulation.push({ individual: child, fitness: 0 });
+            }
+            population = newPopulation;
+        }
+
+        if (isRunning) {
+            self.postMessage({
+                type: 'complete',
+                payload: {
+                    generation: generationCount,
+                    bestFitness: population[0].fitness.toFixed(3),
+                    bestIndividual: population[0].individual
+                }
+            });
+        }
+    } catch (error) { // <-- ADDED CATCH
+        console.error("Error during evolution:", error);
         self.postMessage({
-            type: 'progress',
+            type: 'error',
             payload: {
-                generation: generationCount,
-                maxGenerations: currentGaConfig.maxGenerations,
-                bestFitness: population[0].fitness.toFixed(3),
-                bestIndividual: population[0].individual,
-                processedCount: generationCount * currentGaConfig.populationSize,
-                populationSize: currentGaConfig.populationSize // <-- ADDED THIS
+                message: error.message
             }
         });
-
-        const newPopulation = [];
-        for (let i = 0; i < currentGaConfig.eliteCount; i++) newPopulation.push(population[i]);
-        while (newPopulation.length < currentGaConfig.populationSize) {
-            if (!isRunning) return;
-            const parent1 = selectParent(population);
-            const parent2 = selectParent(population);
-            let child = (Math.random() < currentGaConfig.crossoverRate) ? crossover(parent1.individual, parent2.individual) : { ...parent1.individual };
-            child = mutate(child);
-            newPopulation.push({ individual: child, fitness: 0 });
-        }
-        population = newPopulation;
+    } finally { // <-- ADDED FINALLY
+        isRunning = false;
     }
-
-    if (isRunning) {
-        self.postMessage({
-            type: 'complete',
-            payload: {
-                generation: generationCount,
-                bestFitness: population[0].fitness.toFixed(3),
-                bestIndividual: population[0].individual
-            }
-        });
-    }
-    isRunning = false;
 }
 
 // --- WEB WORKER MESSAGE HANDLER ---
