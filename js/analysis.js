@@ -72,11 +72,14 @@ export function labelHistoryFailures(sortedHistory) {
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
-    const localAdaptiveFactorInfluences = {
+    const localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     };
     if (spinsToProcess.length < 3) return [];
+
+    let wins = 0; // Initialize wins for this simulation
+    let losses = 0; // Initialize losses for this simulation
 
     for (let i = 2; i < spinsToProcess.length; i++) {
         const num1 = spinsToProcess[i - 2];
@@ -93,8 +96,8 @@ function runSimulationOnHistory(spinsToProcess) {
             lastWinningNumber: localConfirmedWinsLog.length > 0 ? localConfirmedWinsLog[localConfirmedWinsLog.length - 1] : null,
             useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
-            useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory,
+            useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, // Use the current config for simulation
+            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory, // Use current adaptive rates config
             activePredictionTypes: state.activePredictionTypes,
             useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
             terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
@@ -109,13 +112,37 @@ function runSimulationOnHistory(spinsToProcess) {
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
-        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
-            // This is where you would update adaptive influences for the simulation
+        // Update wins/losses for this specific simulation run
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
+            wins++;
+        } else if (newHistoryItem.recommendedGroupId) { // Only count as a loss if a recommendation was made
+            losses++;
         }
+
+        // Apply adaptive influence updates within the simulation
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
+            const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
+            if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
+            if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
+                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + config.ADAPTIVE_LEARNING_RATES.SUCCESS);
+            } else {
+                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - config.ADAPTIVE_LEARNING_RATES.FAILURE);
+            }
+        }
+
         if (winningNumber !== null) {
             localConfirmedWinsLog.push(winningNumber);
         }
     }
+
+    // --- ADDED LOGGING START ---
+    console.log(`--- Analysis.js runSimulationOnHistory ---`);
+    console.log(`Simulated Wins: ${wins}, Losses: ${losses}`);
+    console.log(`Calculated W/L Ratio: ${losses === 0 ? (wins > 0 ? wins * 10 : 0) : (wins / losses)}`);
+    // console.log(`Final Adaptive Influences (Analysis.js Sim): ${JSON.stringify(localAdaptiveFactorInfluences)}`); // Uncomment if you want to inspect these
+    console.log(`------------------------------------------`);
+    // --- ADDED LOGGING END ---
+
     return localHistory;
 }
 
