@@ -45,7 +45,12 @@ export function initializeWorkers() {
 
         switch (type) {
             case 'progress':
-                const progressHtml = `Evolving... Gen: <strong>${payload.generation}/${payload.maxGenerations}</strong><br>Best W/L Ratio: <strong>${payload.bestFitness}</strong>`;
+                const totalVariations = payload.maxGenerations * payload.populationSize;
+                const progressHtml = `
+                    Evolving... Gen: <strong>${payload.generation}/${payload.maxGenerations}</strong>
+                    <br>Processed: <strong>${payload.processedCount} / ${totalVariations}</strong>
+                    <br>Best W/L Ratio: <strong>${payload.bestFitness}</strong>
+                `;
                 updateOptimizationStatus(progressHtml);
                 state.setBestFoundParams(payload.bestIndividual);
                 break;
@@ -58,5 +63,4 @@ export function initializeWorkers() {
                 break;
         }
     };
-
-} //
+}
