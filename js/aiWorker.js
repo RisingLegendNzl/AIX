@@ -3,30 +3,28 @@
 // Keep the module imports to ensure the library code executes and defines globals
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js';
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@4.20.0/dist/tf-layers.min.js';
+// **APPLIED FIX: Import the CPU backend**
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@4.20.0/dist/tf-backend-cpu.min.js';
+
 
 import * as config from './config.js';
 
-// **APPLIED FIX: Access the global `tf` object from `self` and ensure async initialization**
-// Define tf here to be a reference to the global object.
-// We expect the CDN imports above to define a global `self.tf`
+// Access the global `tf` object from `self`
 const tf = self.tf;
 
-// If tf is still undefined here, then the CDN imports are truly not working as expected,
-// or there's a more fundamental issue.
 if (!tf) {
     const errorMsg = 'TensorFlow.js global object (tf) is not defined after import. Cannot proceed.';
     console.error(errorMsg);
     self.postMessage({ type: 'error', message: `AI Model: ${errorMsg}` });
-    // It's critical to stop here if tf isn't available
     throw new Error(errorMsg);
 }
 
 async function initTensorFlow() {
     try {
-        // Now, `tf.ready()` should be available on the global `tf` object
         await tf.ready();
 
         tf.enableProdMode();
+        // Ensure backend is explicitly set after it's imported and ready
         tf.setBackend('cpu');
         if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
     } catch (err) {
@@ -36,10 +34,8 @@ async function initTensorFlow() {
     }
 }
 
-// Call the initialization function immediately, and ensure other operations wait for it.
 let tfInitializedPromise = initTensorFlow();
 
-// The console log below will now show what `self.tf` contains.
 console.log('TensorFlow.js tf object in aiWorker (from self.tf):', tf);
 
 
