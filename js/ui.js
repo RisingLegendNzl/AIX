@@ -33,7 +33,7 @@ const parameterDefinitions = {
     MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' }
 };
 
-// Map parameter names to their respective config objects and display labels
+// Map parameter names to their respective config objects and display labels for sliders
 const parameterMap = {
     // Strategy Core Settings
     learningRate_success: { obj: config.STRATEGY_CONFIG, label: 'Success Learn Rate', container: 'strategyLearningRatesSliders' },
@@ -52,6 +52,24 @@ const parameterMap = {
     MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' }
 };
 
+// Define strategy toggles with their labels and corresponding state keys
+const strategyTogglesDefinitions = [
+    // Base Strategies
+    { id: 'trendConfirmationToggle', label: 'Wait for Trend Confirmation', stateKey: 'useTrendConfirmation' },
+    { id: 'weightedZoneToggle', label: 'Use Neighbour Score Weighting', stateKey: 'useWeightedZone' },
+    { id: 'proximityBoostToggle', label: 'Use Proximity Boost', stateKey: 'useProximityBoost' },
+    { id: 'pocketDistanceToggle', label: 'Show Pocket Distance', stateKey: 'usePocketDistance' },
+    { id: 'lowestPocketDistanceToggle', label: 'Prioritize Lowest Pocket Distance', stateKey: 'useLowestPocketDistance' },
+    { id: 'advancedCalculationsToggle', label: 'Enable Advanced Calculations', stateKey: 'useAdvancedCalculations' },
+    // Advanced Strategies
+    { id: 'dynamicStrategyToggle', label: 'Dynamic Best Strategy', stateKey: 'useDynamicStrategy' },
+    { id: 'adaptivePlayToggle', label: 'Adaptive Play Signals', stateKey: 'useAdaptivePlay' },
+    { id: 'tableChangeWarningsToggle', label: 'Table Change Warnings', stateKey: 'useTableChangeWarnings' },
+    { id: 'dueForHitToggle', label: 'Due for a Hit (Contrarian)', stateKey: 'useDueForHit' },
+    { id: 'neighbourFocusToggle', label: 'Neighbour Focus', stateKey: 'useNeighbourFocus' },
+    { id: 'lessStrictModeToggle', label: 'Less Strict Mode', stateKey: 'useLessStrict' },
+    { id: 'dynamicTerminalNeighbourCountToggle', label: 'Dynamic Terminal Neighbour Count', stateKey: 'useDynamicTerminalNeighbourCount' }
+];
 
 // --- HELPER FUNCTIONS ---
 function getRouletteNumberColor(n) {
@@ -70,17 +88,7 @@ function toggleGuide(contentId) {
 
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
-/**
- * Renders the details of the active calculation groups, including streaks, hit rates, and pocket distance.
- * @param {number} num1
- * @param {number} num2
- * @param {object} streaks
- * @param {object} boardStats
- * @param {number|null} lastWinningNumber
- * @param {boolean} usePocketDistance
- */
-// NOTE: This function is now mostly absorbed into handleNewCalculation for direct rendering.
-// Keeping it here for reference or if parts are still needed elsewhere.
+// NOTE: renderCalculationDetails is now mostly absorbed into handleNewCalculation for direct rendering.
 function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, lastWinningNumber = null, usePocketDistance = false) {
     let detailsHtml = '<h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3><div class="space-y-2">';
 
@@ -93,14 +101,12 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
 
         const terminals = config.terminalMapping?.[baseNum] || [];
         
-        // Confirmed by Streak Logic
         const streak = streaks[type.id] || 0;
         let confirmedByHtml = '';
         if (streak >= 2) {
             confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
         }
 
-        // Hit Rate & Pocket Distance Logic
         const stats = boardStats[type.id] || { success: 0, total: 0 };
         const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
         let pocketDistanceHtml = '';
@@ -132,25 +138,17 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
     });
 
     detailsHtml += '</div>';
-    // dom.resultDisplay.innerHTML = detailsHtml; // This line is removed as it's now part of fullResultHtml
     dom.resultDisplay.classList.remove('hidden');
 }
 
 
 export function updateAllTogglesUI() {
-    dom.trendConfirmationToggle.checked = state.useTrendConfirmation;
-    dom.weightedZoneToggle.checked = state.useWeightedZone;
-    dom.proximityBoostToggle.checked = state.useProximityBoost;
-    dom.pocketDistanceToggle.checked = state.usePocketDistance;
-    dom.lowestPocketDistanceToggle.checked = state.useLowestPocketDistance;
-    dom.advancedCalculationsToggle.checked = state.useAdvancedCalculations;
-    dom.dynamicStrategyToggle.checked = state.useDynamicStrategy;
-    dom.adaptivePlayToggle.checked = state.useAdaptivePlay;
-    dom.tableChangeWarningsToggle.checked = state.useTableChangeWarnings;
-    dom.dueForHitToggle.checked = state.useDueForHit;
-    dom.neighbourFocusToggle.checked = state.useNeighbourFocus;
-    dom.lessStrictModeToggle.checked = state.useLessStrict;
-    dom.dynamicTerminalNeighbourCountToggle.checked = state.useDynamicTerminalNeighbourCount;
+    // Update individual toggle states based on state.js
+    strategyTogglesDefinitions.forEach(toggleDef => {
+        if (dom[toggleDef.id]) {
+            dom[toggleDef.id].checked = state[toggleDef.stateKey];
+        }
+    });
 }
 
 export function updateWinLossCounter() {
@@ -707,7 +705,6 @@ function handlePresetSelection(presetName) {
     handleStrategyChange();
 }
 
-// MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
 function createSlider(containerId, label, paramObj, paramName) {
     const container = document.getElementById(containerId);
     if (!container) {
@@ -752,23 +749,12 @@ function createSlider(containerId, label, paramObj, paramName) {
     numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
 }
 
-// MODIFIED: initializeAdvancedSettingsUI to add all sliders (THIS WAS THE KEY CHANGE)
+// MODIFIED: initializeAdvancedSettingsUI to add all sliders
 export function initializeAdvancedSettingsUI() {
     // Clear previous sliders
     dom.strategyLearningRatesSliders.innerHTML = '';
     dom.patternThresholdsSliders.innerHTML = '';
     dom.adaptiveInfluenceSliders.innerHTML = '';
-
-    // Separate containers for logical grouping
-    const strategyLearningRatesContainer = document.getElementById('strategyLearningRatesSliders');
-    const patternThresholdsContainer = document.getElementById('patternThresholdsSliders');
-    const adaptiveInfluenceContainer = document.getElementById('adaptiveInfluenceSliders');
-
-    // Headers for each sub-category
-    strategyLearningRatesContainer.innerHTML = '<h3>Strategy Learning Rates</h3>';
-    patternThresholdsContainer.innerHTML = '<h3>Pattern & Trigger Thresholds</h3>';
-    adaptiveInfluenceContainer.innerHTML = '<h3>Adaptive Influence Learning</h3>';
-
 
     // Create sliders for Core Strategy Parameters
     createSlider('strategyLearningRatesSliders', 'Success Learn Rate', config.STRATEGY_CONFIG, 'learningRate_success');
@@ -788,6 +774,23 @@ export function initializeAdvancedSettingsUI() {
     createSlider('adaptiveInfluenceSliders', 'Adaptive Failure Rate', config.ADAPTIVE_LEARNING_RATES, 'FAILURE');
     createSlider('adaptiveInfluenceSliders', 'Min Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MIN_INFLUENCE');
     createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
+}
+
+// NEW: Function to render all strategy toggles
+function renderStrategyToggles() {
+    if (!dom.strategiesToggles) return;
+    dom.strategiesToggles.innerHTML = ''; // Clear existing toggles
+
+    strategyTogglesDefinitions.forEach(toggleDef => {
+        const labelElement = document.createElement('label');
+        labelElement.className = 'toggle-label';
+        labelElement.innerHTML = `
+            <span class="font-medium text-gray-700">${toggleDef.label}</span>
+            <input type="checkbox" id="${toggleDef.id}" class="toggle-checkbox">
+            <div class="toggle-switch"><div class="toggle-knob"></div></div>
+        `;
+        dom.strategiesToggles.appendChild(labelElement);
+    });
 }
 
 
@@ -905,37 +908,30 @@ function attachMainActionListeners() {
     });
 }
 
+// MODIFIED: attachToggleListeners to loop through the new strategyTogglesDefinitions
 function attachToggleListeners() {
-    const toggles = {
-        trendConfirmationToggle: 'useTrendConfirmation', weightedZoneToggle: 'useWeightedZone',
-        proximityBoostToggle: 'useProximityBoost', pocketDistanceToggle: 'usePocketDistance',
-        lowestPocketDistanceToggle: 'useLowestPocketDistance', advancedCalculationsToggle: 'useAdvancedCalculations',
-        dynamicStrategyToggle: 'useDynamicStrategy', adaptivePlayToggle: 'useAdaptivePlay',
-        tableChangeWarningsToggle: 'useTableChangeWarnings', dueForHitToggle: 'useDueForHit',
-        neighbourFocusToggle: 'useNeighbourFocus', lessStrictModeToggle: 'useLessStrict',
-        dynamicTerminalNeighbourCountToggle: 'useDynamicTerminalNeighbourCount'
-    };
+    strategyTogglesDefinitions.forEach(toggleDef => {
+        if (dom[toggleDef.id]) { // Ensure the DOM element exists
+            dom[toggleDef.id].addEventListener('change', () => {
+                const newToggleStates = { ...state };
+                newToggleStates[toggleDef.stateKey] = dom[toggleDef.id].checked;
+                state.setToggles(newToggleStates);
 
-    for (const [toggleId, stateKey] of Object.entries(toggles)) {
-        dom[toggleId].addEventListener('change', () => {
-            const newToggleStates = { ...state };
-            newToggleStates[stateKey] = dom[toggleId].checked;
-            state.setToggles(newToggleStates);
-
-            if (stateKey === 'usePocketDistance') {
-                renderHistory();
-            } else if (stateKey === 'useAdvancedCalculations' || stateKey === 'useDynamicTerminalNeighbourCount') {
-                updateActivePredictionTypes();
-                handleStrategyChange();
-                const num1Val = parseInt(dom.number1.value, 10);
-                const num2Val = parseInt(dom.number2.value, 10);
-                const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
-                drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
-            } else {
-                handleStrategyChange();
-            }
-        });
-    }
+                if (toggleDef.stateKey === 'usePocketDistance') {
+                    renderHistory();
+                } else if (toggleDef.stateKey === 'useAdvancedCalculations' || toggleDef.stateKey === 'useDynamicTerminalNeighbourCount') {
+                    updateActivePredictionTypes();
+                    handleStrategyChange();
+                    const num1Val = parseInt(dom.number1.value, 10);
+                    const num2Val = parseInt(dom.number2.value, 10);
+                    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
+                    drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
+                } else {
+                    handleStrategyChange();
+                }
+            });
+        }
+    });
 }
 
 function attachAdvancedSettingsListeners() {
@@ -957,16 +953,21 @@ function attachAdvancedSettingsListeners() {
     if (dom.analyzeVideoButton) dom.analyzeVideoButton.addEventListener('click', startVideoAnalysis);
     if (dom.clearVideoButton) dom.clearVideoButton.addEventListener('click', clearVideoState);
 
-    // NEW: Category Toggle Listeners
+    // NEW: Category Toggle Listeners (these were already there but just for clarity)
     dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
     dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
 }
 
+// MODIFIED: attachGuideAndInfoListeners for new structure
 function attachGuideAndInfoListeners() {
     // Guide toggles
-    document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
-    document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
-    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
+    // Presets header no longer toggles guide content
+    // document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent')); // Removed
+
+    // New Strategies header toggle
+    document.getElementById('strategiesHeader').addEventListener('click', () => toggleGuide('strategiesContent'));
+    
+    // Advanced Settings header toggle
     document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
 
 
@@ -978,16 +979,13 @@ function attachGuideAndInfoListeners() {
         });
     }
 }
-// --- INITIALIZATION ---
+// MODIFIED: initializeUI to grab new DOM elements and render toggles
 export function initializeUI() {
     const elementIds = [
         'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
         'boardStateConclusion', 'historicalNumbersInput', 'imageUpload', 'imageUploadLabel',
         'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 'aiModelStatus', 'recalculateAnalysisButton',
-        'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
-        'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
-        'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
-        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
+        'videoUpload', 'videoUploadLabel',
         'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
         'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
         'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
@@ -997,13 +995,22 @@ export function initializeUI() {
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton',
-        // NEW: Add new category toggle IDs here
-        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
+        // New category toggle IDs
+        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
+        // New combined strategies section IDs
+        'strategiesHeader', 'strategiesContent', 'strategiesToggles', // Add this ID for the container of all strategy toggles
+        'presetsHeader' // Add this to grab the new presets header (though it doesn't toggle guide content)
     ];
+    // Add all individual toggle IDs to the list for DOM collection
+    strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id));
+
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
+    // NEW: Render strategy toggles before attaching their listeners
+    renderStrategyToggles();
+
     attachMainActionListeners();
-    attachToggleListeners();
+    attachToggleListeners(); // Now attaches to dynamically created toggles
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
     
@@ -1024,6 +1031,15 @@ export function initializeUI() {
             useWeightedZone: state.useWeightedZone,
             useNeighbourFocus: state.useNeighbourFocus,
             useTrendConfirmation: state.useTrendConfirmation,
+            // Pass all individual strategy toggles to the worker if they need to be fixed
+            usePocketDistance: state.usePocketDistance,
+            useLowestPocketDistance: state.useLowestPocketDistance,
+            useAdvancedCalculations: state.useAdvancedCalculations,
+            useDynamicStrategy: state.useDynamicStrategy,
+            useAdaptivePlay: state.useAdaptivePlay,
+            useTableChangeWarnings: state.useTableChangeWarnings,
+            useDueForHit: state.useDueForHit,
+            useLessStrict: state.useLessStrict,
         };
 
         optimizationWorker.postMessage({
