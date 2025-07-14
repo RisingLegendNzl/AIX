@@ -154,6 +154,8 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
 
 export function updateAllTogglesUI() {
     // Add a small timeout to ensure DOM is ready after dynamic rendering
+    // This timeout is technically not strictly needed anymore because of direct DOM reference storage,
+    // but leaving it as a safe guard doesn't hurt.
     setTimeout(() => {
         strategyTogglesDefinitions.forEach(toggleDef => {
             const toggleElement = dom[toggleDef.id]; // Get the element from the collected dom object
@@ -890,8 +892,19 @@ function renderStrategyToggles() {
             <div class="toggle-switch"><div class="toggle-knob"></div></div>
         `;
         togglesContainer.appendChild(labelElement);
+        // FIX: Directly store reference to the checkbox element in the dom object
+        // This is crucial for updateAllTogglesUI and attachToggleListeners
+        const checkbox = labelElement.querySelector(`#${toggleDef.id}`);
+        if (checkbox) dom[toggleDef.id] = checkbox;
     });
     dom.strategiesContent.appendChild(togglesContainer); // Append the toggles container to strategiesContent
+
+    // FIX: Store reference to the main toggle button for strategy descriptions
+    const strategyDescriptionsToggleButton = dom.strategiesContent.querySelector('#strategyDescriptionsToggleButton');
+    if (strategyDescriptionsToggleButton) dom.strategyDescriptionsToggleButton = strategyDescriptionsToggleButton;
+    // FIX: Store reference to the main content div for strategy descriptions
+    const strategyDescriptionsContent = dom.strategiesContent.querySelector('#strategyDescriptionsContent');
+    if (strategyDescriptionsContent) dom.strategyDescriptionsContent = strategyDescriptionsContent;
 }
 
 
@@ -1111,32 +1124,35 @@ export function initializeUI() {
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton',
         // New category toggle IDs
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
-        // New combined strategies section IDs
+        // New combined strategies section IDs (containers)
         'strategiesHeader', 'strategiesContent', // strategiesToggles is now a container within strategiesContent, not directly grabbed here
         'presetsHeader',
         // NEW: Nested dropdown IDs for strategy descriptions and its button
         'strategyDescriptionsHeader', 'strategyDescriptionsContent', 'strategyDescriptionsToggleButton' 
     ];
     // Add all individual toggle IDs to the list for DOM collection
-    strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id));
+    // This is now done by `renderStrategyToggles` directly populating `dom`
+    // strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id)); // REMOVED: This is no longer needed here
 
     // NEW: First, render all dynamic content to ensure elements are in the DOM
-    renderStrategyToggles(); // This populates strategiesContent and strategyDescriptionsContent
+    renderStrategyToggles(); // This populates strategiesContent and strategyDescriptionsContent, AND updates `dom` for toggles/button
 
     // FIX: Move the DOM element collection AFTER all dynamic content has been rendered
+    // This loop now primarily collects references to static elements and elements *rendered by renderStrategyToggles itself* (like the description button and content div)
+    // Toggles themselves are handled within renderStrategyToggles.
     elementIds.forEach(id => { 
         if(document.getElementById(id)) {
             dom[id] = document.getElementById(id);
         } else if (config.DEBUG_MODE) {
-            console.warn(`DOM element with ID ${id} not found during collection.`); // This warning is now expected if element isn't there, but helps debug if a critical one is missing.
+            console.warn(`DOM element with ID ${id} not found during collection. This might be expected for dynamically handled elements.`); // Added clarification
         }
     });
     
     // Now attach listeners and update UI
     attachMainActionListeners();
-    attachToggleListeners();
+    attachToggleListeners(); // Now attaches to dynamically created toggles
     attachAdvancedSettingsListeners();
-    attachGuideAndInfoListeners();
+    attachGuideAndInfoListeners(); // Attach listener to the new strategyDescriptionsToggleButton
     
     dom.startOptimizationButton.addEventListener('click', () => {
         if (state.history.length < 20) {
