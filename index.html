@@ -492,22 +492,6 @@
                     <h2 class="text-xl font-bold text-gray-700">Presets</h2>
                 </div>
                 <p class="text-sm text-gray-500 mt-2 mb-4">These presets are based on default strategy settings and provide a quick starting point.</p>
-                <div id="presetStrategyGuideContent" class="space-y-4">
-                    <div class="space-y-4">
-                        <div>
-                            <h4 class="font-bold text-gray-800">Highest Win Rate</h4>
-                            <p>Enables `Neighbour Score Weighting` and `Use Proximity Boost` while disabling all others. This mode plays every round and had the highest overall win rate (51.5%) based on simulations.</p>
-                        </div>
-                        <div>
-                            <h4 class="font-bold text-gray-800">Balanced & Safe</h4>
-                            <p>Enables all strategies in the disciplined 'Strict' mode. This provides a good win rate (48.9%) on the spins it plays by waiting for trend confirmation.</p>
-                        </div>
-                        <div>
-                            <h4 class="font-bold text-gray-800">Aggressive Signals</h4>
-                            <p>Enables all strategies and turns on `Less Strict Mode`. This uses the 'safe' logic but is much more likely to find and flag `(High Confidence)` opportunities.</p>
-                        </div>
-                    </div>
-                </div>
                 <div class="pt-4 grid grid-cols-1 md:grid-cols-3 gap-2">
                     <button id="setHighestWinRatePreset" class="btn btn-secondary text-sm">Highest Win Rate</button>
                     <button id="setBalancedSafePreset" class="btn btn-secondary text-sm">Balanced & Safe</button>
@@ -522,6 +506,8 @@
                 </div>
                 <div id="strategiesContent" class="strategy-guide-content">
                     <div class="space-y-4">
+                        <h3 class="font-bold text-gray-800 text-lg">Base Strategies</h3>
+                        <p class="text-sm text-gray-600">Fundamental toggles that define the core behavior of your prediction system.</p>
                         <div>
                             <h4 class="font-bold text-gray-800">Wait for Trend Confirmation</h4>
                             <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
@@ -546,6 +532,9 @@
                             <h4 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h4>
                             <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
                         </div>
+                    </div>
+                    <div class="space-y-4 mt-6"> <h3 class="font-bold text-gray-800 text-lg">Advanced Strategies</h3>
+                        <p class="text-sm text-gray-600">More complex and experimental strategies to fine-tune prediction behavior.</p>
                         <div>
                             <h4 class="font-bold text-gray-800">Dynamic Best Strategy</h4>
                             <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
@@ -575,9 +564,9 @@
                             <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
                         </div>
                     </div>
+                    <div class="pt-2 divide-y divide-gray-200" id="strategiesToggles">
+                        </div>
                 </div>
-                <div class="pt-2 divide-y divide-gray-200" id="strategiesToggles">
-                    </div>
             </div>
 
             <div class="card p-8">
