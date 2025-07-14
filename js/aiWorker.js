@@ -1,16 +1,14 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
-import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
+// **APPLIED FIX: Using importScripts for TensorFlow.js to address import/scoping issues in Web Worker**
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.js');
 
-// **APPLIED FIX: Initialize TensorFlow.js backend asynchronously**
-// Ensure TensorFlow.js is ready and set the backend
-tf.ready().then(() => {
-    tf.setBackend('cpu');
-    if (config.DEBUG_MODE) console.log('TensorFlow.js backend set to CPU in aiWorker.');
-}).catch(err => {
-    console.error('Failed to initialize TensorFlow.js backend in aiWorker:', err);
-    self.postMessage({ type: 'error', message: 'AI Model: Failed to initialize TensorFlow.js backend.' });
-});
+// Now 'tf' should be globally available in the worker's scope
+// (no 'import * as tf from' needed as it's a global script)
+
+// Set backend to CPU immediately after synchronous loading
+tf.setBackend('cpu');
+if (config.DEBUG_MODE) console.log('TensorFlow.js backend set to CPU in aiWorker via importScripts.');
 
 import * as config from './config.js';
 console.log('TensorFlow.js tf object in aiWorker:', tf); // Keep this for verification
