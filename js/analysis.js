@@ -1,3 +1,4 @@
+
 // js/analysis.js
 
 // --- IMPORTS ---
@@ -114,7 +115,7 @@ export function runAllAnalyses(winningNumber = null) {
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
         
-        ui.renderRecommendation(recommendation);
+        // ui.renderRecommendation(recommendation);
 
         if (state.history.length > 0 && state.history[state.history.length - 1].status === 'pending') {
             const lastItem = state.history[state.history.length - 1];
