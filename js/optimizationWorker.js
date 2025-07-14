@@ -195,6 +195,11 @@ async function runEvolution() {
     for (let i = 0; i < currentGaConfig.populationSize; i++) {
         population.push({ individual: createIndividual(), fitness: 0 });
     }
+
+    // --- ADDED LOGGING START ---
+    console.log(`Optimization Worker: Starting evolution with historyData length: ${historyData.length}`); // New log line
+    // --- ADDED LOGGING END ---
+
     try {
         while (isRunning && generationCount < currentGaConfig.maxGenerations) {
             generationCount++;
