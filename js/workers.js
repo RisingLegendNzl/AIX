@@ -61,6 +61,12 @@ export function initializeWorkers() {
             case 'stopped':
                 showOptimizationStopped();
                 break;
+            // --- ADDED THIS NEW CASE ---
+            case 'error':
+                const errorHtml = `<span style="color: #ef4444;"><strong>Error:</strong> ${payload.message}</span>`;
+                updateOptimizationStatus(errorHtml);
+                showOptimizationStopped(); // Also reset the buttons
+                break;
         }
     };
 }
