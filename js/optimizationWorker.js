@@ -1,4 +1,4 @@
-// js/optimizationWorker.js
+// optimizationWorker.js - Genetic Algorithm for Parameter Optimization
 
 // Corrected import paths for being inside the /js folder
 import * as shared from './shared-logic.js';
@@ -155,8 +155,8 @@ function calculateFitness(individual) {
         });
         const simItem = { ...rawItem };
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
-        simItem.recommendationDetails = recommendation.bestCandidate?.details || null; // Ensure details are copied if needed for later inspection
-        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        simItem.recommendationDetails = recommendation.bestCandidate?.details || null; 
+        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
         if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
             wins++;
         } else if (simItem.recommendedGroupId) {
@@ -174,15 +174,8 @@ function calculateFitness(individual) {
         simulatedHistory.push(simItem);
         if (simItem.winningNumber !== null) tempConfirmedWinsLog.push(simItem.winningNumber);
     }
-
-    // --- ADDED LOGGING START ---
-    console.log(`--- Optimization Worker Fitness Calculation ---`);
-    console.log(`Individual Params: ${JSON.stringify(individual)}`);
-    console.log(`Simulated Wins: ${wins}, Losses: ${losses}`);
-    console.log(`Calculated Fitness (W/L Ratio): ${losses === 0 ? (wins > 0 ? wins * 10 : 0) : (wins / losses)}`);
-    // console.log(`Final Adaptive Influences (Sim): ${JSON.stringify(localAdaptiveFactorInfluences)}`); // Uncomment if you want to inspect these for each individual
-    console.log(`-----------------------------------------------`);
-    // --- ADDED LOGGING END ---
+    
+    // Removed temporary debugging logs for Sim Wins/Losses/Ratio
 
     if (losses === 0) return wins > 0 ? wins * 10 : 0;
     return wins / losses;
@@ -197,9 +190,7 @@ async function runEvolution() {
         population.push({ individual: createIndividual(), fitness: 0 });
     }
 
-    // --- ADDED LOGGING START ---
-    console.log(`Optimization Worker: Starting evolution with historyData length: ${historyData.length}`); // New log line
-    // --- ADDED LOGGING END ---
+    // Removed temporary debugging log for historyData length
 
     try {
         while (isRunning && generationCount < currentGaConfig.maxGenerations) {
@@ -247,8 +238,7 @@ async function runEvolution() {
                     generation: generationCount,
                     bestFitness: population[0].fitness.toFixed(3),
                     bestIndividual: population[0].individual,
-                    // --- ADDED: Include the toggles used for this run ---
-                    togglesUsed: sharedData.toggles
+                    togglesUsed: sharedData.toggles // Include the toggles used for this run
                 }
             });
         }
