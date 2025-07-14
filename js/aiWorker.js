@@ -1,34 +1,46 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
-import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js';
+// Keep the module imports to ensure the library code executes and defines globals
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js';
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@4.20.0/dist/tf-layers.min.js';
 
 import * as config from './config.js';
 
-// **APPLIED FIX: New asynchronous initialization function for TensorFlow.js**
+// **APPLIED FIX: Access the global `tf` object from `self` and ensure async initialization**
+// Define tf here to be a reference to the global object.
+// We expect the CDN imports above to define a global `self.tf`
+const tf = self.tf;
+
+// If tf is still undefined here, then the CDN imports are truly not working as expected,
+// or there's a more fundamental issue.
+if (!tf) {
+    const errorMsg = 'TensorFlow.js global object (tf) is not defined after import. Cannot proceed.';
+    console.error(errorMsg);
+    self.postMessage({ type: 'error', message: `AI Model: ${errorMsg}` });
+    // It's critical to stop here if tf isn't available
+    throw new Error(errorMsg);
+}
+
 async function initTensorFlow() {
     try {
-        // Wait for TF.js to be fully ready before proceeding
-        await tf.ready(); // This call should now be reliable if tf.js-core is properly loaded.
+        // Now, `tf.ready()` should be available on the global `tf` object
+        await tf.ready();
 
-        // Optional: For better performance in production, enable production mode
-        tf.enableProdMode(); //
-
-        // Explicitly set backend to CPU for Web Worker compatibility
-        tf.setBackend('cpu'); //
+        tf.enableProdMode();
+        tf.setBackend('cpu');
         if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
     } catch (err) {
         console.error('Failed to initialize TensorFlow.js backend in aiWorker:', err);
         self.postMessage({ type: 'error', message: 'AI Model: Failed to initialize TensorFlow.js backend.' });
-        throw err; // Re-throw to propagate the error and potentially stop worker operations
+        throw err;
     }
 }
 
 // Call the initialization function immediately, and ensure other operations wait for it.
-// We will need to make changes to self.onmessage to await this.
 let tfInitializedPromise = initTensorFlow();
 
-console.log('TensorFlow.js tf object in aiWorker (after initial import):', tf); // Keep this for verification
+// The console log below will now show what `self.tf` contains.
+console.log('TensorFlow.js tf object in aiWorker (from self.tf):', tf);
 
 
 // --- ENSEMBLE CONFIGURATION ---
@@ -103,7 +115,7 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
         ];
     };
-    
+
     const featuresForScaling = validHistory.map(item => getFeatures(item));
     const newScaler = {
         min: Array(featuresForScaling[0].length).fill(Infinity),
@@ -131,13 +143,13 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     for (let i = 0; i < validHistory.length - SEQUENCE_LENGTH; i++) {
         const sequence = validHistory.slice(i, i + SEQUENCE_LENGTH);
         const targetItem = validHistory[i + SEQUENCE_LENGTH];
-        
+
         const xs_row = sequence.map(item => getFeatures(item).map((val, idx) => scaleFeature(val, idx)));
         rawFeatures.push(xs_row);
-        
+
         rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
         rawFailureLabels.push(failureModes.map(mode => (targetItem.failureMode === mode ? 1 : 0)));
-        
+
         // Create the label for streak lengths
         const streakLengthLabel = config.allPredictionTypes.map(type => {
             const streaks = historicalStreakData[type.id] || [];
@@ -163,20 +175,20 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
     const input = tf.input({ shape: inputShape });
     const lstmLayer = tf.layers.lstm({ units: lstmUnits, returnSequences: false, activation: 'relu' }).apply(input);
     const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
-    
+
     // Original outputs
     const groupOutput = tf.layers.dense({ units: groupOutputUnits, activation: 'sigmoid', name: 'group_output' }).apply(dropoutLayer);
     const failureOutput = tf.layers.dense({ units: failureOutputUnits, activation: 'softmax', name: 'failure_output' }).apply(dropoutLayer);
-    
+
     // New output for streak length prediction (regression)
     const streakOutput = tf.layers.dense({ units: streakOutputUnits, activation: 'relu', name: 'streak_output' }).apply(dropoutLayer);
 
     const model = tf.model({ inputs: input, outputs: [groupOutput, failureOutput, streakOutput] });
-    
+
     model.compile({
         optimizer: tf.train.adam(),
-        loss: { 
-            'group_output': 'binaryCrossentropy', 
+        loss: {
+            'group_output': 'binaryCrossentropy',
             'failure_output': 'categoricalCrossentropy',
             'streak_output': 'meanSquaredError' // MSE for regression
         },
@@ -215,9 +227,9 @@ async function trainEnsemble(historyData, historicalStreakData) {
         try {
             self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name}...` });
             if (member.model) member.model.dispose();
-            
+
             member.model = createMultiOutputLSTMModel([SEQUENCE_LENGTH, featureCount], groupLabelCount, failureLabelCount, streakLabelCount, member.lstmUnits);
-            
+
             await member.model.fit(xs, ys, {
                 epochs: member.epochs,
                 batchSize: member.batchSize,
@@ -255,9 +267,9 @@ async function predictWithEnsemble(historyData) {
     if (validHistory.length < SEQUENCE_LENGTH) return null;
 
     const lastSequence = validHistory.slice(-SEQUENCE_LENGTH);
-    
+
     const scaler = activeModels[0].scaler;
-    
+
     const getFeatures = (item) => {
         const props = getNumberProperties(item.winningNumber);
          return [
@@ -268,7 +280,7 @@ async function predictWithEnsemble(historyData) {
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
         ];
     };
-    
+
     const scaleFeature = (value, index) => {
         if (!scaler) return value;
         const featureMin = scaler.min[index];
@@ -293,11 +305,11 @@ async function predictWithEnsemble(historyData) {
             const groupProbs = await prediction[0].data();
             const failureProbs = await prediction[1].data();
             const streakPreds = await prediction[2].data(); // Get third output
-            
+
             groupProbs.forEach((p, i) => averagedGroupProbs[i] += p);
             failureProbs.forEach((p, i) => averagedFailureProbs[i] += p);
             streakPreds.forEach((p, i) => averagedStreakPreds[i] += p);
-            
+
             prediction[0].dispose();
             prediction[1].dispose();
             prediction[2].dispose(); // Dispose third output tensor
@@ -311,7 +323,7 @@ async function predictWithEnsemble(historyData) {
         config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
         config.allPredictionTypes.forEach((type, i) => finalResult.streakPredictions[type.id] = averagedStreakPreds[i]);
-        
+
         return finalResult;
 
     } catch (error) {
