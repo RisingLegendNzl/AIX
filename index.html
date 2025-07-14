@@ -488,11 +488,11 @@
             </div>
 
             <div class="card p-8">
-                <div id="presetStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Strategy Presets</h2>
-                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
+                <div id="presetsHeader" class="flex justify-between items-center">
+                    <h2 class="text-xl font-bold text-gray-700">Presets</h2>
                 </div>
-                <div id="presetStrategyGuideContent" class="strategy-guide-content">
+                <p class="text-sm text-gray-500 mt-2 mb-4">These presets are based on default strategy settings and provide a quick starting point.</p>
+                <div id="presetStrategyGuideContent" class="space-y-4">
                     <div class="space-y-4">
                         <div>
                             <h4 class="font-bold text-gray-800">Highest Win Rate</h4>
@@ -502,7 +502,7 @@
                             <h4 class="font-bold text-gray-800">Balanced & Safe</h4>
                             <p>Enables all strategies in the disciplined 'Strict' mode. This provides a good win rate (48.9%) on the spins it plays by waiting for trend confirmation.</p>
                         </div>
-                            <div>
+                        <div>
                             <h4 class="font-bold text-gray-800">Aggressive Signals</h4>
                             <p>Enables all strategies and turns on `Less Strict Mode`. This uses the 'safe' logic but is much more likely to find and flag `(High Confidence)` opportunities.</p>
                         </div>
@@ -516,145 +516,68 @@
             </div>
 
             <div class="card p-8">
-                <div id="baseStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Base Strategies</h2>
+                <div id="strategiesHeader" class="flex justify-between items-center cursor-pointer">
+                    <h2 class="text-xl font-bold text-gray-700">Strategies</h2>
                     <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
                 </div>
-                <div id="baseStrategyGuideContent" class="strategy-guide-content">
+                <div id="strategiesContent" class="strategy-guide-content">
                     <div class="space-y-4">
-                            <div>
-                                <h4 class="font-bold text-gray-800">Wait for Trend Confirmation</h4>
-                                <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Use Neighbour Score Weighting</h4>
-                                <p>When enabled, this makes the recommendation smarter. It boosts the score of states whose "hit zones" contain numbers that are currently "hot" in the "Neighbour Analysis" panel.</p>
-                            </div>
-                                <div>
-                                <h4 class="font-bold text-gray-800">Use Proximity Boost</h4>
-                                <p>When enabled, this gives a score boost to the state whose hit zone is physically closest on the roulette wheel to the last number spun, based on the theory of wheel "gravity".</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Show Pocket Distance in History</h4>
-                                <p>When enabled, each successful history entry will display the shortest "pocket distance" from the winning number to the successful prediction's hit zone.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Prioritize Lowest Pocket Distance</h4>
-                                <p>When enabled, the recommendation will prioritize the group(s) whose hit zone is closest (pocket distance 0 or 1) to the last confirmed winning number. This overrides other strategy weightings if a very close distance is found.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h4>
-                                <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
-                            </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Wait for Trend Confirmation</h4>
+                            <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
                         </div>
-                </div>
-                <div class="pt-2 divide-y divide-gray-200">
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Wait for Trend Confirmation</span>
-                        <input type="checkbox" id="trendConfirmationToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Use Neighbour Score Weighting</span>
-                        <input type="checkbox" id="weightedZoneToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Use Proximity Boost</span>
-                        <input type="checkbox" id="proximityBoostToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Show Pocket Distance</span>
-                        <input type="checkbox" id="pocketDistanceToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Prioritize Lowest Pocket Distance</span>
-                        <input type="checkbox" id="lowestPocketDistanceToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Enable Advanced Calculations</span>
-                        <input type="checkbox" id="advancedCalculationsToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                </div>
-            </div>
-            <div class="card p-8">
-                <div id="advancedStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Advanced Strategies</h2>
-                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
-                </div>
-                <div id="advancedStrategyGuideContent" class="strategy-guide-content">
-                    <div class="space-y-4">
-                            <div>
-                                <h4 class="font-bold text-gray-800">Dynamic Best Strategy</h4>
-                                <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Adaptive Play Signals</h4>
-                                <p>Provides more nuanced betting advice ('Strong Play', 'Wait', 'Avoid Now') based on the quality and risk of the current signal.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Table Change Warnings</h4>
-                                <p>Provides warnings when a previously strong pattern seems to be breaking, helping you avoid potential losing streaks.</p>
-                            </div>
-                                <div>
-                                <h4 class="font-bold text-gray-800">Due for a Hit (Contrarian)</h4>
-                                <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Neighbour Focus</h4>
-                                <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Less Strict Mode</h4>
-                                <p>When enabled, this relaxes the conditions for a "(High Confidence)" recommendation. It will be shown if the top state has a very high hit rate (over 60%) or a long winning streak (3 or more), removing the need for trend confirmation.</p>
-                            </div>
-                            <div>
-                                <h4 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h4>
-                                <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
-                            </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Use Neighbour Score Weighting</h4>
+                            <p>When enabled, this makes the recommendation smarter. It boosts the score of states whose "hit zones" contain numbers that are currently "hot" in the "Neighbour Analysis" panel.</p>
                         </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Use Proximity Boost</h4>
+                            <p>When enabled, this gives a score boost to the state whose hit zone is physically closest on the roulette wheel to the last number spun, based on the theory of wheel "gravity".</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Show Pocket Distance in History</h4>
+                            <p>When enabled, each successful history entry will display the shortest "pocket distance" from the winning number to the successful prediction's hit zone.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Prioritize Lowest Pocket Distance</h4>
+                            <p>When enabled, the recommendation will prioritize the group(s) whose hit zone is closest (pocket distance 0 or 1) to the last confirmed winning number. This overrides other strategy weightings if a very close distance is found.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h4>
+                            <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Dynamic Best Strategy</h4>
+                            <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Adaptive Play Signals</h4>
+                            <p>Provides more nuanced betting advice ('Strong Play', 'Wait', 'Avoid Now') based on the quality and risk of the current signal.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Table Change Warnings</h4>
+                            <p>Provides warnings when a previously strong pattern seems to be breaking, helping you avoid potential losing streaks.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Due for a Hit (Contrarian)</h4>
+                            <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Neighbour Focus</h4>
+                            <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Less Strict Mode</h4>
+                            <p>When enabled, this relaxes the conditions for a "(High Confidence)" recommendation. It will be shown if the top state has a very high hit rate (over 60%) or a long winning streak (3 or more), removing the need for trend confirmation.</p>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h4>
+                            <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="pt-2 divide-y divide-gray-200">
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Dynamic Best Strategy</span>
-                        <input type="checkbox" id="dynamicStrategyToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Adaptive Play Signals</span>
-                        <input type="checkbox" id="adaptivePlayToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Table Change Warnings</span>
-                        <input type="checkbox" id="tableChangeWarningsToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Due for a Hit (Contrarian)</span>
-                        <input type="checkbox" id="dueForHitToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Neighbour Focus</span>
-                        <input type="checkbox" id="neighbourFocusToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Less Strict Mode</span>
-                        <input type="checkbox" id="lessStrictModeToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                    <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Dynamic Terminal Neighbour Count</span>
-                        <input type="checkbox" id="dynamicTerminalNeighbourCountToggle" class="toggle-checkbox">
-                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
-                    </label>
-                </div>
+                <div class="pt-2 divide-y divide-gray-200" id="strategiesToggles">
+                    </div>
             </div>
 
             <div class="card p-8">
