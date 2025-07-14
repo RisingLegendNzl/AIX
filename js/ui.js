@@ -1,7 +1,8 @@
 // js/ui.js
 
 // --- IMPORTS ---
-import { getHitZone, calculateTrendStats } from '../shared-logic.js'; // Added calculateTrendStats
+// Added getBoardStateStats and calculatePocketDistance
+import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance } from '../shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
 // Import analysis functions that the UI will trigger
@@ -30,12 +31,15 @@ function toggleGuide(contentId) {
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
 /**
- * Renders the details of the active calculation groups, including streak confirmations.
- * @param {number} num1 - The first number from the input.
- * @param {number} num2 - The second number from the input.
- * @param {object} streaks - An object with current streak counts for each group.
+ * Renders the details of the active calculation groups, including streaks, hit rates, and pocket distance.
+ * @param {number} num1
+ * @param {number} num2
+ * @param {object} streaks
+ * @param {object} boardStats
+ * @param {number|null} lastWinningNumber
+ * @param {boolean} usePocketDistance
  */
-function renderCalculationDetails(num1, num2, streaks = {}) {
+function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, lastWinningNumber = null, usePocketDistance = false) {
     let detailsHtml = '<h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3><div class="space-y-2">';
 
     state.activePredictionTypes.forEach(type => {
@@ -47,17 +51,40 @@ function renderCalculationDetails(num1, num2, streaks = {}) {
 
         const terminals = config.terminalMapping?.[baseNum] || [];
         
-        // --- Confirmed by Streak Logic ---
+        // Confirmed by Streak Logic
         const streak = streaks[type.id] || 0;
         let confirmedByHtml = '';
         if (streak >= 2) {
             confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
         }
 
+        // Hit Rate & Pocket Distance Logic
+        const stats = boardStats[type.id] || { success: 0, total: 0 };
+        const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
+        let pocketDistanceHtml = '';
+
+        if (usePocketDistance && lastWinningNumber !== null) {
+            const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
+            let minDistance = Infinity;
+            if (hitZone.length > 0) {
+                hitZone.forEach(zoneNum => {
+                    const dist = calculatePocketDistance(zoneNum, lastWinningNumber, config.rouletteWheel);
+                    if (dist < minDistance) minDistance = dist;
+                });
+            }
+            if(minDistance !== Infinity) {
+                 pocketDistanceHtml = `<span>Dist: <strong>${minDistance}</strong></span>`;
+            }
+        }
+
         detailsHtml += `
             <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
                 <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
                 <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
+                <div class="group-stats">
+                    <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
+                    ${pocketDistanceHtml}
+                </div>
             </div>
         `;
     });
@@ -363,8 +390,8 @@ export function updateAiStatus(message) {
 // --- EVENT HANDLERS (Private to this module) ---
 
 /**
- * Handles the "Calculate" button click. Renders the calculation groups
- * and creates a new pending item in the history.
+ * Handles the "Calculate" button click. Gathers all necessary stats and renders
+ * the detailed calculation groups display.
  */
 function handleNewCalculation() {
     if (!dom.number1 || !dom.number2 || !dom.resultDisplay) return;
@@ -378,9 +405,12 @@ function handleNewCalculation() {
         return;
     }
 
-    // --- Get streak data before rendering ---
+    // --- Gather all necessary stats before rendering ---
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    renderCalculationDetails(num1Val, num2Val, trendStats.currentStreaks);
+    const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const lastWinningNumber = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+
+    renderCalculationDetails(num1Val, num2Val, trendStats.currentStreaks, boardStats, lastWinningNumber, state.usePocketDistance);
 
     const newHistoryItem = {
         id: Date.now(),
@@ -399,8 +429,7 @@ function handleNewCalculation() {
     state.history.push(newHistoryItem);
     runAllAnalyses(); // Run analysis to get recommendation for the new item
     renderHistory();
-    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
-    drawRouletteWheel(newHistoryItem.difference, lastWinning);
+    drawRouletteWheel(newHistoryItem.difference, lastWinningNumber);
 }
 
 /**
