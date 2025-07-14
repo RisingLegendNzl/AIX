@@ -795,79 +795,88 @@ export function initializeAdvancedSettingsUI() {
 
 // NEW: Function to render all strategy toggles and their guide text
 function renderStrategyToggles() {
-    if (!dom.strategiesContent) return; // strategiesToggles is now inside strategiesContent
+    if (!dom.strategiesContent) return; 
 
-    // Clear existing content from the main strategiesContent div
-    dom.strategiesContent.innerHTML = ''; 
-    
-    // Create the "What do these do?" header as a button and its associated content container
-    const descriptionsHeaderHtml = `
-        <button id="strategyDescriptionsToggleButton" class="btn btn-secondary text-sm px-3 py-1 rounded-md mt-2 mb-4">
-            <h3 class="font-bold text-gray-700 text-sm inline-block mr-2">What do these do?</h3>
-            <svg class="inline-block w-4 h-4 ml-1 -mt-0.5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-        </button>
-        <div id="strategyDescriptionsContent" class="strategy-guide-content space-y-4">
-            <h4 class="font-bold text-gray-800">Base Strategies</h4>
-            <p class="text-sm text-gray-600">Fundamental toggles that define the core behavior of your prediction system.</p>
+    dom.strategiesContent.innerHTML = ''; // Clear existing content
+
+    // Create the "What do these do?" button
+    const descriptionsToggleButton = document.createElement('button');
+    descriptionsToggleButton.id = "strategyDescriptionsToggleButton";
+    descriptionsToggleButton.className = "btn btn-secondary text-sm px-3 py-1 rounded-md mt-2 mb-4";
+    descriptionsToggleButton.innerHTML = `
+        <h3 class="font-bold text-gray-700 text-sm inline-block mr-2">What do these do?</h3>
+        <svg class="inline-block w-4 h-4 ml-1 -mt-0.5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+    `;
+    dom.strategiesContent.appendChild(descriptionsToggleButton);
+    // Store direct reference
+    dom.strategyDescriptionsToggleButton = descriptionsToggleButton;
+
+    // Create the strategy descriptions content div
+    const strategyDescriptionsContent = document.createElement('div');
+    strategyDescriptionsContent.id = "strategyDescriptionsContent";
+    strategyDescriptionsContent.className = "strategy-guide-content space-y-4"; // Initially hidden
+    strategyDescriptionsContent.innerHTML = `
+        <h4 class="font-bold text-gray-800">Base Strategies</h4>
+        <p class="text-sm text-gray-600">Fundamental toggles that define the core behavior of your prediction system.</p>
+        <div>
+            <h5 class="font-bold text-gray-800">Wait for Trend Confirmation</h5>
+            <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
+        </div>
+        <div>
+            <h5 class="font-bold text-gray-800">Use Neighbour Score Weighting</h5>
+            <p>When enabled, this makes the recommendation smarter. It boosts the score of states whose "hit zones" contain numbers that are currently "hot" in the "Neighbour Analysis" panel.</p>
+        </div>
+        <div>
+            <h5 class="font-bold text-gray-800">Use Proximity Boost</h5>
+            <p>When enabled, this gives a score boost to the state whose hit zone is physically closest on the roulette wheel to the last number spun, based on the theory of wheel "gravity".</p>
+        </div>
+        <div>
+            <h5 class="font-bold text-gray-800">Show Pocket Distance in History</h5>
+            <p>When enabled, each successful history entry will display the shortest "pocket distance" from the winning number to the successful prediction's hit zone.</p>
+        </div>
+        <div>
+            <h5 class="font-bold text-gray-800">Prioritize Lowest Pocket Distance</h5>
+            <p>When enabled, the recommendation will prioritize the group(s) whose hit zone is closest (pocket distance 0 or 1) to the last confirmed winning number. This overrides other strategy weightings if a very close distance is found.</p>
+        </div>
+        <div>
+            <h5 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h5>
+            <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
+        </div>
+        <div class="space-y-4 mt-6">
+            <h4 class="font-bold text-gray-800">Advanced Strategies</h4>
+            <p class="text-sm text-gray-600">More complex and experimental strategies to fine-tune prediction behavior.</p>
             <div>
-                <h5 class="font-bold text-gray-800">Wait for Trend Confirmation</h5>
-                <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
+                <h5 class="font-bold text-gray-800">Dynamic Best Strategy</h5>
+                <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
             </div>
             <div>
-                <h5 class="font-bold text-gray-800">Use Neighbour Score Weighting</h5>
-                <p>When enabled, this makes the recommendation smarter. It boosts the score of states whose "hit zones" contain numbers that are currently "hot" in the "Neighbour Analysis" panel.</p>
+                <h5 class="font-bold text-gray-800">Adaptive Play Signals</h5>
+                <p>Provides more nuanced betting advice ('Strong Play', 'Wait', 'Avoid Now') based on the quality and risk of the current signal.</p>
+                </div>
+            <div>
+                <h5 class="font-bold text-gray-800">Table Change Warnings</h5>
+                <p>Provides warnings when a previously strong pattern seems to be breaking, helping you avoid potential losing streaks.</p>
             </div>
             <div>
-                <h5 class="font-bold text-gray-800">Use Proximity Boost</h5>
-                <p>When enabled, this gives a score boost to the state whose hit zone is physically closest on the roulette wheel to the last number spun, based on the theory of wheel "gravity".</p>
+                <h5 class="font-bold text-gray-800">Due for a Hit (Contrarian)</h5>
+                <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
             </div>
             <div>
-                <h5 class="font-bold text-gray-800">Show Pocket Distance in History</h5>
-                <p>When enabled, each successful history entry will display the shortest "pocket distance" from the winning number to the successful prediction's hit zone.</p>
+                <h5 class="font-bold text-gray-800">Neighbour Focus</h5>
+                <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
             </div>
             <div>
-                <h5 class="font-bold text-gray-800">Prioritize Lowest Pocket Distance</h5>
-                <p>When enabled, the recommendation will prioritize the group(s) whose hit zone is closest (pocket distance 0 or 1) to the last confirmed winning number. This overrides other strategy weightings if a very close distance is found.</p>
+                <h5 class="font-bold text-gray-800">Less Strict Mode</h5>
+                <p>When enabled, this relaxes the conditions for a "(High Confidence)" recommendation. It will be shown if the top state has a very high hit rate (over 60%) or a long winning streak (3 or more), removing the need for trend confirmation.</p>
             </div>
             <div>
-                <h5 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h5>
-                <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
-            </div>
-            <div class="space-y-4 mt-6">
-                <h4 class="font-bold text-gray-800">Advanced Strategies</h4>
-                <p class="text-sm text-gray-600">More complex and experimental strategies to fine-tune prediction behavior.</p>
-                <div>
-                    <h5 class="font-bold text-gray-800">Dynamic Best Strategy</h5>
-                    <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
-                </div>
-                <div>
-                    <h5 class="font-bold text-gray-800">Adaptive Play Signals</h5>
-                    <p>Provides more nuanced betting advice ('Strong Play', 'Wait', 'Avoid Now') based on the quality and risk of the current signal.</p>
-                </div>
-                <div>
-                    <h5 class="font-bold text-gray-800">Table Change Warnings</h5>
-                    <p>Provides warnings when a previously strong pattern seems to be breaking, helping you avoid potential losing streaks.</p>
-                </div>
-                <div>
-                    <h5 class="font-bold text-gray-800">Due for a Hit (Contrarian)</h5>
-                    <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
-                </div>
-                <div>
-                    <h5 class="font-bold text-gray-800">Neighbour Focus</h5>
-                    <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
-                </div>
-                <div>
-                    <h5 class="font-bold text-gray-800">Less Strict Mode</h5>
-                    <p>When enabled, this relaxes the conditions for a "(High Confidence)" recommendation. It will be shown if the top state has a very high hit rate (over 60%) or a long winning streak (3 or more), removing the need for trend confirmation.</p>
-                </div>
-                <div>
-                    <h5 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h5>
-                    <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
-                </div>
+                <h5 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h5>
+                <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
             </div>
         </div>
     `;
-    dom.strategiesContent.innerHTML += descriptionsHeaderHtml; // Append the new descriptions header and content
+    dom.strategiesContent.appendChild(strategyDescriptionsContent);
+    dom.strategyDescriptionsContent = strategyDescriptionsContent; // Store direct reference
 
     // Create a div for the actual toggles (pt-2 divide-y divide-gray-200)
     const togglesContainer = document.createElement('div');
@@ -893,18 +902,10 @@ function renderStrategyToggles() {
         `;
         togglesContainer.appendChild(labelElement);
         // FIX: Directly store reference to the checkbox element in the dom object
-        // This is crucial for updateAllTogglesUI and attachToggleListeners
         const checkbox = labelElement.querySelector(`#${toggleDef.id}`);
         if (checkbox) dom[toggleDef.id] = checkbox;
     });
-    dom.strategiesContent.appendChild(togglesContainer); // Append the toggles container to strategiesContent
-
-    // FIX: Store reference to the main toggle button for strategy descriptions
-    const strategyDescriptionsToggleButton = dom.strategiesContent.querySelector('#strategyDescriptionsToggleButton');
-    if (strategyDescriptionsToggleButton) dom.strategyDescriptionsToggleButton = strategyDescriptionsToggleButton;
-    // FIX: Store reference to the main content div for strategy descriptions
-    const strategyDescriptionsContent = dom.strategiesContent.querySelector('#strategyDescriptionsContent');
-    if (strategyDescriptionsContent) dom.strategyDescriptionsContent = strategyDescriptionsContent;
+    dom.strategiesContent.appendChild(togglesContainer);
 }
 
 
@@ -1025,7 +1026,9 @@ function attachMainActionListeners() {
 // MODIFIED: attachToggleListeners to loop through the new strategyTogglesDefinitions
 function attachToggleListeners() {
     strategyTogglesDefinitions.forEach(toggleDef => {
-        if (dom[toggleDef.id]) { // Ensure the DOM element exists
+        // FIX: Ensure the DOM element is actually found in `dom` before attaching listener
+        // This relies on `renderStrategyToggles` populating `dom[toggleDef.id]` directly.
+        if (dom[toggleDef.id]) { 
             dom[toggleDef.id].addEventListener('change', () => {
                 const newToggleStates = { ...state };
                 newToggleStates[toggleDef.stateKey] = dom[toggleDef.id].checked;
@@ -1068,8 +1071,12 @@ function attachAdvancedSettingsListeners() {
     if (dom.clearVideoButton) dom.clearVideoButton.addEventListener('click', clearVideoState);
 
     // NEW: Category Toggle Listeners (these were already there but just for clarity)
-    dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
-    dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
+    if (dom.optimizeCoreStrategyToggle) { // Check for existence
+        dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
+    }
+    if (dom.optimizeAdaptiveRatesToggle) { // Check for existence
+        dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
+    }
 }
 
 // MODIFIED: attachGuideAndInfoListeners for new structure
@@ -1088,7 +1095,7 @@ function attachGuideAndInfoListeners() {
     }
     
     // NEW: Listener for the nested "What do these do?" button inside Strategies
-    if (dom.strategyDescriptionsToggleButton) { 
+    if (dom.strategyDescriptionsToggleButton) { // Use the new button ID
         dom.strategyDescriptionsToggleButton.addEventListener('click', () => toggleGuide('strategyDescriptionsContent'));
     }
 
@@ -1122,37 +1129,37 @@ export function initializeUI() {
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton',
-        // New category toggle IDs
+        // New category toggle IDs (for optimization toggles)
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
         // New combined strategies section IDs (containers)
-        'strategiesHeader', 'strategiesContent', // strategiesToggles is now a container within strategiesContent, not directly grabbed here
+        'strategiesHeader', 'strategiesContent', // strategiesToggles is dynamically created and appended
         'presetsHeader',
         // NEW: Nested dropdown IDs for strategy descriptions and its button
         'strategyDescriptionsHeader', 'strategyDescriptionsContent', 'strategyDescriptionsToggleButton' 
     ];
-    // Add all individual toggle IDs to the list for DOM collection
-    // This is now done by `renderStrategyToggles` directly populating `dom`
-    // strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id)); // REMOVED: This is no longer needed here
+    // strategyTogglesDefinitions are no longer pushed to elementIds for dom collection as they are handled directly below.
 
     // NEW: First, render all dynamic content to ensure elements are in the DOM
-    renderStrategyToggles(); // This populates strategiesContent and strategyDescriptionsContent, AND updates `dom` for toggles/button
+    // This function now also populates `dom` with references to the dynamically created toggles and button.
+    renderStrategyToggles(); 
 
-    // FIX: Move the DOM element collection AFTER all dynamic content has been rendered
-    // This loop now primarily collects references to static elements and elements *rendered by renderStrategyToggles itself* (like the description button and content div)
-    // Toggles themselves are handled within renderStrategyToggles.
+    // FIX: This loop now primarily collects references to static elements and those dynamically created elements
+    // whose references were *not* already explicitly stored by renderStrategyToggles.
     elementIds.forEach(id => { 
         if(document.getElementById(id)) {
             dom[id] = document.getElementById(id);
         } else if (config.DEBUG_MODE) {
-            console.warn(`DOM element with ID ${id} not found during collection. This might be expected for dynamically handled elements.`); // Added clarification
+            // This warning is now expected for elements whose references are handled directly within renderStrategyToggles.
+            // For other elements, it helps debug if a critical static one is missing.
+            console.warn(`DOM element with ID ${id} not found during collection. This might be expected for dynamically handled elements.`);
         }
     });
     
     // Now attach listeners and update UI
     attachMainActionListeners();
-    attachToggleListeners(); // Now attaches to dynamically created toggles
+    attachToggleListeners(); // Attaches to dynamically created toggles (dom references now guaranteed)
     attachAdvancedSettingsListeners();
-    attachGuideAndInfoListeners(); // Attach listener to the new strategyDescriptionsToggleButton
+    attachGuideAndInfoListeners(); // Attach listener to the new strategyDescriptionsToggleButton (dom reference now guaranteed)
     
     dom.startOptimizationButton.addEventListener('click', () => {
         if (state.history.length < 20) {
