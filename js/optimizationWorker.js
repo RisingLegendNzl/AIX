@@ -175,8 +175,6 @@ function calculateFitness(individual) {
         if (simItem.winningNumber !== null) tempConfirmedWinsLog.push(simItem.winningNumber);
     }
     
-    // Removed temporary debugging logs for Sim Wins/Losses/Ratio
-
     if (losses === 0) return wins > 0 ? wins * 10 : 0;
     return wins / losses;
 }
@@ -190,8 +188,6 @@ async function runEvolution() {
         population.push({ individual: createIndividual(), fitness: 0 });
     }
 
-    // Removed temporary debugging log for historyData length
-
     try {
         while (isRunning && generationCount < currentGaConfig.maxGenerations) {
             generationCount++;
@@ -202,12 +198,6 @@ async function runEvolution() {
             if (!isRunning) return;
             population.sort((a, b) => b.fitness - a.fitness);
             
-            // --- ADDED DEBUG LOG ---
-            if (config.DEBUG_MODE) { // Only log in debug mode
-                console.log(`Optimization Worker: Sending progress. Generation: ${generationCount}, MaxGen: ${currentGaConfig.maxGenerations}, PopSize: ${currentGaConfig.populationSize}, Processed: ${generationCount * currentGaConfig.populationSize}`);
-            }
-            // --- END ADDED DEBUG LOG ---
-
             self.postMessage({
                 type: 'progress',
                 payload: {
@@ -246,7 +236,7 @@ async function runEvolution() {
                     generation: generationCount,
                     bestFitness: population[0].fitness.toFixed(3),
                     bestIndividual: population[0].individual,
-                    togglesUsed: sharedData.toggles
+                    togglesUsed: sharedData.toggles // Include the toggles used for this run
                 }
             });
         }
