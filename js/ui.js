@@ -145,7 +145,7 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
 export function updateAllTogglesUI() {
     // Update individual toggle states based on state.js
     strategyTogglesDefinitions.forEach(toggleDef => {
-        if (dom[toggleDef.id]) {
+        if (dom[toggleDef.id]) { // Ensure the DOM element exists before trying to set checked
             dom[toggleDef.id].checked = state[toggleDef.stateKey];
         }
     });
@@ -699,7 +699,7 @@ function handlePresetSelection(presetName) {
     Object.assign(config.ADAPTIVE_LEARNING_RATES, preset.ADAPTIVE_LEARNING_RATES);
     state.setToggles(preset.TOGGLES);
 
-    updateAllTogglesUI();
+    updateAllTogglesUI(); // This will now correctly update the dynamically rendered toggles
     initializeAdvancedSettingsUI();
     updateActivePredictionTypes();
     handleStrategyChange();
@@ -776,11 +776,81 @@ export function initializeAdvancedSettingsUI() {
     createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
 }
 
-// NEW: Function to render all strategy toggles
+// NEW: Function to render all strategy toggles and their guide text
 function renderStrategyToggles() {
-    if (!dom.strategiesToggles) return;
-    dom.strategiesToggles.innerHTML = ''; // Clear existing toggles
+    if (!dom.strategiesContent || !dom.strategiesToggles) return;
 
+    // Clear existing toggles and guide content
+    dom.strategiesContent.innerHTML = ''; 
+    
+    // Add Base Strategies guide content
+    dom.strategiesContent.innerHTML += `
+        <div class="space-y-4">
+            <h3 class="font-bold text-gray-800 text-lg">Base Strategies</h3>
+            <p class="text-sm text-gray-600">Fundamental toggles that define the core behavior of your prediction system.</p>
+            <div>
+                <h4 class="font-bold text-gray-800">Wait for Trend Confirmation</h4>
+                <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Use Neighbour Score Weighting</h4>
+                <p>When enabled, this makes the recommendation smarter. It boosts the score of states whose "hit zones" contain numbers that are currently "hot" in the "Neighbour Analysis" panel.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Use Proximity Boost</h4>
+                <p>When enabled, this gives a score boost to the state whose hit zone is physically closest on the roulette wheel to the last number spun, based on the theory of wheel "gravity".</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Show Pocket Distance in History</h4>
+                <p>When enabled, each successful history entry will display the shortest "pocket distance" from the winning number to the successful prediction's hit zone.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Prioritize Lowest Pocket Distance</h4>
+                <p>When enabled, the recommendation will prioritize the group(s) whose hit zone is closest (pocket distance 0 or 1) to the last confirmed winning number. This overrides other strategy weightings if a very close distance is found.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h4>
+                <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
+            </div>
+        </div>
+        <div class="space-y-4 mt-6">
+            <h3 class="font-bold text-gray-800 text-lg">Advanced Strategies</h3>
+            <p class="text-sm text-gray-600">More complex and experimental strategies to fine-tune prediction behavior.</p>
+            <div>
+                <h4 class="font-bold text-gray-800">Dynamic Best Strategy</h4>
+                <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Adaptive Play Signals</h4>
+                <p>Provides more nuanced betting advice ('Strong Play', 'Wait', 'Avoid Now') based on the quality and risk of the current signal.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Table Change Warnings</h4>
+                <p>Provides warnings when a previously strong pattern seems to be breaking, helping you avoid potential losing streaks.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Due for a Hit (Contrarian)</h4>
+                <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Neighbour Focus</h4>
+                <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Less Strict Mode</h4>
+                <p>When enabled, this relaxes the conditions for a "(High Confidence)" recommendation. It will be shown if the top state has a very high hit rate (over 60%) or a long winning streak (3 or more), removing the need for trend confirmation.</p>
+            </div>
+            <div>
+                <h4 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h4>
+                <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
+            </div>
+        </div>
+    `;
+
+    // Create a div for the actual toggles (pt-2 divide-y divide-gray-200)
+    const togglesContainer = document.createElement('div');
+    togglesContainer.className = 'pt-2 divide-y divide-gray-200';
+    
     strategyTogglesDefinitions.forEach(toggleDef => {
         const labelElement = document.createElement('label');
         labelElement.className = 'toggle-label';
@@ -789,8 +859,9 @@ function renderStrategyToggles() {
             <input type="checkbox" id="${toggleDef.id}" class="toggle-checkbox">
             <div class="toggle-switch"><div class="toggle-knob"></div></div>
         `;
-        dom.strategiesToggles.appendChild(labelElement);
+        togglesContainer.appendChild(labelElement);
     });
+    dom.strategiesContent.appendChild(togglesContainer); // Append the toggles container to strategiesContent
 }
 
 
@@ -963,12 +1034,20 @@ function attachGuideAndInfoListeners() {
     // Guide toggles
     // Presets header no longer toggles guide content
     // document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent')); // Removed
+    if (dom.presetsHeader) { // Ensure presetsHeader exists to avoid error if HTML is not loaded yet
+        // No click listener needed for presetsHeader as it's not collapsible
+    }
+
 
     // New Strategies header toggle
-    document.getElementById('strategiesHeader').addEventListener('click', () => toggleGuide('strategiesContent'));
+    if (dom.strategiesHeader) { // Ensure strategiesHeader exists
+        dom.strategiesHeader.addEventListener('click', () => toggleGuide('strategiesContent'));
+    }
     
     // Advanced Settings header toggle
-    document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+    if (dom.advancedSettingsHeader) { // Ensure advancedSettingsHeader exists
+        dom.advancedSettingsHeader.addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+    }
 
 
     // History Info Dropdown
@@ -998,7 +1077,7 @@ export function initializeUI() {
         // New category toggle IDs
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
         // New combined strategies section IDs
-        'strategiesHeader', 'strategiesContent', 'strategiesToggles', // Add this ID for the container of all strategy toggles
+        'strategiesHeader', 'strategiesContent', 'strategiesToggles',
         'presetsHeader' // Add this to grab the new presets header (though it doesn't toggle guide content)
     ];
     // Add all individual toggle IDs to the list for DOM collection
