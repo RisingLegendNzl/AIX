@@ -1,8 +1,6 @@
-
 // js/analysis.js
 
 // --- IMPORTS ---
-// js/analysis.js
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from '../shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
@@ -10,6 +8,41 @@ import * as ui from './ui.js';
 import { aiWorker } from './workers.js';
 
 // --- ANALYSIS FUNCTIONS ---
+
+/**
+ * Asynchronously gets a prediction from the AI worker.
+ * @param {Array} history - The current history to send for prediction.
+ * @returns {Promise<object|null>} A promise that resolves with the prediction data or null.
+ */
+function getAiPrediction(history) {
+    // Immediately return null if the AI isn't ready, to prevent delays.
+    if (!state.isAiReady || !aiWorker) {
+        return Promise.resolve(null);
+    }
+
+    // This Promise will "wrap" the message passing, making it easy to await.
+    return new Promise((resolve) => {
+        const timeout = 1000; // 1-second timeout
+
+        const timer = setTimeout(() => {
+            aiWorker.removeEventListener('message', tempListener);
+            console.warn('AI prediction timed out.');
+            resolve(null); // Resolve with null if it takes too long
+        }, timeout);
+
+        const tempListener = (event) => {
+            if (event.data.type === 'predictionResult') {
+                clearTimeout(timer); // Cancel the timeout
+                aiWorker.removeEventListener('message', tempListener);
+                resolve(event.data.probabilities);
+            }
+        };
+
+        aiWorker.addEventListener('message', tempListener);
+        aiWorker.postMessage({ type: 'predict', payload: { history } });
+    });
+}
+
 
 export function labelHistoryFailures(sortedHistory) {
     let lastSuccessfulType = null;
@@ -51,7 +84,6 @@ function runSimulationOnHistory(spinsToProcess) {
         const winningNumber = spinsToProcess[i];
         
         const trendStats = calculateTrendStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-        // **TYPO FIXED HERE**
         const boardStats = getBoardStateStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
         const neighbourScores = runSharedNeighbourAnalysis(localHistory, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
 
@@ -87,14 +119,13 @@ function runSimulationOnHistory(spinsToProcess) {
     return localHistory;
 }
 
-export function runAllAnalyses(winningNumber = null) {
+export async function runAllAnalyses(winningNumber = null) {
     state.saveState();
 
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
 
-    // Call UI functions instead of direct DOM manipulation
     ui.renderAnalysisList(neighbourScores);
     ui.renderStrategyWeights();
     ui.renderBoardState(boardStats);
@@ -103,34 +134,41 @@ export function runAllAnalyses(winningNumber = null) {
     const num2Val = parseInt(document.getElementById('number2').value, 10);
 
     if (!isNaN(num1Val) && !isNaN(num2Val)) {
+        // --- Get AI Prediction ---
+        ui.updateAiStatus('AI Model: Getting prediction...');
+        const aiPredictionData = await getAiPrediction(state.history);
+        ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
+
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+        
+        // --- Pass prediction data to the recommendation engine ---
         const recommendation = getRecommendation({
             trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
-            isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: state.adaptiveFactorInfluences,
+            isForWeightUpdate: false, 
+            aiPredictionData, // <-- Pass the awaited data here
+            currentAdaptiveInfluences: state.adaptiveFactorInfluences,
             lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
-            useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady, useTrendConfirmationBool: state.useTrendConfirmation,
+            useNeighbourFocusBool: state.useNeighbourFocus, 
+            isAiReadyBool: state.isAiReady, // <-- Pass the readiness state
+            useTrendConfirmationBool: state.useTrendConfirmation,
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
-        
-        // ui.renderRecommendation(recommendation);
 
-        if (state.history.length > 0 && state.history[state.history.length - 1].status === 'pending') {
-            const lastItem = state.history[state.history.length - 1];
-            lastItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
-            lastItem.recommendationDetails = recommendation.details;
+        const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending');
+        if (lastPendingItem) {
+            lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+            lastPendingItem.recommendationDetails = recommendation.details;
 
-            // If a winning number was provided, evaluate the pending item immediately
             if (winningNumber !== null) {
-                evaluateCalculationStatus(lastItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+                evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
 
-                // If the winning number was successfully added, update the log
-                if (lastItem.winningNumber !== null) {
+                if (lastPendingItem.winningNumber !== null) {
                     const newLog = state.history
                         .filter(item => item.winningNumber !== null)
-                        .sort((a, b) => a.id - b.id) // ensure chronological order
+                        .sort((a, b) => a.id - b.id)
                         .map(item => item.winningNumber);
                     state.setConfirmedWinsLog(newLog);
                 }
@@ -178,7 +216,7 @@ export async function handleHistoricalAnalysis() {
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
-    runAllAnalyses();
+    await runAllAnalyses();
     ui.renderHistory();
     ui.drawRouletteWheel();
     
@@ -202,7 +240,7 @@ export async function handleHistoricalAnalysis() {
     }
 }
 
-export function handleStrategyChange() {
+export async function handleStrategyChange() {
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
     if (currentWinningNumbers.length >= 3) {
@@ -212,7 +250,7 @@ export function handleStrategyChange() {
         labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     }
     
-    runAllAnalyses();
+    await runAllAnalyses();
     ui.renderHistory();
 
     const num1Val = parseInt(document.getElementById('number1').value, 10);
