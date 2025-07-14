@@ -112,6 +112,10 @@ function runSimulationOnHistory(spinsToProcess) {
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
+        // --- ADDED LOGGING START ---
+        console.log(`Analysis SimItem - ID: ${newHistoryItem.id}, Reco: ${newHistoryItem.recommendedGroupId}, WinNum: ${newHistoryItem.winningNumber}, HitTypes: ${JSON.stringify(newHistoryItem.hitTypes)}, Status: ${newHistoryItem.status}`);
+        // --- ADDED LOGGING END ---
+
         // Update wins/losses for this specific simulation run
         if (newHistoryItem.recommendedGroupId && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
             wins++;
