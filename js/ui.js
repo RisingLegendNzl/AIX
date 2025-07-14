@@ -2,7 +2,7 @@
 
 // --- IMPORTS ---
 // Added getBoardStateStats and calculatePocketDistance
-import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance } from './shared-logic.js';
+import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
 // Import analysis functions that the UI will trigger
@@ -39,6 +39,8 @@ function toggleGuide(contentId) {
  * @param {number|null} lastWinningNumber
  * @param {boolean} usePocketDistance
  */
+// NOTE: This function is now mostly absorbed into handleNewCalculation for direct rendering.
+// Keeping it here for reference or if parts are still needed elsewhere.
 function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, lastWinningNumber = null, usePocketDistance = false) {
     let detailsHtml = '<h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3><div class="space-y-2">';
 
@@ -90,7 +92,7 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
     });
 
     detailsHtml += '</div>';
-    dom.resultDisplay.innerHTML = detailsHtml;
+    // dom.resultDisplay.innerHTML = detailsHtml; // This line is removed as it's now part of fullResultHtml
     dom.resultDisplay.classList.remove('hidden');
 }
 
@@ -405,19 +407,18 @@ function handleNewCalculation() {
         return;
     }
 
-    // --- Gather all necessary stats before rendering ---
+    // --- Gather all necessary stats before calling getRecommendation ---
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); // Need this for recommendation
     const lastWinningNumber = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
-
-    renderCalculationDetails(num1Val, num2Val, trendStats.currentStreaks, boardStats, lastWinningNumber, state.usePocketDistance);
 
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
         num2: num2Val,
         difference: Math.abs(num2Val - num1Val),
-        status: 'pending',
+        status: 'pending', // Initially pending
         hitTypes: [],
         typeSuccessStatus: {},
         winningNumber: null,
@@ -425,12 +426,94 @@ function handleNewCalculation() {
         recommendedGroupId: null,
         recommendationDetails: null
     };
+    state.history.push(newHistoryItem); // Add to history before getting recommendation so it's part of context
 
-    state.history.push(newHistoryItem);
-    runAllAnalyses(); // Run analysis to get recommendation for the new item
+    // --- Get the recommendation immediately for display ---
+    // Note: getAiPrediction is async, but for initial display, we'll get sync recommendation
+    // The AI prediction part will update it later in runAllAnalyses().
+    const aiPredictionData = null; // AI prediction will come later via runAllAnalyses
+    const recommendation = getRecommendation({
+        trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
+        isForWeightUpdate: false, aiPredictionData: aiPredictionData, currentAdaptiveInfluences: state.adaptiveFactorInfluences,
+        lastWinningNumber: lastWinningNumber, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
+        useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady,
+        useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: state.history,
+        activePredictionTypes: state.activePredictionTypes,
+        useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
+        terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
+    });
+
+    // Store recommendation in the history item immediately
+    newHistoryItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+    newHistoryItem.recommendationDetails = recommendation.details;
+
+    // Build the full result HTML, starting with the main recommendation
+    let fullResultHtml = `
+        <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
+        <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
+            ${recommendation.html}
+        </div>
+        <h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3>
+        <div class="space-y-2">
+    `;
+
+    // Now append the details for each prediction type (from renderCalculationDetails's logic)
+    state.activePredictionTypes.forEach(type => {
+        const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
+        if (!predictionTypeDefinition) return;
+
+        const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val); // Use num1Val, num2Val directly
+        if (baseNum < 0 || baseNum > 36) return;
+
+        const terminals = config.terminalMapping?.[baseNum] || [];
+        
+        const streak = trendStats.currentStreaks[type.id] || 0;
+        let confirmedByHtml = '';
+        if (streak >= 2) {
+            confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
+        }
+
+        const stats = boardStats[type.id] || { success: 0, total: 0 };
+        const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
+        let pocketDistanceHtml = '';
+
+        if (state.usePocketDistance && lastWinningNumber !== null) {
+            const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
+            let minDistance = Infinity;
+            if (hitZone.length > 0) {
+                hitZone.forEach(zoneNum => {
+                    const dist = calculatePocketDistance(zoneNum, lastWinningNumber, config.rouletteWheel);
+                    if (dist < minDistance) minDistance = dist;
+                });
+            }
+            if(minDistance !== Infinity) {
+                 pocketDistanceHtml = `<span class="text-pink-500">Dist: <strong>${minDistance}</strong></span>`;
+            }
+        }
+
+        fullResultHtml += `
+            <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
+                <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
+                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
+                <div class="group-stats">
+                    <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
+                    ${pocketDistanceHtml}
+                </div>
+            </div>
+        `;
+    });
+
+    fullResultHtml += '</div>'; // Close the space-y-2 div
+    dom.resultDisplay.innerHTML = fullResultHtml;
+    dom.resultDisplay.classList.remove('hidden');
+
+    // Trigger full analysis for other UI elements (like AI prediction, history updates etc.)
+    runAllAnalyses();
     renderHistory();
     drawRouletteWheel(newHistoryItem.difference, lastWinningNumber);
 }
+
 
 /**
  * Handles the "Submit Result" button click. Evaluates the last pending
