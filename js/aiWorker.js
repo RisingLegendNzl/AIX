@@ -1,10 +1,10 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
 // Keep the module imports to ensure the library code executes and defines globals
-import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js';
-import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@4.20.0/dist/tf-layers.min.js';
-// **APPLIED FIX: Import the CPU backend**
-import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@4.20.0/dist/tf-backend-cpu.min.js';
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@latest/dist/tf-core.min.js';
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@latest/dist/tf-layers.min.js';
+// APPLIED FIX: Import the CPU backend
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@latest/dist/tf-backend-cpu.min.js';
 
 
 import * as config from './config.js';
@@ -169,7 +169,13 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
 // Function to create model, now with a third output for streaks
 function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputUnits, streakOutputUnits, lstmUnits) {
     const input = tf.input({ shape: inputShape });
-    const lstmLayer = tf.layers.lstm({ units: lstmUnits, returnSequences: false, activation: 'relu' }).apply(input);
+    const lstmLayer = tf.layers.lstm({
+        units: lstmUnits,
+        returnSequences: false,
+        activation: 'relu',
+        // **APPLIED FIX: Explicitly set kernelInitializer for LSTM**
+        kernelInitializer: 'glorotUniform'
+    }).apply(input);
     const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
 
     // Original outputs
