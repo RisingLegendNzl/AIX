@@ -62,8 +62,8 @@ initializeWorkers();
 analysis.runAllAnalyses();
 ui.renderHistory();
 
-// 5. Initialize the AI with historical data if available
-analysis.initializeAiWithHistory();
+// 5. Initialize the AI worker correctly, giving it time to load its resources
+analysis.initializeAi();
 
 // Read initial values directly for startup sequence
 const initialNum1 = parseInt(document.getElementById('number1').value, 10);
