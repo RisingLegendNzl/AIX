@@ -1,8 +1,11 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
-import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js'; // Applied fix here
+// Add these two separate imports:
+import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@latest/dist/tf-core.min.js';
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@latest/dist/tf-layers.min.js';
+
 import * as config from './config.js';
-console.log('TensorFlow.js tf object in aiWorker:', tf);
+console.log('TensorFlow.js tf object in aiWorker:', tf); // Keep this for verification
 
 // --- ENSEMBLE CONFIGURATION ---
 const ENSEMBLE_CONFIG = [
