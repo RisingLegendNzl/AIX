@@ -85,14 +85,9 @@ function toggleGuide(contentId) {
         content.classList.toggle('open');
         // Rotate SVG arrow if present (assuming it's the last child of the header/button)
         let svg = null;
-        const targetElement = document.getElementById(contentId); // The content div
-        if (targetElement) {
-            // Find the button/header that toggles this content (its previous sibling)
-            const toggler = targetElement.previousElementSibling; 
-            if (toggler) {
-                // If the toggler is a div (main strategy header) or a button (nested what do these do)
-                svg = toggler.querySelector('svg'); 
-            }
+        const toggler = content.previousElementSibling; // This is the header div or button that toggles this content
+        if (toggler) {
+            svg = toggler.querySelector('svg'); 
         }
         
         if (svg) {
@@ -520,7 +515,7 @@ function handleNewCalculation() {
 
         const terminals = config.terminalMapping?.[baseNum] || [];
         
-        const streak = trendStats.currentStreaks[type.id] || 0;
+        const streak = streaks[type.id] || 0;
         let confirmedByHtml = '';
         if (streak >= 2) {
             confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
@@ -1080,7 +1075,7 @@ function attachGuideAndInfoListeners() {
     }
     
     // NEW: Listener for the nested "What do these do?" button inside Strategies
-    if (dom.strategyDescriptionsToggleButton) { // Use the new button ID
+    if (dom.strategyDescriptionsToggleButton) { 
         dom.strategyDescriptionsToggleButton.addEventListener('click', () => toggleGuide('strategyDescriptionsContent'));
     }
 
@@ -1125,15 +1120,23 @@ export function initializeUI() {
     // Add all individual toggle IDs to the list for DOM collection
     strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id));
 
-    elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
-    
-    // NEW: Render strategy toggles before attaching their listeners
-    renderStrategyToggles(); // This now populates strategiesContent and strategyDescriptionsContent
+    // NEW: First, render all dynamic content to ensure elements are in the DOM
+    renderStrategyToggles(); // This populates strategiesContent and strategyDescriptionsContent
 
+    // FIX: Move the DOM element collection AFTER all dynamic content has been rendered
+    elementIds.forEach(id => { 
+        if(document.getElementById(id)) {
+            dom[id] = document.getElementById(id);
+        } else if (config.DEBUG_MODE) {
+            console.warn(`DOM element with ID ${id} not found during collection.`); // This warning is now expected if element isn't there, but helps debug if a critical one is missing.
+        }
+    });
+    
+    // Now attach listeners and update UI
     attachMainActionListeners();
-    attachToggleListeners(); // Now attaches to dynamically created toggles
+    attachToggleListeners();
     attachAdvancedSettingsListeners();
-    attachGuideAndInfoListeners(); // Attach listener to the new strategyDescriptionsToggleButton
+    attachGuideAndInfoListeners();
     
     dom.startOptimizationButton.addEventListener('click', () => {
         if (state.history.length < 20) {
