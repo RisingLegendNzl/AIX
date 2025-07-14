@@ -1,7 +1,7 @@
 // js/ui.js
 
 // --- IMPORTS ---
-import { getHitZone } from '../shared-logic.js';
+import { getHitZone, calculateTrendStats } from '../shared-logic.js'; // Added calculateTrendStats
 import * as config from './config.js';
 import * as state from './state.js';
 // Import analysis functions that the UI will trigger
@@ -30,12 +30,12 @@ function toggleGuide(contentId) {
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
 /**
- * Renders the details of the active calculation groups in the main result display.
- * This provides immediate feedback with base numbers and terminals.
+ * Renders the details of the active calculation groups, including streak confirmations.
  * @param {number} num1 - The first number from the input.
  * @param {number} num2 - The second number from the input.
+ * @param {object} streaks - An object with current streak counts for each group.
  */
-function renderCalculationDetails(num1, num2) {
+function renderCalculationDetails(num1, num2, streaks = {}) {
     let detailsHtml = '<h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3><div class="space-y-2">';
 
     state.activePredictionTypes.forEach(type => {
@@ -46,11 +46,18 @@ function renderCalculationDetails(num1, num2) {
         if (baseNum < 0 || baseNum > 36) return;
 
         const terminals = config.terminalMapping?.[baseNum] || [];
+        
+        // --- Confirmed by Streak Logic ---
+        const streak = streaks[type.id] || 0;
+        let confirmedByHtml = '';
+        if (streak >= 2) {
+            confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
+        }
 
         detailsHtml += `
             <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
                 <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
-                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}</p>
+                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
             </div>
         `;
     });
@@ -175,79 +182,76 @@ export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) 
 }
 
 export function renderHistory() {
-    updateWinLossCounter(); 
+    updateWinLossCounter();
 
+    if (!dom.historyList) return;
     dom.historyList.innerHTML = `<li class="text-center text-gray-500 py-4">No calculations yet.</li>`;
     if (state.history.length === 0) return;
     dom.historyList.innerHTML = '';
-    
+
     [...state.history].sort((a, b) => b.id - a.id).forEach(item => {
         const li = document.createElement('li');
         li.className = 'history-item relative';
-        if (item.status === 'success') li.classList.add('is-success');
-        if (item.status === 'fail') li.classList.add('is-fail');
-        
-        let stateBadgeContent;
+
+        let stateBadgeContent = '';
         let stateBadgeClass = 'bg-gray-400';
 
+        // --- NEW BADGE LOGIC ---
         if (item.status === 'pending') {
             stateBadgeContent = 'Pending';
-            stateBadgeClass = 'bg-gray-400';
-        } else if (item.recommendedGroupId !== null) { 
+        } else if (item.recommendedGroupId && item.recommendationDetails) {
+            const details = item.recommendationDetails;
             const recommendedType = config.allPredictionTypes.find(type => type.id === item.recommendedGroupId);
-            const recommendedLabel = recommendedType?.displayLabel || 'Unknown Group'; 
-            const recommendedColorClass = recommendedType?.colorClass || 'bg-gray-400';
+            const recommendedLabel = recommendedType?.displayLabel || 'Unknown';
+            const hitRate = details.hitRate || 0;
             const recommendedHit = item.hitTypes.includes(item.recommendedGroupId);
-            const otherGroupsHit = item.hitTypes.length > 0 && !recommendedHit;
 
-            if (recommendedHit) {
-                stateBadgeContent = `Reco: ${recommendedLabel} (Hit)`;
-                stateBadgeClass = recommendedColorClass;
-            } else if (otherGroupsHit) {
-                const otherHitLabels = item.hitTypes.map(id => config.allPredictionTypes.find(type => type.id === id)?.displayLabel || id);
-                stateBadgeContent = `Reco: ${recommendedLabel} (Missed), Hit: ${otherHitLabels.join(' & ')}`;
-                stateBadgeClass = 'bg-red-500';
-            } else {
-                stateBadgeContent = `Reco: ${recommendedLabel} (Missed)`;
-                stateBadgeClass = recommendedColorClass;
+            let resultText = '';
+            if (item.status !== 'pending') {
+                resultText = recommendedHit ? ' - HIT' : ' - MISS';
             }
-        } else { 
-            stateBadgeContent = item.status === 'success' ? `Success (No Reco)` : 'Failed (No Reco)';
-            stateBadgeClass = item.status === 'success' ? 'bg-green-600' : 'bg-red-500';
+
+            stateBadgeContent = `Top: ${recommendedLabel} (${hitRate.toFixed(1)}%) ${resultText}`;
+            stateBadgeClass = recommendedHit ? (recommendedType?.colorClass || 'bg-green-500') : 'bg-red-500';
+        } else {
+            stateBadgeContent = 'No Recommendation';
+            stateBadgeClass = 'bg-gray-500';
         }
 
-        let pocketDistanceDisplay = '';
-        if (state.usePocketDistance && item.status === 'success' && item.pocketDistance !== null) {
-            pocketDistanceDisplay = ` (<span class="text-pink-400">Dist: ${item.pocketDistance}</span>)`;
+        // --- NEW ADDITIONAL DETAILS LOGIC ---
+        let additionalDetailsHtml = '';
+        const detailsParts = [];
+
+        // "Pocket Distance" detail
+        if (state.usePocketDistance && item.status !== 'pending' && item.pocketDistance !== null) {
+            detailsParts.push(`Pocket Distance: <strong>${item.pocketDistance}</strong>`);
         }
 
-        const recommendedHit = item.recommendedGroupId && item.hitTypes.includes(item.recommendedGroupId);
-        const showFailIcon = (item.recommendedGroupId && !recommendedHit) || item.status === 'fail';
-        const showSuccessIcon = item.status === 'success' && recommendedHit;
+        if (detailsParts.length > 0) {
+            additionalDetailsHtml = `<div class="additional-details">${detailsParts.join(' | ')}</div>`;
+        }
         
+        // --- AI DETAILS ---
         let aiDetailsHtml = '';
         if (item.recommendedGroupId && item.recommendationDetails) {
-            const details = item.recommendationDetails;
             aiDetailsHtml = `
-                <div class="ai-details-toggle" data-target="ai-details-${item.id}">Show Details</div>
+                <div class="ai-details-toggle" data-target="ai-details-${item.id}">Show AI Details</div>
                 <div id="ai-details-${item.id}" class="ai-details-section">
                     <ul>
-                        ${details.primaryDrivingFactor ? `<li><strong>Reason: ${details.primaryDrivingFactor}</strong> (Influence: ${details.adaptiveInfluenceUsed?.toFixed(2) || '1.00'})</li>` : ''}
-                        <li>Final Score: ${details.finalScore.toFixed(2)}</li>
-                        <li>Base Score: ${details.baseScore.toFixed(2)}</li>
-                        <li>Hit Rate: ${details.hitRate.toFixed(2)}%</li>
-                        <li>AI Probability: ${details.mlProbability !== null ? (details.mlProbability * 100).toFixed(1) + '%' : 'N/A'}</li>
+                        ${item.recommendationDetails.primaryDrivingFactor ? `<li><strong>Reason: ${item.recommendationDetails.primaryDrivingFactor}</strong></li>` : ''}
+                        <li>Final Score: ${item.recommendationDetails.finalScore.toFixed(2)}</li>
                     </ul>
                 </div>
             `;
         }
-        
+
         li.innerHTML = `
-            ${stateBadgeContent ? `<div class="state-badge ${stateBadgeClass}">${stateBadgeContent}</div>` : ''}
-            <p>${item.num2} - ${item.num1} = <strong class="text-lg">${item.difference}</strong>${pocketDistanceDisplay}</p>
+            <div class="state-badge ${stateBadgeClass}">${stateBadgeContent}</div>
+            <div class="calculation-info">
+                <p>${item.num2} - ${item.num1} = <strong class="text-lg">${item.difference}</strong></p>
+                ${additionalDetailsHtml}
+            </div>
             <div class="flex items-center space-x-2">
-                <div class="status-box fail-box" style="display:${showFailIcon ? 'flex' : 'none'};"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></div>
-                <div class="status-box success-box" style="display:${showSuccessIcon ? 'flex' : 'none'};"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg></div>
                 <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
@@ -255,12 +259,13 @@ export function renderHistory() {
         dom.historyList.appendChild(li);
     });
 
+    // Re-attach listeners for the new "Show Details" toggles
     document.querySelectorAll('.ai-details-toggle').forEach(toggle => {
         toggle.onclick = () => {
             const targetElement = document.getElementById(toggle.dataset.target);
             if (targetElement) {
                 targetElement.classList.toggle('open');
-                toggle.textContent = targetElement.classList.contains('open') ? 'Hide Details' : 'Show Details';
+                toggle.textContent = targetElement.classList.contains('open') ? 'Hide AI Details' : 'Show AI Details';
             }
         };
     });
@@ -373,7 +378,9 @@ function handleNewCalculation() {
         return;
     }
 
-    renderCalculationDetails(num1Val, num2Val);
+    // --- Get streak data before rendering ---
+    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    renderCalculationDetails(num1Val, num2Val, trendStats.currentStreaks);
 
     const newHistoryItem = {
         id: Date.now(),
