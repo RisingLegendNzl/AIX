@@ -928,7 +928,7 @@ function attachToggleListeners() {
                 updateActivePredictionTypes();
                 handleStrategyChange();
                 const num1Val = parseInt(dom.number1.value, 10);
-                const num2Val = parseInt(dom.number2.value, 10);
+                const num2Val = parseInt(document.getElementById('number2').value, 10);
                 const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
                 drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
             } else {
