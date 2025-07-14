@@ -44,10 +44,10 @@
             align-items: center;
             transition: all 0.2s ease;
             padding: 12px 20px;
-            border-radius: 88px;
+            border-radius: 12px;
             position: relative;
             flex-wrap: wrap;
-        }
+            flex-direction: column; /* Stack content vertically */        align-items: flex-start;    }
         .history-item.is-success { background-color: #f0fdf4; border-color: #22c55e; }
         .history-item.is-fail { background-color: #fef2f2; border-color: #ef4444; }
 
@@ -64,6 +64,17 @@
             z-index: 10;
             white-space: nowrap;
         }
+
+        .calculation-info {    width: 100%;}
+
+        .additional-details {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        .history-item .flex { /* This targets the container for the delete button */    position: absolute;    top: 16px;    right: 20px;}
+
         .bg-amber-500 { background-color: #f59e0b; }
         .bg-blue-500 { background-color: #3b82f6; }
         .bg-red-500 { background-color: #ef4444; }
