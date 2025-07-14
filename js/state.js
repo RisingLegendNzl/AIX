@@ -8,6 +8,8 @@ export let isAiReady = false;
 export let bestFoundParams = null;
 export let currentVideoURL = null;
 export let activePredictionTypes = [];
+export let liveTables = {}; // NEW: Store available live tables
+export let currentLiveTableId = null; // NEW: Store the ID of the currently selected live table
 
 export let strategyStates = {
     weightedZone: { weight: 1.0, name: 'Neighbour Weighting' },
@@ -50,6 +52,10 @@ export function setActivePredictionTypes(types) { activePredictionTypes = types;
 export function setStrategyStates(states) { strategyStates = states; }
 export function setPatternMemory(memory) { patternMemory = memory; }
 export function setAdaptiveFactorInfluences(influences) { adaptiveFactorInfluences = influences; }
+export function setLiveTables(tables) { liveTables = tables; } // NEW
+export function getCurrentLiveTableId() { return currentLiveTableId; } // NEW
+export function setCurrentLiveTableId(tableId) { currentLiveTableId = tableId; } // NEW
+
 
 export function setToggles(toggles) {
     useTrendConfirmation = toggles.useTrendConfirmation;
@@ -80,6 +86,8 @@ export function saveState() {
             useDueForHit, useNeighbourFocus, useLessStrict, useDynamicTerminalNeighbourCount
         },
         STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+        liveTables, // NEW: Save live tables state
+        currentLiveTableId // NEW: Save current live table selection
     }));
 }
