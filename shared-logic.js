@@ -22,7 +22,9 @@ function getNeighbours(number, count, rouletteWheel) {
     return Array.from(neighbours);
 }
 
-function calculatePocketDistance(num1, num2, rouletteWheel) {
+export function calculatePocketDistance(num1, num2, rouletteWheel)
+
+ {
     const index1 = rouletteWheel.indexOf(num1);
     const index2 = rouletteWheel.indexOf(num2);
     if (index1 === -1 || index2 === -1) return Infinity;
