@@ -2,6 +2,7 @@
 
 import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs';
 import * as config from './config.js';
+console.log('TensorFlow.js tf object in aiWorker:', tf);
 
 // --- ENSEMBLE CONFIGURATION ---
 const ENSEMBLE_CONFIG = [
