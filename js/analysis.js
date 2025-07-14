@@ -112,9 +112,7 @@ function runSimulationOnHistory(spinsToProcess) {
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
-        // --- ADDED LOGGING START ---
-        console.log(`Analysis SimItem - ID: ${newHistoryItem.id}, Reco: ${newHistoryItem.recommendedGroupId}, WinNum: ${newHistoryItem.winningNumber}, HitTypes: ${JSON.stringify(newHistoryItem.hitTypes)}, Status: ${newHistoryItem.status}`);
-        // --- ADDED LOGGING END ---
+        // Removed temporary debugging log for SimItem
 
         // Update wins/losses for this specific simulation run
         if (newHistoryItem.recommendedGroupId && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
@@ -139,13 +137,7 @@ function runSimulationOnHistory(spinsToProcess) {
         }
     }
 
-    // --- ADDED LOGGING START ---
-    console.log(`--- Analysis.js runSimulationOnHistory ---`);
-    console.log(`Simulated Wins: ${wins}, Losses: ${losses}`);
-    console.log(`Calculated W/L Ratio: ${losses === 0 ? (wins > 0 ? wins * 10 : 0) : (wins / losses)}`);
-    // console.log(`Final Adaptive Influences (Analysis.js Sim): ${JSON.stringify(localAdaptiveFactorInfluences)}`); // Uncomment if you want to inspect these
-    console.log(`------------------------------------------`);
-    // --- ADDED LOGGING END ---
+    // Removed temporary debugging logs for Sim Wins/Losses/Ratio
 
     return localHistory;
 }
