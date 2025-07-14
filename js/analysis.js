@@ -221,7 +221,7 @@ export async function handleHistoricalAnalysis() {
     ui.drawRouletteWheel();
     
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
-    if (successfulHistoryCount >= config.TRAINING_MIN_HISTORY) {
+    if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
         state.setIsAiReady(false);
         ui.updateAiStatus('AI Model: Training...');
         const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); 
@@ -236,7 +236,7 @@ export async function handleHistoricalAnalysis() {
         });
     } else {
         state.setIsAiReady(false);
-        ui.updateAiStatus(`AI Model: Need ${config.TRAINING_MIN_HISTORY} confirmed spins to train. (Current: ${successfulHistoryCount})`);
+        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
     }
 }
 
@@ -259,8 +259,9 @@ export async function handleStrategyChange() {
     ui.drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
 }
 
-export function initializeAiWithHistory() {
-    if (!aiWorker) return; // Make sure the worker is ready
+// FIX: Renamed to be more specific. This is for retraining on load.
+export function trainAiOnLoad() {
+    if (!aiWorker || !state.isAiReady) return;
 
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
     if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
@@ -268,15 +269,27 @@ export function initializeAiWithHistory() {
         return;
     }
 
+    ui.updateAiStatus('AI Model: Re-training with loaded history...');
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-
-    const savedScaler = localStorage.getItem('roulette-ml-scaler');
 
     aiWorker.postMessage({
         type: 'train',
         payload: {
             history: state.history,
             historicalStreakData: trendStats.streakData,
+            terminalMapping: config.terminalMapping,
+            rouletteWheel: config.rouletteWheel
+        }
+    });
+}
+
+// FIX: New function to properly initialize the AI worker on startup.
+export function initializeAi() {
+    if (!aiWorker) return;
+    const savedScaler = localStorage.getItem('roulette-ml-scaler');
+    aiWorker.postMessage({
+        type: 'init',
+        payload: {
             scaler: savedScaler,
             terminalMapping: config.terminalMapping,
             rouletteWheel: config.rouletteWheel
