@@ -155,7 +155,7 @@ function calculateFitness(individual) {
         });
         const simItem = { ...rawItem };
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
-        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
         if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
             wins++;
         } else if (simItem.recommendedGroupId) {
@@ -215,9 +215,7 @@ async function runEvolution() {
                     generation: generationCount,
                     maxGenerations: currentGaConfig.maxGenerations,
                     bestFitness: population[0].fitness.toFixed(3),
-                    bestIndividual: population[0].individual,
-                    processedCount: generationCount * currentGaConfig.populationSize,
-                    populationSize: currentGaConfig.populationSize
+                    bestIndividual: population[0].individual
                 }
             });
             const newPopulation = [];
@@ -247,7 +245,9 @@ async function runEvolution() {
                 payload: {
                     generation: generationCount,
                     bestFitness: population[0].fitness.toFixed(3),
-                    bestIndividual: population[0].individual
+                    bestIndividual: population[0].individual,
+                    // --- ADDED: Include the toggles used for this run ---
+                    togglesUsed: sharedData.toggles
                 }
             });
         }
