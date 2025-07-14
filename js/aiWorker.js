@@ -1,9 +1,10 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
-// **APPLIED FIX: Downgrade to TensorFlow.js version 3.21.0**
-import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@3.21.0/dist/tf-core.min.js';
-import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@3.21.0/dist/tf-layers.min.js';
-import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@3.21.0/dist/tf-backend-cpu.min.js';
+// Keep the module imports to ensure the library code executes and defines globals
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@latest/dist/tf-core.min.js';
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@latest/dist/tf-layers.min.js';
+// APPLIED FIX: Import the CPU backend
+import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@latest/dist/tf-backend-cpu.min.js';
 
 
 import * as config from './config.js';
@@ -22,11 +23,9 @@ async function initTensorFlow() {
     try {
         await tf.ready();
 
-        // tf.enableProdMode() might not exist in older versions, or behave differently.
-        // Will leave it for now, if it causes issues, we can remove it.
-        // tf.enableProdMode(); 
-        
-        tf.setBackend('cpu'); 
+        tf.enableProdMode();
+        // Ensure backend is explicitly set after it's imported and ready
+        tf.setBackend('cpu');
         if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
     } catch (err) {
         console.error('Failed to initialize TensorFlow.js backend in aiWorker:', err);
@@ -174,9 +173,8 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
         units: lstmUnits,
         returnSequences: false,
         activation: 'relu',
-        // APPLIED FIX: Explicitly set kernelInitializer for LSTM.
-        // Using 'glorotUniform' as 'orthogonal' might be causing issues in some TF.js versions/environments.
-        kernelInitializer: 'glorotUniform'
+        kernelInitializer: 'glorotUniform', // Explicitly set kernel initializer
+        recurrentInitializer: 'glorotUniform' // APPLIED FIX: Explicitly set recurrent kernel initializer
     }).apply(input);
     const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
 
@@ -215,7 +213,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
 
     const { xs, ys, scaler, featureCount } = prepareDataForLSTM(historyData, historicalStreakData);
     if (!xs) {
-        self.postMessage({ type: 'status', message: 'AI Ensemble: Not enough valid data to train.' });
+        self.postMessage({ type: 'status', message: `AI Model: Not enough valid data to train.` });
         isTraining = false;
         return;
     }
@@ -324,7 +322,6 @@ async function predictWithEnsemble(historyData) {
         averagedStreakPreds.forEach((p, i) => averagedStreakPreds[i] /= allPredictions.length);
 
         const finalResult = { groups: {}, failures: {}, streakPredictions: {} };
-        // FIX: Corrected typo here from averagedGroupProms to averagedGroupProbs
         config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
         config.allPredictionTypes.forEach((type, i) => finalResult.streakPredictions[type.id] = averagedStreakPreds[i]);
