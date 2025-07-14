@@ -29,6 +29,38 @@ function toggleGuide(contentId) {
 
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
+/**
+ * Renders the details of the active calculation groups in the main result display.
+ * This provides immediate feedback with base numbers and terminals.
+ * @param {number} num1 - The first number from the input.
+ * @param {number} num2 - The second number from the input.
+ */
+function renderCalculationDetails(num1, num2) {
+    let detailsHtml = '<h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3><div class="space-y-2">';
+
+    state.activePredictionTypes.forEach(type => {
+        const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
+        if (!predictionTypeDefinition) return;
+
+        const baseNum = predictionTypeDefinition.calculateBase(num1, num2);
+        if (baseNum < 0 || baseNum > 36) return;
+
+        const terminals = config.terminalMapping?.[baseNum] || [];
+
+        detailsHtml += `
+            <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
+                <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
+                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}</p>
+            </div>
+        `;
+    });
+
+    detailsHtml += '</div>';
+    dom.resultDisplay.innerHTML = detailsHtml;
+    dom.resultDisplay.classList.remove('hidden');
+}
+
+
 export function updateAllTogglesUI() {
     dom.trendConfirmationToggle.checked = state.useTrendConfirmation;
     dom.weightedZoneToggle.checked = state.useWeightedZone;
@@ -348,18 +380,19 @@ async function handleCalculation() {
         return;
     }
 
+    // Call the new function to render the calculation details immediately.
+    renderCalculationDetails(num1Val, num2Val);
+
     let winningNumber = null;
     if (winningNumberVal.trim() !== '') {
         winningNumber = parseInt(winningNumberVal, 10);
         if (isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
-            dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Winning number must be between 0 and 36.</p>`;
-            dom.resultDisplay.classList.remove('hidden');
+            dom.resultDisplay.innerHTML += `<p class="text-red-600 font-medium text-center mt-2">Winning number must be between 0 and 36.</p>`;
             return;
         }
     }
 
-    dom.resultDisplay.classList.add('hidden');
-
+    // The rest of the function remains the same to correctly log history and run analysis.
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
@@ -381,6 +414,7 @@ async function handleCalculation() {
     drawRouletteWheel(newHistoryItem.difference, lastWinning);
     dom.winningNumberInput.value = ''; // Clear the optional input
 }
+
 
 function handleClearInputs() { 
     dom.number1.value = '';
