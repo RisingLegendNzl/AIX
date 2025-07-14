@@ -112,8 +112,6 @@ function runSimulationOnHistory(spinsToProcess) {
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
-        // Removed temporary debugging log for SimItem
-
         // Update wins/losses for this specific simulation run
         if (newHistoryItem.recommendedGroupId && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
             wins++;
@@ -136,8 +134,6 @@ function runSimulationOnHistory(spinsToProcess) {
             localConfirmedWinsLog.push(winningNumber);
         }
     }
-
-    // Removed temporary debugging logs for Sim Wins/Losses/Ratio
 
     return localHistory;
 }
@@ -199,6 +195,59 @@ export async function runAllAnalyses(winningNumber = null) {
         }
     }
 }
+
+// NEW: Function to handle a single live spin (triggered by liveData.js)
+export async function handleLiveSpin(winningNumber, num1, num2) {
+    if (isNaN(winningNumber) || isNaN(num1) || isNaN(num2)) {
+        console.warn("Invalid numbers received for live spin.");
+        return;
+    }
+
+    const newLiveHistoryItem = {
+        id: Date.now(), // Use Date.now() for unique ID for live spins
+        num1: num1,
+        num2: num2,
+        difference: Math.abs(num2 - num1),
+        status: 'pending', // Will be updated by evaluateCalculationStatus
+        hitTypes: [],
+        typeSuccessStatus: {},
+        winningNumber: winningNumber,
+        pocketDistance: null,
+        recommendedGroupId: null,
+        recommendationDetails: null
+    };
+
+    // Add the new item to history and confirmedWinsLog
+    state.history.push(newLiveHistoryItem);
+    state.confirmedWinsLog.push(winningNumber);
+
+    // Run all analyses based on the updated history
+    await runAllAnalyses(winningNumber); 
+    ui.renderHistory(); // Re-render history list
+    ui.drawRouletteWheel(newLiveHistoryItem.difference, winningNumber); // Update wheel visualizer
+
+    // Trigger AI re-training if criteria met (similar to handleHistoricalAnalysis)
+    const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
+    if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
+        if (!state.isAiReady) { // Only attempt training if not already ready/training
+            ui.updateAiStatus('AI Model: Training with new live spin...');
+            const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+            aiWorker.postMessage({
+                type: 'train',
+                payload: {
+                    history: state.history,
+                    historicalStreakData: trendStats.streakData,
+                    terminalMapping: config.terminalMapping,
+                    rouletteWheel: config.rouletteWheel
+                }
+            });
+        }
+    } else {
+        state.setIsAiReady(false);
+        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
+    }
+}
+
 
 export function updateActivePredictionTypes() {
     const newActiveTypes = state.useAdvancedCalculations 
