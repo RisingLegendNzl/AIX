@@ -207,10 +207,10 @@ export function getRecommendation(context) {
         isForWeightUpdate = false, aiPredictionData = null,
         currentAdaptiveInfluences, lastWinningNumber,
         useProximityBoostBool, useWeightedZoneBool, useNeighbourFocusBool,
-        isAiReadyBool, useTrendConfirmationBool,
+        isAiReadyBool, useTrendConfirmationBool, useLessStrictBool, 
         current_STRATEGY_CONFIG,
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
-        currentHistoryForTrend // Add this for trend confirmation checks
+        currentHistoryForTrend 
     } = context;
 
     const currentNum1 = inputNum1;
@@ -221,19 +221,19 @@ export function getRecommendation(context) {
             baseScore: 0,
             hitRate: (boardStats[type.id]?.total > 0 ? (boardStats[type.id]?.success / boardStats[type.id]?.total * 100) : 0),
             avgTrend: parseFloat(trendStats.averages[type.id]) || 0,
-            currentStreak: trendStats.currentStreaks[type.id] || 0,
+            currentStreak: parseFloat(trendStats.currentStreaks[type.id]) || 0,
             predictiveDistance: Infinity,
             proximityBoostApplied: false,
             weightedZoneBoostApplied: false,
-            patternBoostApplied: false, // Not implemented in this context, but kept for consistency
-            patternBoostMultiplier: 1, // Not implemented in this context, but kept for consistency
+            patternBoostApplied: false, 
+            patternBoostMultiplier: 1, 
             mlProbability: (aiPredictionData && aiPredictionData.groups && aiPredictionData.groups[type.id] !== undefined) ? aiPredictionData.groups[type.id] : 0,
             mlBoostApplied: false,
-            aiLowPocketBoostApplied: false, // Not implemented in this context, but kept for consistency
+            aiLowPocketBoostApplied: false, 
             finalScore: 0,
             primaryDrivingFactor: "N/A",
             adaptiveInfluenceUsed: 1.0,
-            confluenceBonus: 1.0, // Not implemented in this context, but kept for consistency
+            confluenceBonus: 1.0, 
             reason: [],
             individualScores: {}
         };
@@ -244,7 +244,6 @@ export function getRecommendation(context) {
         if (baseNum < 0 || baseNum > 36) return null;
 
         const terminals = terminalMapping?.[baseNum] || [];
-        // Use context.useDynamicTerminalNeighbourCount for internal hitZone calculation
         const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
 
         // --- Calculate Raw Score Components ---
@@ -339,27 +338,18 @@ export function getRecommendation(context) {
     }).filter(c => c && !isNaN(c.score));
 
     if (candidates.length === 0) {
-        return { html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">Not enough data for a recommendation.</span>', bestCandidate: null, details: null };
+        return { html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">Not enough data for a recommendation.</span>', bestCandidate: null, details: null, signalType: 'Wait for Signal' };
     }
 
     candidates.sort((a, b) => b.score - a.score);
     let bestCandidate = candidates[0];
 
-    if (bestCandidate.score <= 0) {
-        return { html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong recommendations based on current data.</span>', bestCandidate: null, details: null };
-    }
-
-    if (isForWeightUpdate) {
-        return { bestCandidate };
-    }
-
-    let signal = "Wait";
+    // Determine the signal type based on score thresholds
+    let signal = "Wait for Signal"; // Default to wait
     let signalColor = "text-gray-500";
     let reason = "(Low Confidence)";
 
-    // Use current_STRATEGY_CONFIG passed from optimizer OR global ones
-    const effectiveStrategyConfig = current_STRATEGY_CONFIG;
-
+    const effectiveStrategyConfig = current_STRATEGY_CONFIG; 
 
     if (bestCandidate.score > 50) {
         signal = "Strong Play";
@@ -371,7 +361,7 @@ export function getRecommendation(context) {
         reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
     }
 
-    // Use useTrendConfirmationBool parameter
+    // Apply Trend Confirmation (can override "Play" signals)
     if (useTrendConfirmationBool && trendStats.lastSuccessState.length > 0 && !trendStats.lastSuccessState.includes(bestCandidate.type.id)) {
         signal = 'Wait for Signal';
         signalColor = "text-gray-500";
@@ -382,8 +372,18 @@ export function getRecommendation(context) {
         reason = `(No established trend to confirm)`;
     }
 
+    // Apply Less Strict Mode (can override "Wait" signals)
+    if (useLessStrictBool && signal === 'Wait for Signal') {
+        if (bestCandidate.details.hitRate > 60 || bestCandidate.details.currentStreak >= 3) {
+            signal = "Play"; 
+            signalColor = "text-yellow-600"; 
+            reason = `(Less Strict: High Hit Rate / Long Streak)`;
+        }
+    }
+
+
     let finalHtml = `<strong class="${signalColor}">${signal}:</strong> Play <strong style="color: ${bestCandidate.type.textColor};">${bestCandidate.type.label}</strong><br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
-    if (signal.includes('Wait')) {
+    if (signal.includes('Wait')) { 
         finalHtml = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
     }
 
@@ -393,7 +393,6 @@ export function getRecommendation(context) {
         if (fullPredictionType) {
             const baseNum = fullPredictionType.calculateBase(currentNum1, currentNum2);
             const terminals = terminalMapping?.[baseNum] || [];
-            // Use context.useDynamicTerminalNeighbourCount
             const hotNumbers = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel)
                 .map(num => ({num, score: neighbourScores[num]?.success || 0 }))
                 .filter(n => n.score > 0)
@@ -407,5 +406,5 @@ export function getRecommendation(context) {
         }
     }
 
-    return { html: finalHtml, bestCandidate, details: bestCandidate.details };
+    return { html: finalHtml, bestCandidate, details: bestCandidate.details, signalType: signal }; 
 }
