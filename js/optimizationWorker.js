@@ -32,6 +32,12 @@ function selectParent(population) { /* ... unchanged ... */ }
 
 // --- FITNESS CALCULATION (SIMULATION) ---
 function calculateFitness(individual) {
+    // FIX: Add a guard clause to handle cases where a faulty individual is created.
+    if (!individual) {
+        console.warn("Fitness calculation skipped for an undefined individual. Returning 0 fitness.");
+        return 0; // Return the lowest possible fitness to eliminate this individual.
+    }
+
     const SIM_STRATEGY_CONFIG = {
         learningRate_success: individual.learningRate_success,
         learningRate_failure: individual.learningRate_failure,
