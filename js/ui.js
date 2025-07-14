@@ -1,3 +1,4 @@
+
 // js/ui.js
 
 // --- IMPORTS ---
@@ -413,6 +414,17 @@ async function handleCalculation() {
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
     drawRouletteWheel(newHistoryItem.difference, lastWinning);
     dom.winningNumberInput.value = ''; // Clear the optional input
+
+    // --- NEW LOGIC FOR AUTO-CALCULATION ---
+    if (winningNumber !== null) {
+        // Set up the next calculation: winning number becomes the new "Subtract From",
+        // and the old "Subtract From" becomes the new "Number to Subtract".
+        dom.number1.value = num2Val; // Old "Subtract From" number
+        dom.number2.value = winningNumber; // The winning number
+
+        // Programmatically click the calculate button to trigger the next calculation in the chain.
+        document.getElementById('calculateButton').click();
+    }
 }
 
 
