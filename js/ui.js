@@ -83,16 +83,15 @@ function toggleGuide(contentId) {
     const content = document.getElementById(contentId);
     if (content) {
         content.classList.toggle('open');
-        // Rotate SVG arrow if present (assuming it's the last child of the header's button)
-        // Adjust for button being the target directly
+        // Rotate SVG arrow if present (assuming it's the last child of the header/button)
         let svg = null;
-        const targetElement = document.getElementById(contentId);
+        const targetElement = document.getElementById(contentId); // The content div
         if (targetElement) {
-            const header = targetElement.previousElementSibling; // This is the header div
-            if (header && header.tagName === 'DIV') { // Main strategies header (div)
-                svg = header.querySelector('button svg');
-            } else if (header && header.tagName === 'BUTTON') { // Nested strategy descriptions button
-                svg = header.querySelector('svg');
+            // Find the button/header that toggles this content (its previous sibling)
+            const toggler = targetElement.previousElementSibling; 
+            if (toggler) {
+                // If the toggler is a div (main strategy header) or a button (nested what do these do)
+                svg = toggler.querySelector('svg'); 
             }
         }
         
@@ -159,12 +158,17 @@ function renderCalculationDetails(num1, num2, streaks = {}, boardStats = {}, las
 
 
 export function updateAllTogglesUI() {
-    // Update individual toggle states based on state.js
-    strategyTogglesDefinitions.forEach(toggleDef => {
-        if (dom[toggleDef.id]) { // Ensure the DOM element exists before trying to set checked
-            dom[toggleDef.id].checked = state[toggleDef.stateKey];
-        }
-    });
+    // Add a small timeout to ensure DOM is ready after dynamic rendering
+    setTimeout(() => {
+        strategyTogglesDefinitions.forEach(toggleDef => {
+            const toggleElement = dom[toggleDef.id]; // Get the element from the collected dom object
+            if (toggleElement) { // Ensure the DOM element exists before trying to set checked
+                toggleElement.checked = state[toggleDef.stateKey];
+            } else if (config.DEBUG_MODE) {
+                console.warn(`Toggle element with ID ${toggleDef.id} not found in DOM.`);
+            }
+        });
+    }, 0); // A 0ms timeout puts it at the end of the current event loop
 }
 
 export function updateWinLossCounter() {
@@ -801,9 +805,9 @@ function renderStrategyToggles() {
     
     // Create the "What do these do?" header as a button and its associated content container
     const descriptionsHeaderHtml = `
-        <button id="strategyDescriptionsToggleButton" class="w-full btn btn-secondary mt-2 mb-4">
-            <h3 class="font-bold text-gray-700 text-lg inline-block mr-2">What do these do?</h3>
-            <svg class="inline-block w-5 h-5 ml-1 -mt-0.5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        <button id="strategyDescriptionsToggleButton" class="btn btn-secondary text-sm px-3 py-1 rounded-md mt-2 mb-4">
+            <h3 class="font-bold text-gray-700 text-sm inline-block mr-2">What do these do?</h3>
+            <svg class="inline-block w-4 h-4 ml-1 -mt-0.5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
         </button>
         <div id="strategyDescriptionsContent" class="strategy-guide-content space-y-4">
             <h4 class="font-bold text-gray-800">Base Strategies</h4>
@@ -878,7 +882,7 @@ function renderStrategyToggles() {
         if (toggleDef.group !== currentGroup) {
             currentGroup = toggleDef.group;
             const groupHeader = document.createElement('h4');
-            groupHeader.className = 'font-bold text-gray-800 mt-4 mb-2';
+            groupHeader.className = 'font-bold text-gray-800 mt-4 mb-2'; // Apply some styling
             groupHeader.textContent = currentGroup === 'base' ? 'Base Strategies' : 'Advanced Strategies';
             togglesContainer.appendChild(groupHeader);
         }
@@ -1070,7 +1074,7 @@ function attachGuideAndInfoListeners() {
     }
 
 
-    // New Strategies header toggle
+    // New Strategies header toggle (main Strategies dropdown)
     if (dom.strategiesHeader) { 
         dom.strategiesHeader.addEventListener('click', () => toggleGuide('strategiesContent'));
     }
@@ -1115,8 +1119,8 @@ export function initializeUI() {
         // New combined strategies section IDs
         'strategiesHeader', 'strategiesContent', // strategiesToggles is now a container within strategiesContent, not directly grabbed here
         'presetsHeader',
-        // NEW: Nested dropdown IDs for strategy descriptions
-        'strategyDescriptionsHeader', 'strategyDescriptionsContent', 'strategyDescriptionsToggleButton' // Add the new button ID
+        // NEW: Nested dropdown IDs for strategy descriptions and its button
+        'strategyDescriptionsHeader', 'strategyDescriptionsContent', 'strategyDescriptionsToggleButton' 
     ];
     // Add all individual toggle IDs to the list for DOM collection
     strategyTogglesDefinitions.forEach(toggleDef => elementIds.push(toggleDef.id));
