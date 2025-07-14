@@ -173,7 +173,7 @@ function calculateFitness(individual) {
     return wins / losses;
 }
 
-// --- MAIN EVOLUTION LOOP (Largely Unchanged) ---
+// --- MAIN EVOLUTION LOOP ---
 async function runEvolution() {
     isRunning = true;
     generationCount = 0;
@@ -185,10 +185,10 @@ async function runEvolution() {
     while (isRunning && generationCount < currentGaConfig.maxGenerations) {
         generationCount++;
         for (const p of population) {
-            if (!isRunning) { self.postMessage({ type: 'stopped' }); return; }
+            if (!isRunning) return;
             p.fitness = calculateFitness(p.individual);
         }
-        if (!isRunning) { self.postMessage({ type: 'stopped' }); return; }
+        if (!isRunning) return;
 
         population.sort((a, b) => b.fitness - a.fitness);
         self.postMessage({
@@ -198,14 +198,15 @@ async function runEvolution() {
                 maxGenerations: currentGaConfig.maxGenerations,
                 bestFitness: population[0].fitness.toFixed(3),
                 bestIndividual: population[0].individual,
-                processedCount: generationCount * currentGaConfig.populationSize
+                processedCount: generationCount * currentGaConfig.populationSize,
+                populationSize: currentGaConfig.populationSize // <-- ADDED THIS
             }
         });
 
         const newPopulation = [];
         for (let i = 0; i < currentGaConfig.eliteCount; i++) newPopulation.push(population[i]);
         while (newPopulation.length < currentGaConfig.populationSize) {
-            if (!isRunning) { self.postMessage({ type: 'stopped' }); return; }
+            if (!isRunning) return;
             const parent1 = selectParent(population);
             const parent2 = selectParent(population);
             let child = (Math.random() < currentGaConfig.crossoverRate) ? crossover(parent1.individual, parent2.individual) : { ...parent1.individual };
@@ -235,17 +236,18 @@ self.onmessage = (event) => {
         case 'start':
             if (isRunning) return;
             historyData = payload.history;
-            currentGaConfig = payload.GA_CONFIG; // Receive config from main thread
-            // Store the data needed by the shared functions and current toggle states
+            currentGaConfig = payload.GA_CONFIG;
             sharedData = {
-                terminalMapping: payload.terminalMapping,      // Renamed from helpers.terminalMapping
-                rouletteWheel: payload.rouletteWheel,          // Renamed from helpers.rouletteWheel
+                terminalMapping: payload.terminalMapping,
+                rouletteWheel: payload.rouletteWheel,
                 toggles: payload.toggles
             };
             runEvolution();
             break;
         case 'stop':
             isRunning = false;
+            // Immediately notify the main thread to update the UI
+            self.postMessage({ type: 'stopped' }); 
             break;
     }
 };
