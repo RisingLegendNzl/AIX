@@ -73,104 +73,19 @@ function selectParent(population) {
 
 // --- FITNESS CALCULATION (SIMULATION) ---
 function calculateFitness(individual) {
-    const SIM_STRATEGY_CONFIG = {
-        learningRate_success: individual.learningRate_success,
-        learningRate_failure: individual.learningRate_failure,
-        maxWeight: individual.maxWeight,
-        minWeight: individual.minWeight,
-        decayFactor: individual.decayFactor,
-        patternMinAttempts: individual.patternMinAttempts,
-        patternSuccessThreshold: individual.patternSuccessThreshold,
-        triggerMinAttempts: individual.triggerMinAttempts,
-        triggerSuccessThreshold: individual.triggerSuccessThreshold,
-    };
+    // ========================================================================
+    // TEMPORARY DEBUGGING STEP: 
+    // The real calculation is too slow. We are returning a random value 
+    // to test if the rest of the evolution loop is working correctly.
+    // ========================================================================
+    return Math.random();
 
-    const SIM_ADAPTIVE_LEARNING_RATES = {
-        SUCCESS: individual.adaptiveSuccessRate,
-        FAILURE: individual.adaptiveFailureRate,
-        MIN_INFLUENCE: individual.minAdaptiveInfluence,
-        MAX_INFLUENCE: individual.maxAdaptiveInfluence,
-    };
-
-    let wins = 0;
-    let losses = 0;
-    let simulatedHistory = [];
-    let tempConfirmedWinsLog = []; // Local log for winning numbers in this simulation
-    // Adaptive influences for this specific simulation
-    const localAdaptiveFactorInfluences = {
-        'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
-        'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
-    };
-
-    const sortedHistory = [...historyData].sort((a, b) => a.id - b.id);
-
-    // Iterate through the historical data provided to the worker
-    for (const rawItem of sortedHistory) {
-        if (!isRunning) return 0; // Stop if optimization is halted
-        if (rawItem.winningNumber === null) continue; // Skip items without a winning number
-
-        // Use the imported shared functions directly
-        const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-
-        // Get recommendation for the current simulated spin
-        const recommendation = shared.getRecommendation({
-            trendStats,
-            boardStats,
-            neighbourScores,
-            inputNum1: rawItem.num1,
-            inputNum2: rawItem.num2,
-            isForWeightUpdate: false,
-            aiPredictionData: null, // AI not used in GA fitness for now
-            currentAdaptiveInfluences: localAdaptiveFactorInfluences, // Use local influences
-            lastWinningNumber: tempConfirmedWinsLog.length > 0 ? tempConfirmedWinsLog[tempConfirmedWinsLog.length - 1] : null,
-            useProximityBoostBool: sharedData.toggles.useProximityBoost, // Use the actual toggle states passed from main
-            useWeightedZoneBool: sharedData.toggles.useWeightedZone,
-            useNeighbourFocusBool: sharedData.toggles.useNeighbourFocus,
-            isAiReadyBool: false, // AI not used in GA fitness for now
-            useTrendConfirmationBool: sharedData.toggles.useTrendConfirmation,
-            current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
-            current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES,
-            currentHistoryForTrend: simulatedHistory, // Pass current simulation history for trend
-            useDynamicTerminalNeighbourCount: sharedData.toggles.useDynamicTerminalNeighbourCount, // Pass this toggle
-            activePredictionTypes: config.allPredictionTypes,
-            allPredictionTypes: config.allPredictionTypes, // Pass necessary global data
-            terminalMapping: sharedData.terminalMapping,
-            rouletteWheel: sharedData.rouletteWheel
-        });
-
-        // Create a new simulation item to evaluate (similar to main app's history item)
-        const simItem = { ...rawItem }; // Copy original raw item properties
-        simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
-
-        // Evaluate the status of this simulated spin using shared logic
-        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-
-        // Update wins/losses based on the recommendation
-        if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
-            wins++;
-        } else if (simItem.recommendedGroupId) { // Count as a loss if a recommendation was made but missed
-            losses++;
-        }
-        
-        // Update adaptive influences for this simulation run
-        if (simItem.recommendedGroupId && recommendation.bestCandidate?.details?.primaryDrivingFactor) {
-            const primaryFactor = recommendation.bestCandidate.details.primaryDrivingFactor;
-            if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0; // Initialize if not present
-            if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(SIM_ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + SIM_ADAPTIVE_LEARNING_RATES.SUCCESS);
-            } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - SIM_ADAPTIVE_LEARNING_RATES.FAILURE);
-            }
-        }
-
-        simulatedHistory.push(simItem);
-        if (simItem.winningNumber !== null) tempConfirmedWinsLog.push(simItem.winningNumber);
-    }
-
-    if (losses === 0) return wins > 0 ? wins * 10 : 0; // Avoid division by zero, prioritize wins if no losses
+    /* --- ORIGINAL HEAVY CALCULATION (DISABLED FOR NOW) ---
+    const SIM_STRATEGY_CONFIG = { ... };
+    const SIM_ADAPTIVE_LEARNING_RATES = { ... };
+    // ... all the simulation loops ...
     return wins / losses;
+    */
 }
 
 // --- MAIN EVOLUTION LOOP ---
@@ -182,7 +97,7 @@ async function runEvolution() {
         population.push({ individual: createIndividual(), fitness: 0 });
     }
 
-    try { // <-- ADDED TRY
+    try {
         while (isRunning && generationCount < currentGaConfig.maxGenerations) {
             generationCount++;
             for (const p of population) {
@@ -229,7 +144,7 @@ async function runEvolution() {
                 }
             });
         }
-    } catch (error) { // <-- ADDED CATCH
+    } catch (error) {
         console.error("Error during evolution:", error);
         self.postMessage({
             type: 'error',
@@ -237,7 +152,7 @@ async function runEvolution() {
                 message: error.message
             }
         });
-    } finally { // <-- ADDED FINALLY
+    } finally {
         isRunning = false;
     }
 }
