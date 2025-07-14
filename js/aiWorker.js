@@ -1,23 +1,35 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
 
-// **APPLIED FIX: Reverting to module imports and ensuring asynchronous initialization**
 import * as tf from 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js';
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@4.20.0/dist/tf-layers.min.js';
 
-// Ensure TensorFlow.js is ready and set the backend
-tf.ready().then(() => {
-    // Optional: For better performance in production, enable production mode
-    tf.enableProdMode();
-    // Explicitly set backend to CPU for Web Worker compatibility
-    tf.setBackend('cpu');
-    if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
-}).catch(err => {
-    console.error('Failed to initialize TensorFlow.js backend in aiWorker:', err);
-    self.postMessage({ type: 'error', message: 'AI Model: Failed to initialize TensorFlow.js backend.' });
-});
-
 import * as config from './config.js';
+
+// **APPLIED FIX: New asynchronous initialization function for TensorFlow.js**
+async function initTensorFlow() {
+    try {
+        // Wait for TF.js to be fully ready before proceeding
+        await tf.ready(); // This call should now be reliable if tf.js-core is properly loaded.
+
+        // Optional: For better performance in production, enable production mode
+        tf.enableProdMode(); //
+
+        // Explicitly set backend to CPU for Web Worker compatibility
+        tf.setBackend('cpu'); //
+        if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
+    } catch (err) {
+        console.error('Failed to initialize TensorFlow.js backend in aiWorker:', err);
+        self.postMessage({ type: 'error', message: 'AI Model: Failed to initialize TensorFlow.js backend.' });
+        throw err; // Re-throw to propagate the error and potentially stop worker operations
+    }
+}
+
+// Call the initialization function immediately, and ensure other operations wait for it.
+// We will need to make changes to self.onmessage to await this.
+let tfInitializedPromise = initTensorFlow();
+
 console.log('TensorFlow.js tf object in aiWorker (after initial import):', tf); // Keep this for verification
+
 
 // --- ENSEMBLE CONFIGURATION ---
 const ENSEMBLE_CONFIG = [
@@ -175,6 +187,9 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
 
 // Main training function (updated for new data)
 async function trainEnsemble(historyData, historicalStreakData) {
+    // Ensure TF.js is initialized before training
+    await tfInitializedPromise;
+
     if (isTraining) {
         self.postMessage({ type: 'status', message: 'AI Ensemble: Training already in progress.' });
         return;
@@ -230,6 +245,9 @@ async function trainEnsemble(historyData, historicalStreakData) {
 
 // Prediction function (updated for third output)
 async function predictWithEnsemble(historyData) {
+    // Ensure TF.js is initialized before predicting
+    await tfInitializedPromise;
+
     const activeModels = ensemble.filter(m => m.model && m.scaler);
     if (activeModels.length === 0) return null;
 
@@ -307,6 +325,9 @@ async function predictWithEnsemble(historyData) {
 
 // Storage functions (unchanged)
 async function loadModelsFromStorage() {
+    // Ensure TF.js is initialized before loading models
+    await tfInitializedPromise;
+
     const loadPromises = ensemble.map(async (member) => {
         try {
             // The path for loadLayersModel must match the path used in `save`.
@@ -322,6 +343,9 @@ async function loadModelsFromStorage() {
 }
 
 async function clearModelsFromStorage() {
+    // Ensure TF.js is initialized before clearing models
+    await tfInitializedPromise;
+
     const clearPromises = ensemble.map(async (member) => {
         try {
             if (member.model) {
@@ -343,6 +367,16 @@ async function clearModelsFromStorage() {
 // --- Message Handling for Web Worker (Updated) ---
 self.onmessage = async (event) => {
     const { type, payload } = event.data;
+
+    // Ensure TF.js initialization completes before processing messages that rely on it
+    try {
+        await tfInitializedPromise;
+    } catch (tfInitError) {
+        console.error("AI Worker: TensorFlow.js was not initialized, cannot process message.", tfInitError);
+        self.postMessage({ type: 'error', message: 'AI Model: Initialization failed. Cannot process request.' });
+        return; // Stop processing if TF.js init failed
+    }
+
     switch (type) {
         case 'init':
             terminalMapping = payload.terminalMapping;
