@@ -129,11 +129,11 @@ export const clonablePredictionTypes = allPredictionTypes.map(type => ({
 
 // --- Genetic Algorithm Configuration ---
 export const GA_CONFIG = {
-    populationSize: 1, // TEMPORARY: Set to 1 for precise debugging
+    populationSize: 50, // RESTORED to original value
     mutationRate: 0.15,
     crossoverRate: 0.7,
-    eliteCount: 1,      // TEMPORARY: Set to 1
-    maxGenerations: 1   // TEMPORARY: Set to 1 for precise debugging
+    eliteCount: 4,      // RESTORED to original value
+    maxGenerations: 100 // RESTORED to original value
 };
 
 // --- AI Model Configuration ---
