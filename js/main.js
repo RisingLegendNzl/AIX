@@ -6,6 +6,7 @@ import * as state from './state.js';
 import * as ui from './ui.js';
 import * as analysis from './analysis.js';
 import { initializeWorkers } from './workers.js';
+import { connectLiveDataSource } from './liveData.js'; // NEW: Import connectLiveDataSource
 
 // --- STATE MANAGEMENT ---
 function loadState() {
@@ -58,11 +59,15 @@ loadState();
 // 3. Initialize the Web Workers and their message handlers
 initializeWorkers();
 
-// 4. Run the initial analyses and render the UI based on loaded state
+// NEW: 4. Connect to the live data source (your WebSocket server)
+// IMPORTANT: Ensure you have added the Socket.IO client library to your index.html
+connectLiveDataSource(); 
+
+// 5. Run the initial analyses and render the UI based on loaded state
 analysis.runAllAnalyses();
 ui.renderHistory();
 
-// 5. Initialize the AI worker correctly, giving it time to load its resources
+// 6. Initialize the AI worker correctly, giving it time to load its resources
 analysis.initializeAi();
 
 // Read initial values directly for startup sequence
