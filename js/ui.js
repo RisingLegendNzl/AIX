@@ -150,19 +150,19 @@ export function renderTrendAnalysis(analysis) {
 }
 
 export function updateAllTogglesUI() {
-    dom.trendConfirmationToggle.checked = state.useTrendConfirmation;
-    dom.weightedZoneToggle.checked = state.useWeightedZone;
-    dom.proximityBoostToggle.checked = state.useProximityBoost;
-    dom.pocketDistanceToggle.checked = state.usePocketDistance;
-    dom.lowestPocketDistanceToggle.checked = state.useLowestPocketDistance;
-    dom.advancedCalculationsToggle.checked = state.useAdvancedCalculations;
-    dom.dynamicStrategyToggle.checked = state.useDynamicStrategy;
-    dom.adaptivePlayToggle.checked = state.useAdaptivePlay;
-    dom.tableChangeWarningsToggle.checked = state.useTableChangeWarnings;
-    dom.dueForHitToggle.checked = state.useDueForHit;
-    dom.neighbourFocusToggle.checked = state.useNeighbourFocus;
-    dom.lessStrictModeToggle.checked = state.useLessStrict;
-    dom.dynamicTerminalNeighbourCountToggle.checked = state.useDynamicTerminalNeighbourCount;
+    if (dom.trendConfirmationToggle) dom.trendConfirmationToggle.checked = state.useTrendConfirmation;
+    if (dom.weightedZoneToggle) dom.weightedZoneToggle.checked = state.useWeightedZone;
+    if (dom.proximityBoostToggle) dom.proximityBoostToggle.checked = state.useProximityBoost;
+    if (dom.pocketDistanceToggle) dom.pocketDistanceToggle.checked = state.usePocketDistance;
+    if (dom.lowestPocketDistanceToggle) dom.lowestPocketDistanceToggle.checked = state.useLowestPocketDistance;
+    if (dom.advancedCalculationsToggle) dom.advancedCalculationsToggle.checked = state.useAdvancedCalculations;
+    if (dom.dynamicStrategyToggle) dom.dynamicStrategyToggle.checked = state.useDynamicStrategy;
+    if (dom.adaptivePlayToggle) dom.adaptivePlayToggle.checked = state.useAdaptivePlay;
+    if (dom.tableChangeWarningsToggle) dom.tableChangeWarningsToggle.checked = state.useTableChangeWarnings;
+    if (dom.dueForHitToggle) dom.dueForHitToggle.checked = state.useDueForHit;
+    if (dom.neighbourFocusToggle) dom.neighbourFocusToggle.checked = state.useNeighbourFocus;
+    if (dom.lessStrictModeToggle) dom.lessStrictModeToggle.checked = state.useLessStrict;
+    if (dom.dynamicTerminalNeighbourCountToggle) dom.dynamicTerminalNeighbourCountToggle.checked = state.useDynamicTerminalNeighbourCount;
 }
 
 export function updateWinLossCounter() {
@@ -179,8 +179,8 @@ export function updateWinLossCounter() {
         }
     });
 
-    dom.winCount.textContent = wins;
-    dom.lossCount.textContent = losses;
+    if (dom.winCount) dom.winCount.textContent = wins;
+    if (dom.lossCount) dom.lossCount.textContent = losses;
 }
 
 export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) {
@@ -364,6 +364,7 @@ export function renderHistory() {
 }
 
 export function renderAnalysisList(neighbourScores) {
+    if(!dom.analysisList) return;
     dom.analysisList.innerHTML = '';
     const sortedAnalysis = Object.entries(neighbourScores).map(([num, scores]) => ({ num: parseInt(num), score: scores.success })).sort((a, b) => b.score - a.score);
     if (sortedAnalysis.length > 0 && !sortedAnalysis.every(a => a.score === 0)) {
@@ -376,6 +377,7 @@ export function renderAnalysisList(neighbourScores) {
 }
 
 export function renderBoardState(boardStats) {
+    if(!dom.boardStateAnalysis) return;
     dom.boardStateAnalysis.innerHTML = '';
     for(const typeId in boardStats) {
         const type = config.allPredictionTypes.find(t => t.id === typeId);
@@ -550,7 +552,7 @@ function handleSubmitResult() {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
         setTimeout(() => {
-            document.getElementById('calculateButton').click();
+            if(dom.calculateButton) dom.calculateButton.click();
         }, 50);
     }
     hidePatternAlert();
@@ -558,14 +560,14 @@ function handleSubmitResult() {
 
 
 function handleClearInputs() { 
-    dom.number1.value = '';
-    dom.number2.value = '';
-    dom.winningNumberInput.value = '';
-    dom.resultDisplay.classList.add('hidden');
-    dom.number1.focus();
+    if (dom.number1) dom.number1.value = '';
+    if (dom.number2) dom.number2.value = '';
+    if (dom.winningNumberInput) dom.winningNumberInput.value = '';
+    if (dom.resultDisplay) dom.resultDisplay.classList.add('hidden');
+    if (dom.number1) dom.number1.focus();
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
     drawRouletteWheel(null, lastWinning);
-    if (dom.resultDisplay.textContent.includes('valid numbers')) {
+    if (dom.resultDisplay && dom.resultDisplay.textContent.includes('valid numbers')) {
         dom.resultDisplay.textContent = '';
     }
     hidePatternAlert();
@@ -599,7 +601,7 @@ function handleHistoryAction(event) {
     if (state.history.filter(item => item.status === 'success').length < config.AI_CONFIG.trainingMinHistory) {
         state.setIsAiReady(false);
         updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
-        aiWorker.postMessage({ type: 'clear_model' });
+        if (aiWorker) aiWorker.postMessage({ type: 'clear_model' });
     }
     hidePatternAlert();
 }
@@ -620,54 +622,10 @@ function handleClearHistory() {
     
     analysis.triggerTrendAnalysis();
 
-    dom.historicalAnalysisMessage.textContent = 'History cleared.';
+    if(dom.historicalAnalysisMessage) dom.historicalAnalysisMessage.textContent = 'History cleared.';
     drawRouletteWheel(); 
     
-    aiWorker.postMessage({ type: 'clear_model' });
-    hidePatternAlert();
-}
-
-function handleVideoUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (state.currentVideoURL) {
-        URL.revokeObjectURL(state.currentVideoURL);
-    }
-    state.setCurrentVideoURL(URL.createObjectURL(file));
-
-    dom.videoPlayer.src = state.currentVideoURL;
-    dom.videoPlayer.classList.remove('hidden');
-    dom.videoUploadContainer.classList.add('hidden');
-    dom.videoControlsContainer.classList.remove('hidden');
-    dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
-    hidePatternAlert();
-}
-
-function startVideoAnalysis() {
-    dom.analyzeVideoButton.disabled = true;
-    dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
-    console.log("Video analysis initiated.");
-    setTimeout(() => {
-        dom.analyzeVideoButton.disabled = false;
-        dom.videoStatus.textContent = 'Analysis complete (simulation).';
-    }, 2000);
-    hidePatternAlert();
-}
-
-function clearVideoState() {
-    if (state.currentVideoURL) {
-        URL.revokeObjectURL(state.currentVideoURL);
-        state.setCurrentVideoURL(null);
-    }
-    dom.videoPlayer.src = '';
-    dom.videoUpload.value = ''; 
-
-    dom.videoPlayer.classList.add('hidden');
-    dom.frameCanvas.classList.add('hidden');
-    dom.videoControlsContainer.classList.add('hidden');
-    dom.videoUploadContainer.classList.remove('hidden');
-    dom.videoStatus.textContent = '';
+    if (aiWorker) aiWorker.postMessage({ type: 'clear_model' });
     hidePatternAlert();
 }
 
@@ -691,10 +649,8 @@ function handlePresetSelection(presetName) {
 
 function createSlider(containerId, label, paramObj, paramName) {
     const container = document.getElementById(containerId);
-    if (!container) {
-        console.warn(`Slider container ${containerId} not found.`);
-        return;
-    }
+    if (!container) return;
+    
     const id = `${paramName}Slider`;
     const paramDef = parameterDefinitions[paramName];
     if (!paramDef) {
@@ -725,7 +681,7 @@ function createSlider(containerId, label, paramObj, paramName) {
         paramObj[paramName] = val;
 
         state.saveState(); 
-        dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
+        if (dom.parameterStatusMessage) dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
         analysis.handleStrategyChange();
     };
 
@@ -734,33 +690,43 @@ function createSlider(containerId, label, paramObj, paramName) {
 }
 
 export function initializeAdvancedSettingsUI() {
-    const slidersContainer = document.getElementById('advancedSettingsContent');
+    const slidersContainer = dom.advancedSettingsContent;
     if (!slidersContainer) return;
 
     slidersContainer.innerHTML = `
-        <div class="space-y-3">
-            <h3 class="text-lg font-semibold text-gray-700">Strategy Learning Rates</h3>
-            <div class="space-y-3" id="strategyLearningRatesSliders"></div>
+        <div class="space-y-6">
+            <div class="space-y-3">
+                <h3 class="text-lg font-semibold text-gray-700">Optimization Categories</h3>
+                <p class="text-sm text-gray-600 mb-4">Toggle which parameter categories the optimizer should consider.</p>
+                <div class="divide-y divide-gray-200">
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Core Strategy Parameters</span><input type="checkbox" id="optimizeCoreStrategyToggle" class="toggle-checkbox" checked><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Adaptive Influence Rates</span><input type="checkbox" id="optimizeAdaptiveRatesToggle" class="toggle-checkbox" checked><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                </div>
+            </div>
+            <div class="space-y-3">
+                <h3 class="text-lg font-semibold text-gray-700">Strategy Learning Rates</h3>
+                <div class="space-y-3" id="strategyLearningRatesSliders"></div>
+            </div>
+            <div class="space-y-3">
+                <h3 class="lg font-semibold text-gray-700">Pattern & Trigger Thresholds</h3>
+                <div class="space-y-3" id="patternThresholdsSliders"></div>
+            </div>
+            <div class="space-y-3">
+                <h3 class="text-lg font-semibold text-gray-700">Adaptive Influence Learning</h3>
+                <div class="space-y-3" id="adaptiveInfluenceSliders"></div>
+            </div>
+            <div class="space-y-3">
+                <h3 class="text-lg font-semibold text-gray-700">Table Change Warning Parameters</h3>
+                <div class="space-y-3" id="warningParametersSliders"></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+                <button id="resetParametersButton" class="btn btn-secondary">Reset to Defaults</button>
+                <button id="saveParametersButton" class="btn btn-secondary">Save Parameters to File</button>
+                <input type="file" id="loadParametersInput" class="hidden" accept=".json">
+                <label for="loadParametersInput" id="loadParametersLabel" class="w-full text-center btn btn-secondary cursor-pointer">Load Parameters from File</label>
+            </div>
+            <p id="parameterStatusMessage" class="text-sm text-center text-gray-600 mt-2 h-4"></p>
         </div>
-        <div class="space-y-3">
-            <h3 class="lg font-semibold text-gray-700">Pattern & Trigger Thresholds</h3>
-            <div class="space-y-3" id="patternThresholdsSliders"></div>
-        </div>
-        <div class="space-y-3">
-            <h3 class="text-lg font-semibold text-gray-700">Adaptive Influence Learning</h3>
-            <div class="space-y-3" id="adaptiveInfluenceSliders"></div>
-        </div>
-        <div class="space-y-3">
-            <h3 class="text-lg font-semibold text-gray-700">Table Change Warning Parameters</h3>
-            <div class="space-y-3" id="warningParametersSliders"></div>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
-            <button id="resetParametersButton" class="btn btn-secondary">Reset to Defaults</button>
-            <button id="saveParametersButton" class="btn btn-secondary">Save Parameters to File</button>
-            <input type="file" id="loadParametersInput" class="hidden" accept=".json">
-            <label for="loadParametersInput" id="loadParametersLabel" class="w-full text-center btn btn-secondary cursor-pointer">Load Parameters from File</label>
-        </div>
-        <p id="parameterStatusMessage" class="text-sm text-center text-gray-600 mt-2 h-4"></p>
     `;
 
     for (const paramName in parameterMap) {
@@ -791,24 +757,18 @@ export function toggleParameterSliders(enable) {
     }
 }
 
-// --- UI INITIALIZATION HELPERS ---
-
 function attachMainActionListeners() {
-    document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
-    document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
-    document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
-    document.getElementById('swapButton').addEventListener('click', handleSwap);
-    document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
-    dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses()); 
+    if (dom.calculateButton) dom.calculateButton.addEventListener('click', handleNewCalculation);
+    if (dom.submitResultButton) dom.submitResultButton.addEventListener('click', handleSubmitResult);
+    if (dom.clearInputsButton) dom.clearInputsButton.addEventListener('click', handleClearInputs);
+    if (dom.swapButton) dom.swapButton.addEventListener('click', handleSwap);
+    if (dom.clearHistoryButton) dom.clearHistoryButton.addEventListener('click', handleClearHistory);
+    if (dom.historyList) dom.historyList.addEventListener('click', handleHistoryAction);
+    if (dom.recalculateAnalysisButton) dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses());
     
-    [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleNewCalculation();
-    }));
-
-    dom.winningNumberInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleSubmitResult();
-    });
+    if (dom.number1) dom.number1.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleNewCalculation(); });
+    if (dom.number2) dom.number2.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleNewCalculation(); });
+    if (dom.winningNumberInput) dom.winningNumberInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSubmitResult(); });
 }
 
 export function attachOptimizationButtonListeners() {
@@ -819,10 +779,10 @@ export function attachOptimizationButtonListeners() {
                 return;
             }
             updateOptimizationStatus('Starting optimization...');
-            dom.optimizationResult.classList.add('hidden');
+            if (dom.optimizationResult) dom.optimizationResult.classList.add('hidden');
             toggleParameterSliders(false); 
             dom.startOptimizationButton.disabled = true;
-            dom.stopOptimizationButton.disabled = false;
+            if(dom.stopOptimizationButton) dom.stopOptimizationButton.disabled = false;
             
             const togglesForWorker = {
                 useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
@@ -855,7 +815,7 @@ export function attachOptimizationButtonListeners() {
 
     if (dom.stopOptimizationButton) {
         dom.stopOptimizationButton.addEventListener('click', () => {
-            optimizationWorker.postMessage({ type: 'stop' });
+            if (optimizationWorker) optimizationWorker.postMessage({ type: 'stop' });
         });
     }
 
@@ -865,10 +825,7 @@ export function attachOptimizationButtonListeners() {
                 const params = state.bestFoundParams.bestIndividual;
                 const toggles = state.bestFoundParams.togglesUsed;
 
-                Object.assign(config.STRATEGY_CONFIG, {
-                    ...config.STRATEGY_CONFIG,
-                    ...params
-                });
+                Object.assign(config.STRATEGY_CONFIG, params);
                 Object.assign(config.ADAPTIVE_LEARNING_RATES, {
                     ...config.ADAPTIVE_LEARNING_RATES,
                     SUCCESS: params.adaptiveSuccessRate,
@@ -924,22 +881,45 @@ function attachToggleListeners() {
 }
 
 function attachAdvancedSettingsListeners() {
-    dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
-    dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
-    dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
+    if (dom.setHighestWinRatePreset) dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
+    if (dom.setBalancedSafePreset) dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
+    if (dom.setAggressiveSignalsPreset) dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
 
-    document.getElementById('advancedSettingsContent').addEventListener('click', (e) => {
-        if (e.target.id === 'resetParametersButton') resetAllParameters();
-        if (e.target.id === 'saveParametersButton') saveParametersToFile();
-    });
+    if (dom.advancedSettingsContent) {
+        dom.advancedSettingsContent.addEventListener('click', (e) => {
+            if (e.target.id === 'resetParametersButton') resetAllParameters();
+            if (e.target.id === 'saveParametersButton') saveParametersToFile();
+        });
+    }
     
-    dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
-    dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis); 
+    if (dom.loadParametersInput) dom.loadParametersInput.addEventListener('change', (e) => loadParametersFromFile(e));
+    if (dom.analyzeHistoricalDataButton) dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis); 
+    if (dom.optimizeCoreStrategyToggle) dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); 
+    if (dom.optimizeAdaptiveRatesToggle) dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); 
 }
 
 function attachGuideAndInfoListeners() {
-    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
-    document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+    const guides = {
+        presetStrategyGuideHeader: 'presetStrategyGuideContent',
+        baseStrategyGuideHeader: 'baseStrategyGuideContent',
+        advancedStrategyGuideHeader: 'advancedStrategyGuideContent',
+        advancedSettingsHeader: 'advancedSettingsContent'
+    };
+    for(const headerId in guides) {
+        if (document.getElementById(headerId)) {
+            document.getElementById(headerId).addEventListener('click', () => toggleGuide(guides[headerId]));
+        }
+    }
+
+    if(dom.historyInfoToggle) {
+        dom.historyInfoToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if(dom.historyInfoDropdown) dom.historyInfoDropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', () => {
+             if (dom.historyInfoDropdown) dom.historyInfoDropdown.classList.add('hidden');
+        });
+    }
 }
 
 export function initializeUI() {
@@ -956,7 +936,9 @@ export function initializeUI() {
         'applyBestParamsButton', 'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'loadParametersInput', 'submitResultButton', 'patternAlert',
         'setHighestWinRatePreset', 'setBalancedSafePreset', 'setAggressiveSignalsPreset', 
-        'advancedStrategyGuideHeader', 'advancedStrategyGuideContent', 'systemStatusDisplay', 'trendAnalysisDisplay'
+        'advancedStrategyGuideHeader', 'advancedStrategyGuideContent', 'systemStatusDisplay', 'trendAnalysisDisplay',
+        'clearInputsButton', 'swapButton', 'clearHistoryButton', 'recalculateAnalysisButton', 'loadParametersLabel',
+        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
     
@@ -964,4 +946,5 @@ export function initializeUI() {
     attachToggleListeners();
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
+    initializeAdvancedSettingsUI();
 }
