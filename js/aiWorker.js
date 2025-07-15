@@ -126,29 +126,56 @@ function getConsecutivePerformanceForAI(historySubset, allPredictionTypes) {
         allPredictionTypes.forEach(type => {
             if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
                 allTypesEvaluatedForThisItem = true; // At least one type was evaluated
-                if (consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) { // Only count if not already started
+                // Only count if not already started, or if continuing same streak
+                if ((consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) || 
+                    (item.typeSuccessStatus[type.id] && consecutiveHits[type.id] > 0) ||
+                    (!item.typeSuccessStatus[type.id] && consecutiveMisses[type.id] > 0)) {
+                    
                     if (item.typeSuccessStatus[type.id]) { // Hit
-                        consecutiveHits[type.id] = (consecutiveHits[type.id] === 0) ? 1 : consecutiveHits[type.id] + 1; // Start or continue hit streak
+                        consecutiveHits[type.id]++; 
                         consecutiveMisses[type.id] = 0; // Reset miss streak
                     } else { // Miss
-                        consecutiveMisses[type.id] = (consecutiveMisses[type.id] === 0) ? 1 : consecutiveMisses[type.id] + 1; // Start or continue miss streak
+                        consecutiveMisses[type.id]++; 
                         consecutiveHits[type.id] = 0; // Reset hit streak
                     }
+                } else {
+                    // This means the streak for this specific type was broken by an opposite result earlier in the historySliceForThisItem
+                    // So we effectively stop counting for this type beyond this point for this specific snapshot.
+                    // This logic ensures we're only capturing the *current* consecutive streak.
+                    consecutiveHits[type.id] = 0; // Reset if streak broke earlier
+                    consecutiveMisses[type.id] = 0; // Reset if streak broke earlier
                 }
-            }
-        });
-        // If no types were evaluated in this item, it's like a break in the chain for all.
-        if (!allTypesEvaluatedForThisItem) {
-            allPredictionTypes.forEach(type => {
+            } else {
+                // If type success status isn't available for this type in this item,
+                // it means this type wasn't active or calculated. Break the streak.
+                // Reset for this specific type
                 consecutiveHits[type.id] = 0;
                 consecutiveMisses[type.id] = 0;
-            });
-            break;
-        }
+            }
+        });
+        // If no types were evaluated in this item at all, it's like a break in the chain for all relevant types.
+        // This outer break is likely not needed if inner loop handles it for each type.
+        // Removing for now for more precise per-type tracking.
+        // if (!allTypesEvaluatedForThisItem) {
+        //     break;
+        // }
     }
 
     return { consecutiveHits, consecutiveMisses };
 }
+
+// FIXED: Move scaleFeature to global scope so it's accessible by predictWithEnsemble
+const scaleFeature = (value, index, scaler) => {
+    if (!scaler || scaler.min[index] === undefined || scaler.max[index] === undefined) {
+        // Fallback or error if scaler is not valid
+        console.warn('Scaler is invalid or missing min/max for index', index, scaler);
+        return value; // Return original value or handle as error
+    }
+    const featureMin = scaler.min[index];
+    const featureMax = scaler.max[index];
+    if (featureMax === featureMin) return 0; // Avoid division by zero if feature is constant
+    return (value - featureMin) / (featureMax - featureMin);
+};
 
 
 // Function to prepare data, now includes consecutive hit/miss features
@@ -194,7 +221,7 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
 
         // For each item in the sequence, get its features, passing the history slice *up to that item*
         const xs_row = sequence.map((item, idx) => {
-            const historySliceForThisItem = validHistory.slice(0, i + idx + 1);
+            const historySliceForThisItem = validHistory.slice(0, i + idx + 1); // Slice up to the current item being processed in the overall history
             return getFeatures(item, historySliceForThisItem);
         });
         rawFeatures.push(xs_row);
@@ -212,16 +239,15 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     const featureCount = rawFeatures.length > 0 ? rawFeatures[0][0].length : 0;
 
     // Apply scaling to the entire feature set after generating all features
-    const featuresForScaling = rawFeatures.flat(2); // Flatten all features to 1D array for min/max
     const newScaler = {
         min: Array(featureCount).fill(Infinity),
         max: Array(featureCount).fill(-Infinity)
     };
     
     // Recalculate min/max for scaling across all features
-    for (let i = 0; i < rawFeatures.length; i++) {
-        for (let j = 0; j < rawFeatures[i].length; j++) {
-            for (let k = 0; k < rawFeatures[i][j].length; k++) {
+    for (let i = 0; i < rawFeatures.length; i++) { // Iterate over sequences
+        for (let j = 0; j < rawFeatures[i].length; j++) { // Iterate over items in sequence
+            for (let k = 0; k < rawFeatures[i][j].length; k++) { // Iterate over features in item
                 const val = rawFeatures[i][j][k];
                 newScaler.min[k] = Math.min(newScaler.min[k], val);
                 newScaler.max[k] = Math.max(newScaler.max[k], val);
@@ -229,17 +255,10 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         }
     }
 
-    const scaleFeature = (value, index) => {
-        const featureMin = newScaler.min[index];
-        const featureMax = newScaler.max[index];
-        if (featureMax === featureMin) return 0; // Avoid division by zero if feature is constant
-        return (value - featureMin) / (featureMax - featureMin);
-    };
-
     // Apply scaling to rawFeatures
     const scaledFeatures = rawFeatures.map(sequence => 
         sequence.map(itemFeatures => 
-            itemFeatures.map((val, idx) => scaleFeature(val, idx))
+            itemFeatures.map((val, idx) => scaleFeature(val, idx, newScaler)) // Pass newScaler here
         )
     );
 
@@ -352,7 +371,7 @@ async function predictWithEnsemble(historyData) {
 
     const lastSequence = validHistory.slice(-SEQUENCE_LENGTH);
 
-    const scaler = activeModels[0].scaler;
+    const scaler = activeModels[0].scaler; // Assuming all models use the same scaler
 
     // Helper to get features including consecutive performance
     const getFeaturesForPrediction = (item, historySliceForContext) => {
@@ -382,7 +401,7 @@ async function predictWithEnsemble(historyData) {
             // For prediction, the context slice should be up to the current item being processed in the sequence relative to the *full* validHistory.
             // If lastSequence is `validHistory.slice(-SEQUENCE_LENGTH)`, then the context for item at `idx` in `lastSequence` is `validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1)`
             const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
-            return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx));
+            return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler)); // Pass scaler here
         });
         
         inputTensor = tf.tensor3d([inputFeatures]);
