@@ -5,18 +5,21 @@ import * as state from './state.js';
 import * as config from './config.js';
 
 // Import specific UI functions needed, NOT the whole module
-import { updateAiStatus, updateOptimizationStatus, showOptimizationComplete, showOptimizationStopped, toggleParameterSliders } from './ui.js'; // ADDED: toggleParameterSliders
+import { updateAiStatus, updateOptimizationStatus, showOptimizationComplete, showOptimizationStopped, toggleParameterSliders, updateRlStatus } from './ui.js'; 
 import * as dom from './ui.js'; // Import dom elements from ui.js for button references
 
 
 // --- WORKER INITIALIZATION ---
-export let aiWorker;
-export let optimizationWorker;
+// Declare the workers globally in the module scope
+export let aiWorker; 
+export let optimizationWorker; 
+export let rlWorker; 
 
 export function initializeWorkers() {
-    // Corrected paths to point inside the /js folder
+    // Assign the worker instances to the *already exported* variables
     aiWorker = new Worker('js/aiWorker.js', { type: 'module' });
     optimizationWorker = new Worker('js/optimizationWorker.js', { type: 'module' });
+    rlWorker = new Worker('js/rlWorker.js', { type: 'module' });
 
     // --- WORKER MESSAGE HANDLERS ---
     aiWorker.onmessage = (event) => {
@@ -66,6 +69,28 @@ export function initializeWorkers() {
                 const errorHtml = `<span style="color: #ef4444;"><strong>Error:</strong> ${payload.message}</span>`;
                 updateOptimizationStatus(errorHtml);
                 showOptimizationStopped();
+                break;
+        }
+    };
+
+    rlWorker.onmessage = (event) => { // NEW: RL Worker message handler
+        const { type, payload } = event.data;
+        if (config.DEBUG_MODE) console.log(`Main: Received from RL Worker: ${type}`);
+
+        switch (type) {
+            case 'status':
+                updateRlStatus(payload.message);
+                break;
+            case 'newAdaptiveRates':
+                // Apply the new adaptive rates suggested by the RL agent
+                state.setAdaptiveLearningRatesOverride(payload.adaptiveRates);
+                // Re-run analyses to apply the new rates immediately
+                // This might be too frequent if RL learns every spin, consider debouncing or a specific RL-triggered analysis
+                analysis.handleStrategyChange(); // Use handleStrategyChange to re-evaluate based on new rates
+                break;
+            case 'error':
+                updateRlStatus(`Error: ${payload.message}`);
+                console.error("RL Worker Error:", payload.message);
                 break;
         }
     };
