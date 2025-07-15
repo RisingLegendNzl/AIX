@@ -189,8 +189,70 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
 }
 
 
+/**
+ * Analyzes recent successful plays to detect shifts in primary driving factors.
+ * @param {Array} history - The full history log.
+ * @param {object} strategyConfig - The current strategy configuration.
+ * @returns {object} Contains boolean for shift detected and a reason.
+ */
+export function analyzeFactorShift(history, strategyConfig) {
+    let factorShiftDetected = false;
+    let reason = '';
+
+    const relevantSuccessfulPlays = [...history]
+        .filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.primaryDrivingFactor !== "N/A")
+        .sort((a, b) => b.id - a.id) // Newest first
+        .slice(0, strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE); // Get only the recent successful plays
+
+    if (relevantSuccessfulPlays.length < strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE) {
+        return { factorShiftDetected: false, reason: 'Not enough successful plays to detect factor shift.' };
+    }
+
+    const factorCounts = {};
+    relevantSuccessfulPlays.forEach(item => {
+        const factor = item.recommendationDetails.primaryDrivingFactor;
+        factorCounts[factor] = (factorCounts[factor] || 0) + 1;
+    });
+
+    const totalFactorsConsidered = relevantSuccessfulPlays.length;
+    let dominantFactor = null;
+    let dominantFactorPercentage = 0;
+    let diversityScore = 0; // Higher diversity means more spread out factors
+
+    Object.keys(factorCounts).forEach(factor => {
+        const percentage = (factorCounts[factor] / totalFactorsConsidered) * 100;
+        if (percentage > dominantFactorPercentage) {
+            dominantFactorPercentage = percentage;
+            dominantFactor = factor;
+        }
+        // A simple way to measure diversity: sum of squares of proportions. Lower is more diverse.
+        diversityScore += Math.pow(factorCounts[factor] / totalFactorsConsidered, 2);
+    });
+
+    // Check for lack of dominance (factors are too spread out)
+    if (dominantFactorPercentage < strategyConfig.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT) {
+        factorShiftDetected = true;
+        reason = `No single dominant primary factor (${dominantFactorPercentage.toFixed(1)}%) in recent successful plays.`;
+    }
+
+    // Check for high diversity (if diversity score is below a threshold, meaning many different factors are hitting)
+    // The diversity threshold is usually 1 - (1/N) where N is number of unique factors, but can be a set value.
+    // Let's use 1 - WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD for simplicity, if diversityScore is *less* than that, it's diverse.
+    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) {
+        factorShiftDetected = true;
+        reason = `High diversity of primary factors in recent successful plays.`;
+    }
+    
+    // You could also add logic to compare the *current* dominant factor to the *historical* dominant factor,
+    // but that would require storing and comparing historical factor dominance. For now, this focuses on recent diversity/lack of dominance.
+
+    return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
+}
+
+
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
+    let localConfirmedWinsLog = [];
     let localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
@@ -273,6 +335,9 @@ export async function runAllAnalyses(winningNumber = null) {
     // Calculate rolling performance for table change warnings
     const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
 
+    // NEW: Calculate factor shift status
+    const factorShiftStatus = analyzeFactorShift(state.history, config.STRATEGY_CONFIG);
+
     ui.renderAnalysisList(neighbourScores);
     ui.renderStrategyWeights();
     ui.renderBoardState(boardStats);
@@ -302,6 +367,7 @@ export async function runAllAnalyses(winningNumber = null) {
             useLessStrictBool: state.useLessStrict,     // Pass less strict toggle
             useTableChangeWarningsBool: state.useTableChangeWarnings, // PASS TABLE CHANGE WARNING TOGGLE
             rollingPerformance: rollingPerformance, // PASS ROLLING PERFORMANCE DATA
+            factorShiftStatus: factorShiftStatus, // PASS FACTOR SHIFT STATUS
             useLowestPocketDistanceBool: state.useLowestPocketDistance, // Pass pocket distance toggle
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
