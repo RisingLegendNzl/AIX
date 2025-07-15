@@ -1,7 +1,15 @@
 // js/analysis.js
 
 // --- IMPORTS ---
-import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
+// FIXED: Added analyzeFactorShift to the import list from shared-logic.
+import { 
+    calculateTrendStats, 
+    getBoardStateStats, 
+    runNeighbourAnalysis as runSharedNeighbourAnalysis, 
+    getRecommendation, 
+    evaluateCalculationStatus,
+    analyzeFactorShift 
+} from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
@@ -109,6 +117,9 @@ function determineSystemMode(context) {
             if (criticalFailureProb < CONDUCTOR_CONFIG.AGGRESSIVE_AI_FAILURE_PROB_THRESHOLD) {
                 return 'aggressive';
             }
+        } else if (!aiPredictionData) {
+            // If AI isn't ready but trend is strong, still allow aggressive mode
+            return 'aggressive';
         }
     }
     
