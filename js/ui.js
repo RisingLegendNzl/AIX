@@ -29,7 +29,14 @@ const parameterDefinitions = {
     SUCCESS: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' }, // Corresponds to adaptiveSuccessRate in GA
     FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },  // Corresponds to adaptiveFailureRate in GA
     MIN_INFLUENCE: { min: 0.0, max: 1.0, step: 0.01, category: 'adaptiveRates' },
-    MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' }
+    MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' },
+
+    // NEW: Table Change Warning Parameters for Sliders (Match config.js)
+    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'coreStrategy' }, // Example range
+    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'coreStrategy' }, // Example range
+    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'coreStrategy' }, // Example range
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'coreStrategy' }, // Example range
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'coreStrategy' } // Example range
 };
 
 // Map parameter names to their respective config objects and display labels
@@ -48,7 +55,13 @@ const parameterMap = {
     SUCCESS: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Success Rate', container: 'adaptiveInfluenceSliders' },
     FAILURE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
     MIN_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Min Adaptive Influence', container: 'adaptiveInfluenceSliders' },
-    MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' }
+    MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' },
+    // Table Change Warning Parameters
+    WARNING_ROLLING_WINDOW_SIZE: { obj: config.STRATEGY_CONFIG, label: 'Warn Window Size', container: 'warningParametersSliders' },
+    WARNING_MIN_PLAYS_FOR_EVAL: { obj: config.STRATEGY_CONFIG, label: 'Warn Min Plays', container: 'warningParametersSliders' },
+    WARNING_LOSS_STREAK_THRESHOLD: { obj: config.STRATEGY_CONFIG, label: 'Warn Loss Streak', container: 'warningParametersSliders' },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { obj: config.STRATEGY_CONFIG, label: 'Warn Win Rate %', container: 'warningParametersSliders' },
+    DEFAULT_AVERAGE_WIN_RATE: { obj: config.STRATEGY_CONFIG, label: 'Default Avg Win Rate', container: 'warningParametersSliders' }
 };
 
 
@@ -344,7 +357,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -877,16 +890,24 @@ export function initializeAdvancedSettingsUI() {
     dom.strategyLearningRatesSliders.innerHTML = '';
     dom.patternThresholdsSliders.innerHTML = '';
     dom.adaptiveInfluenceSliders.innerHTML = '';
+    // NEW: Clear warnings parameter sliders container
+    if (dom.warningParametersSliders) dom.warningParametersSliders.innerHTML = '';
+
 
     // Separate containers for logical grouping
     const strategyLearningRatesContainer = document.getElementById('strategyLearningRatesSliders');
     const patternThresholdsContainer = document.getElementById('patternThresholdsSliders');
     const adaptiveInfluenceContainer = document.getElementById('adaptiveInfluenceSliders');
+    // NEW: Get warnings parameter sliders container
+    const warningParametersContainer = document.getElementById('warningParametersSliders');
+
 
     // Headers for each sub-category
     strategyLearningRatesContainer.innerHTML = '<h3>Strategy Learning Rates</h3>';
     patternThresholdsContainer.innerHTML = '<h3>Pattern & Trigger Thresholds</h3>';
     adaptiveInfluenceContainer.innerHTML = '<h3>Adaptive Influence Learning</h3>';
+    // NEW: Header for warnings parameter sliders
+    if (warningParametersContainer) warningParametersContainer.innerHTML = '<h3>Table Change Warning Parameters</h3>';
 
 
     // Create sliders for Core Strategy Parameters
@@ -909,11 +930,13 @@ export function initializeAdvancedSettingsUI() {
     createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
 
     // NEW: Add sliders for Table Change Warning Parameters
-    createSlider('strategyLearningRatesSliders', 'Warning Window Size', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WINDOW_SIZE');
-    createSlider('strategyLearningRatesSliders', 'Min Plays for Eval', config.STRATEGY_CONFIG, 'WARNING_MIN_PLAYS_FOR_EVAL');
-    createSlider('strategyLearningRatesSliders', 'Loss Streak Threshold', config.STRATEGY_CONFIG, 'WARNING_LOSS_STREAK_THRESHOLD');
-    createSlider('strategyLearningRatesSliders', 'Rolling Win Rate Threshold', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WIN_RATE_THRESHOLD');
-    createSlider('strategyLearningRatesSliders', 'Default Average Win Rate', config.STRATEGY_CONFIG, 'DEFAULT_AVERAGE_WIN_RATE');
+    if (warningParametersContainer) { // Only create if container exists
+        createSlider('warningParametersSliders', 'Warn Window Size', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WINDOW_SIZE');
+        createSlider('warningParametersSliders', 'Min Plays for Eval', config.STRATEGY_CONFIG, 'WARNING_MIN_PLAYS_FOR_EVAL');
+        createSlider('warningParametersSliders', 'Loss Streak Threshold', config.STRATEGY_CONFIG, 'WARNING_LOSS_STREAK_THRESHOLD');
+        createSlider('warningParametersSliders', 'Rolling Win Rate Threshold', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WIN_RATE_THRESHOLD');
+        createSlider('warningParametersSliders', 'Default Avg Win Rate', config.STRATEGY_CONFIG, 'DEFAULT_AVERAGE_WIN_RATE');
+    }
 }
 
 
@@ -999,6 +1022,14 @@ export function toggleParameterSliders(enable) {
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
             } else if (parameterDefinitions[paramName].category === 'adaptiveRates') {
                 categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
+            }
+            // NEW: Handle warning parameters category
+            else if (parameterDefinitions[paramName].category === 'warningParameters') {
+                // Assuming warning parameters are tied to 'coreStrategy' optimization toggle or a new toggle.
+                // For now, let's link it to 'optimizeCoreStrategyToggle' or just be always editable if not optimizing.
+                // Or we can add a new toggle for 'optimizeWarningParametersToggle' if needed.
+                // For simplicity, let's say they're editable if coreStrategy is editable or optimization is off.
+                categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked; // Link to core strategy optimization
             }
             
             // A slider/input is enabled if the main `enable` is true AND its category toggle is checked
@@ -1126,6 +1157,8 @@ export function initializeUI() {
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
+        // NEW: Add a container for Table Change Warning sliders
+        'warningParametersSliders',
         // NEW: Add new category toggle IDs here
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
