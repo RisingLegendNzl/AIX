@@ -118,6 +118,77 @@ export function calculateRollingPerformance(history, strategyConfig) {
     };
 }
 
+/**
+ * Calculates consecutive hits and misses for each prediction type.
+ * @param {Array} history - The full history log.
+ * @param {Array} allPredictionTypes - Array of all prediction type definitions.
+ * @returns {object} An object with current consecutive hits and misses for each prediction type ID.
+ */
+export function calculateConsecutivePerformance(history, allPredictionTypes) {
+    const consecutiveHits = {};
+    const consecutiveMisses = {};
+
+    // Initialize all types to 0
+    allPredictionTypes.forEach(type => {
+        consecutiveHits[type.id] = 0;
+        consecutiveMisses[type.id] = 0;
+    });
+
+    const relevantHistory = [...history]
+        .filter(item => item.status !== 'pending' && item.winningNumber !== null) // Only confirmed spins
+        .sort((a, b) => a.id - b.id); // Sort oldest to newest to calculate streaks correctly
+
+    // We process from oldest to newest to correctly build up streaks
+    // But then we return the *current* consecutive count for the *latest* state.
+    // A more efficient way for just the *latest* would be to go reverse from newest.
+    // For AI training, we need values for *each* point in history, so this forward pass is more correct.
+
+    const tempConsecutiveHits = {};
+    const tempConsecutiveMisses = {};
+    allPredictionTypes.forEach(type => {
+        tempConsecutiveHits[type.id] = 0;
+        tempConsecutiveMisses[type.id] = 0;
+    });
+
+
+    // To get the values *for each point in history* which is what prepareDataForLSTM needs,
+    // we would augment each history item with its consecutive counts *up to that point*.
+    // For now, let's return the counts for the *latest* state, and we'll adjust prepareDataForLSTM later
+    // to derive this contextually for each sequence.
+
+    if (relevantHistory.length > 0) {
+        const latestRelevantItem = relevantHistory[relevantHistory.length - 1];
+
+        allPredictionTypes.forEach(type => {
+            let hits = 0;
+            let misses = 0;
+            // Iterate backwards from the latest relevant item to find the streak
+            for (let i = relevantHistory.length - 1; i >= 0; i--) {
+                const item = relevantHistory[i];
+                if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
+                    if (item.typeSuccessStatus[type.id]) { // Was a hit for this type
+                        hits++;
+                        // If we were counting misses, reset and stop for misses
+                        if (misses > 0) break;
+                    } else { // Was a miss for this type
+                        misses++;
+                        // If we were counting hits, reset and stop for hits
+                        if (hits > 0) break;
+                    }
+                } else {
+                    // If type success status isn't available for this type in this item,
+                    // it means this type wasn't active or calculated. Break the streak.
+                    break;
+                }
+            }
+            consecutiveHits[type.id] = hits > 0 ? hits : 0;
+            consecutiveMisses[type.id] = misses > 0 ? misses : 0;
+        });
+    }
+
+    return { consecutiveHits, consecutiveMisses };
+}
+
 
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
@@ -189,7 +260,7 @@ export async function runAllAnalyses(winningNumber = null) {
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
-    // NEW: Calculate rolling performance for table change warnings
+    // Calculate rolling performance for table change warnings
     const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
 
     ui.renderAnalysisList(neighbourScores);
@@ -333,8 +404,8 @@ export async function handleStrategyChange() {
 
 // FIX: Renamed to be more specific. This is for retraining on load.
 export function trainAiOnLoad() {
-    if (!aiWorker || !state.isAiReady) { // Check if aiWorker and isAiReady are available
-        return; // Exit if pre-conditions aren't met
+    if (!aiWorker || !state.isAiReady) {
+        return;
     }
 
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
@@ -343,7 +414,7 @@ export function trainAiOnLoad() {
     if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
         state.setIsAiReady(false);
         ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
-        return; // Exit the function after updating status
+        return;
     }
 
     // If we reach here, history is sufficient, so proceed with training
