@@ -6,7 +6,7 @@ import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDis
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
-import { aiWorker } from './workers.js';
+import { aiWorker, optimizationWorker } from './workers.js'; // FIXED: Import optimizationWorker
 import * as analysis from './analysis.js'; // Ensure analysis is imported correctly for its functions
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
@@ -32,11 +32,11 @@ const parameterDefinitions = {
     MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' },
 
     // NEW: Table Change Warning Parameters for Sliders (Match config.js)
-    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'coreStrategy' }, // Example range
-    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'coreStrategy' }, // Example range
-    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'coreStrategy' }, // Example range
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'coreStrategy' }, // Example range
-    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'coreStrategy' } // Example range
+    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' }, // Example range
+    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' }, // Example range
+    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' }, // Example range
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' }, // Example range
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' } // Example range
 };
 
 // Map parameter names to their respective config objects and display labels
@@ -512,7 +512,7 @@ function handleNewCalculation() {
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
     // NEW: Calculate rolling performance for table change warnings
-    const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); // Use direct call from here.
+    const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); // FIXED: Correctly call analysis.calculateRollingPerformance
     
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
@@ -834,7 +834,7 @@ function handlePresetSelection(presetName) {
 
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
-    updateActivePredictionTypes();
+    analysis.updateActivePredictionTypes(); // FIXED: Call analysis.updateActivePredictionTypes
     analysis.handleStrategyChange(); // Use analysis.handleStrategyChange after preset
     hidePatternAlert(); // Hide warnings on preset change
 }
@@ -1024,11 +1024,7 @@ export function toggleParameterSliders(enable) {
                 categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
             }
             // NEW: Handle warning parameters category
-            else if (parameterDefinitions[paramName].category === 'warningParameters') {
-                // Assuming warning parameters are tied to 'coreStrategy' optimization toggle or a new toggle.
-                // For now, let's link it to 'optimizeCoreStrategyToggle' or just be always editable if not optimizing.
-                // Or we can add a new toggle for 'optimizeWarningParametersToggle' if needed.
-                // For simplicity, let's say they're editable if coreStrategy is editable or optimization is off.
+            else if (parameterDefinitions[paramName].category === 'warningParameters') { // FIXED: Corrected category check
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked; // Link to core strategy optimization
             }
             
@@ -1109,8 +1105,7 @@ function attachAdvancedSettingsListeners() {
     dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
 
     // Historical Analysis
-    dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis); // FIXED: Call analysis.handleHistoricalAnalysis
-                                                                                                  // instead of just handleHistoricalAnalysis
+    dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis); 
 
     // Video Analysis
     if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
