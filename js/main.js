@@ -34,7 +34,7 @@ function loadState() {
     }
     if (appState.strategyStates) state.setStrategyStates(appState.strategyStates);
     if (appState.patternMemory) state.setPatternMemory(appState.patternMemory);
-    if (appState.adaptiveFactorInfluences) state.setAdaptiveFactorInfluences(appState.adaptiveFactorInfluences);
+    if (appState.adaptiveFactorInfluences) Object.assign(state.adaptiveFactorInfluences, appState.adaptiveFactorInfluences); // Ensure this is merged, not overwritten
     if (appState.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, appState.STRATEGY_CONFIG);
     if (appState.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, appState.ADAPTIVE_LEARNING_RATES);
 
@@ -64,6 +64,9 @@ ui.renderHistory();
 
 // 5. Initialize the AI worker correctly, giving it time to load its resources
 analysis.initializeAi();
+
+// NEW: Attach optimization button listeners *after* workers are initialized
+ui.attachOptimizationButtonListeners(); // FIXED: Call the new function here
 
 // Read initial values directly for startup sequence
 const initialNum1 = parseInt(document.getElementById('number1').value, 10);
