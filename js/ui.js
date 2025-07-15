@@ -5,10 +5,8 @@
 import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
-// Import analysis functions that the UI will trigger
-import { runAllAnalyses, handleStrategyChange, handleHistoricalAnalysis, updateActivePredictionTypes, labelHistoryFailures, initializeAi, trainAiOnLoad } from './analysis.js';
-// Import worker instances to post messages to them
-import { aiWorker, optimizationWorker } from './workers.js';
+import * as ui from './ui.js';
+import { aiWorker } from './workers.js';
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
@@ -282,11 +280,14 @@ export function renderHistory() {
             const recommendedHit = item.hitTypes.includes(item.recommendedGroupId);
 
             let resultText = '';
-            // Determine result text for display purposes (HIT/MISS/WAIT)
+            // Determine result text for display purposes (HIT/MISS/WAIT/AVOID)
             if (item.status !== 'pending') {
                 if (details.finalScore > 0) { // Was an actionable "Play" signal
                     resultText = recommendedHit ? ' - HIT' : ' - MISS';
-                } else { // Was a "Wait for Signal" or "Low Confidence"
+                } else if (details.signal === 'Avoid Play') { // Explicit avoid signal
+                    resultText = ' - AVOID';
+                }
+                else { // Was a "Wait for Signal" or "Low Confidence"
                     resultText = ' - WAIT';
                 }
             }
@@ -294,7 +295,9 @@ export function renderHistory() {
             stateBadgeContent = `Top: ${recommendedLabel} (${hitRate.toFixed(1)}%) ${resultText}`;
             
             // Determine badge color
-            if (item.status !== 'pending' && details.finalScore <= 0) {
+            if (item.status !== 'pending' && details.signal === 'Avoid Play') { // Explicit avoid signal
+                stateBadgeClass = 'bg-red-700'; // Dark red for avoid
+            } else if (item.status !== 'pending' && details.finalScore <= 0) {
                  stateBadgeClass = 'bg-gray-500'; // "Wait" signal should be gray
             } else if (recommendedHit) {
                 stateBadgeClass = recommendedType?.colorClass || 'bg-green-500'; // Green or type color for hits
@@ -449,6 +452,28 @@ export function updateAiStatus(message) {
     if (dom.aiModelStatus) dom.aiModelStatus.textContent = message;
 }
 
+/**
+ * Displays a warning message in the dedicated pattern alert section.
+ * @param {string} message - The warning message to display.
+ */
+function showPatternAlert(message) {
+    if (dom.patternAlert) {
+        dom.patternAlert.innerHTML = `<strong>Warning:</strong> ${message}`;
+        dom.patternAlert.classList.remove('hidden');
+    }
+}
+
+/**
+ * Hides the pattern alert message.
+ */
+function hidePatternAlert() {
+    if (dom.patternAlert) {
+        dom.patternAlert.classList.add('hidden');
+        dom.patternAlert.textContent = '';
+    }
+}
+
+
 // --- EVENT HANDLERS (Private to this module) ---
 
 /**
@@ -464,6 +489,7 @@ function handleNewCalculation() {
     if (isNaN(num1Val) || isNaN(num2Val)) {
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
         dom.resultDisplay.classList.remove('hidden');
+        hidePatternAlert(); // Hide any old warnings
         return;
     }
 
@@ -471,7 +497,11 @@ function handleNewCalculation() {
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const lastWinningNumber = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+    
+    // NEW: Calculate rolling performance for table change warnings
+    const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); // Use direct call from here.
+    
+    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
     const newHistoryItem = {
         id: Date.now(),
@@ -488,84 +518,105 @@ function handleNewCalculation() {
     };
     state.history.push(newHistoryItem);
 
-    const aiPredictionData = null; // AI prediction will come later via runAllAnalyses
-    const recommendation = getRecommendation({
-        trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
-        isForWeightUpdate: false, aiPredictionData: aiPredictionData, currentAdaptiveInfluences: state.adaptiveFactorInfluences,
-        lastWinningNumber: lastWinningNumber, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
-        useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady,
-        useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict, // PASSING NEW TOGGLES HERE
-        current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-        current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: state.history,
-        activePredictionTypes: state.activePredictionTypes,
-        useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
-        terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
-    });
+    // --- Get AI Prediction ---
+    ui.updateAiStatus('AI Model: Getting prediction...');
+    getAiPrediction(state.history).then(aiPredictionData => { // Use .then() to handle async prediction
+        ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
-    newHistoryItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
-    newHistoryItem.recommendationDetails = recommendation.details;
+        const recommendation = getRecommendation({
+            trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
+            isForWeightUpdate: false, 
+            aiPredictionData, 
+            currentAdaptiveInfluences: state.adaptiveFactorInfluences,
+            lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
+            useNeighbourFocusBool: state.useNeighbourFocus, 
+            isAiReadyBool: state.isAiReady, 
+            useTrendConfirmationBool: state.useTrendConfirmation,
+            useAdaptivePlayBool: state.useAdaptivePlay, 
+            useLessStrictBool: state.useLessStrict,
+            useTableChangeWarningsBool: state.useTableChangeWarnings, // Pass table change warning toggle
+            rollingPerformance: rollingPerformance, // Pass rolling performance data
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+            activePredictionTypes: state.activePredictionTypes,
+            currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+            allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
+        });
 
-    let fullResultHtml = `
-        <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
-        <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
-            ${recommendation.html}
-        </div>
-        <h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3>
-        <div class="space-y-2">
-    `;
-
-    state.activePredictionTypes.forEach(type => {
-        const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
-        if (!predictionTypeDefinition) return;
-
-        const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val);
-        if (baseNum < 0 || baseNum > 36) return;
-
-        const terminals = config.terminalMapping?.[baseNum] || [];
+        // Update the last pending history item with the recommendation details
+        const lastPendingItem = state.history.find(item => item.id === newHistoryItem.id); // Find by ID to ensure correct item
+        if (lastPendingItem) {
+            lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+            lastPendingItem.recommendationDetails = { ...recommendation.details, signal: recommendation.signal, reason: recommendation.reason }; // Store signal and reason for history display
+        }
         
-        const streak = trendStats.currentStreaks[type.id] || 0;
-        let confirmedByHtml = '';
-        if (streak >= 2) {
-            confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
-        }
-
-        const stats = boardStats[type.id] || { success: 0, total: 0 };
-        const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
-        let pocketDistanceHtml = '';
-
-        if (state.usePocketDistance && lastWinningNumber !== null) {
-            const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
-            let minDistance = Infinity;
-            if (hitZone.length > 0) {
-                hitZone.forEach(zoneNum => {
-                    const dist = calculatePocketDistance(zoneNum, lastWinningNumber, config.rouletteWheel);
-                    if (dist < minDistance) minDistance = dist;
-                });
-            }
-            if(minDistance !== Infinity) {
-                 pocketDistanceHtml = `<span class="text-pink-500">Dist: <strong>${minDistance}</strong></span>`;
-            }
-        }
-
-        fullResultHtml += `
-            <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
-                <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
-                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
-                <div class="group-stats">
-                    <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
-                    ${pocketDistanceHtml}
-                </div>
+        let fullResultHtml = `
+            <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
+            <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
+                ${recommendation.html}
             </div>
+            <h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3>
+            <div class="space-y-2">
         `;
+
+        state.activePredictionTypes.forEach(type => {
+            const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
+            if (!predictionTypeDefinition) return;
+
+            const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val);
+            if (baseNum < 0 || baseNum > 36) return;
+
+            const terminals = config.terminalMapping?.[baseNum] || [];
+            
+            const streak = trendStats.currentStreaks[type.id] || 0;
+            let confirmedByHtml = '';
+            if (streak >= 2) {
+                confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
+            }
+
+            const stats = boardStats[type.id] || { success: 0, total: 0 };
+            const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
+            let pocketDistanceHtml = '';
+
+            if (state.usePocketDistance && lastWinning !== null) { // Use lastWinning from outer scope
+                const hitZone = getHitZone(baseNum, terminals, lastWinning, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
+                let minDistance = Infinity;
+                if (hitZone.length > 0) {
+                    hitZone.forEach(zoneNum => {
+                        const dist = calculatePocketDistance(zoneNum, lastWinning, config.rouletteWheel);
+                        if (dist < minDistance) minDistance = dist;
+                    });
+                }
+                if(minDistance !== Infinity) {
+                     pocketDistanceHtml = `<span class="text-pink-500">Dist: <strong>${minDistance}</strong></span>`;
+                }
+            }
+
+            fullResultHtml += `
+                <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
+                    <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
+                    <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
+                    <div class="group-stats">
+                        <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
+                        ${pocketDistanceHtml}
+                    </div>
+                </div>
+            `;
+        });
+
+        fullResultHtml += '</div>';
+        dom.resultDisplay.innerHTML = fullResultHtml;
+        dom.resultDisplay.classList.remove('hidden');
+
+        // Show/hide pattern alert based on the recommendation signal
+        if (recommendation.signal === 'Avoid Play') {
+            showPatternAlert(recommendation.reason.replace('(Table Change Warning: ', '').replace(')', '')); // Extract just the warning message
+        } else {
+            hidePatternAlert();
+        }
+
+        renderHistory(); // Re-render history to ensure new item is there and counter is updated
+        drawRouletteWheel(newHistoryItem.difference, lastWinning); // Draw wheel with new diff and last winning
     });
-
-    fullResultHtml += '</div>';
-    dom.resultDisplay.innerHTML = fullResultHtml;
-    dom.resultDisplay.classList.remove('hidden');
-
-    runAllAnalyses();
-    renderHistory();
-    drawRouletteWheel(newHistoryItem.difference, lastWinningNumber);
 }
 
 
@@ -579,22 +630,12 @@ function handleSubmitResult() {
     );
 
     if (!lastPendingForSubmission) {
-        // If there are genuinely NO pending calculations awaiting a winning number,
-        // then either:
-        // 1. No calculations have been performed yet.
-        // 2. All previous pending calculations have already been resolved (e.g., by historical analysis or optimization re-simulations).
-        // In these cases, we don't want to show the "Please perform a calculation first" alert
-        // if the user is just accidentally pressing Enter or clicking Submit.
-
         const hasAnyCalculations = state.history.length > 0;
         if (hasAnyCalculations) {
-            // There's history, but no current input needing a result from the user.
-            // This is the scenario after re-simulation where old pending items are resolved.
-            // We just silently return, preventing the alert.
             console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
+            hidePatternAlert(); // Also hide alert if accidental submit
             return;
         } else {
-            // No calculations have been performed at all. Show the original alert.
             alert("Please perform a calculation first before submitting a winning number.");
             return;
         }
@@ -626,8 +667,12 @@ function handleSubmitResult() {
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
 
-    runAllAnalyses(); // This will re-evaluate recommendations for current inputs
-    renderHistory(); // This will update the UI and win/loss counter
+    // --- CRITICAL: AI Prediction is asynchronous. Call runAllAnalyses AFTER current history update ---
+    // The previous runAllAnalyses was called directly here, but it also has AI prediction logic.
+    // To ensure the sequence is correct (update history item -> re-run ALL analyses/predictions for the *current* state of inputs),
+    // we need to call it again.
+    runAllAnalyses(winningNumber); // Pass winning number so it doesn't try to get a new one from input.
+    renderHistory(); // Re-render history with updated item and win/loss counter
 
     dom.winningNumberInput.value = ''; // Clear the input field
 
@@ -643,6 +688,7 @@ function handleSubmitResult() {
     } else {
         console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
     }
+    hidePatternAlert(); // Hide any warnings after submitting a result
 }
 
 
@@ -657,12 +703,15 @@ function handleClearInputs() {
     if (dom.resultDisplay.textContent.includes('valid numbers')) {
         dom.resultDisplay.textContent = '';
     }
+    hidePatternAlert(); // Hide warnings on clear inputs
 }
 
 function handleSwap() { 
     const v = dom.number1.value; 
     dom.number1.value = dom.number2.value; 
     dom.number2.value = v; 
+    // After swap, re-calculate and hide any old alerts
+    handleNewCalculation(); // Trigger recalculation after swap
 }
 
 function handleHistoryAction(event) { 
@@ -686,6 +735,7 @@ function handleHistoryAction(event) {
         updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
         aiWorker.postMessage({ type: 'clear_model' });
     }
+    hidePatternAlert(); // Hide warnings when history changes
 }
 
 function handleClearHistory() { 
@@ -706,6 +756,7 @@ function handleClearHistory() {
     drawRouletteWheel(); 
     
     aiWorker.postMessage({ type: 'clear_model' });
+    hidePatternAlert(); // Hide warnings when history clears
 }
 
 function handleVideoUpload(event) {
@@ -722,6 +773,7 @@ function handleVideoUpload(event) {
     dom.videoUploadContainer.classList.add('hidden');
     dom.videoControlsContainer.classList.remove('hidden');
     dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
+    hidePatternAlert(); // Hide warnings on video upload
 }
 
 function startVideoAnalysis() {
@@ -732,6 +784,7 @@ function startVideoAnalysis() {
         dom.analyzeVideoButton.disabled = false;
         dom.videoStatus.textContent = 'Analysis complete (simulation).';
     }, 2000);
+    hidePatternAlert(); // Hide warnings on video analysis start
 }
 
 function clearVideoState() {
@@ -747,6 +800,7 @@ function clearVideoState() {
     dom.videoControlsContainer.classList.add('hidden');
     dom.videoUploadContainer.classList.remove('hidden');
     dom.videoStatus.textContent = '';
+    hidePatternAlert(); // Hide warnings on clear video
 }
 
 function handlePresetSelection(presetName) {
@@ -764,6 +818,7 @@ function handlePresetSelection(presetName) {
     initializeAdvancedSettingsUI();
     updateActivePredictionTypes();
     handleStrategyChange();
+    hidePatternAlert(); // Hide warnings on preset change
 }
 
 // MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
@@ -847,6 +902,13 @@ export function initializeAdvancedSettingsUI() {
     createSlider('adaptiveInfluenceSliders', 'Adaptive Failure Rate', config.ADAPTIVE_LEARNING_RATES, 'FAILURE');
     createSlider('adaptiveInfluenceSliders', 'Min Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MIN_INFLUENCE');
     createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
+
+    // NEW: Add sliders for Table Change Warning Parameters
+    createSlider('strategyLearningRatesSliders', 'Warning Window Size', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WINDOW_SIZE');
+    createSlider('strategyLearningRatesSliders', 'Min Plays for Eval', config.STRATEGY_CONFIG, 'WARNING_MIN_PLAYS_FOR_EVAL');
+    createSlider('strategyLearningRatesSliders', 'Loss Streak Threshold', config.STRATEGY_CONFIG, 'WARNING_LOSS_STREAK_THRESHOLD');
+    createSlider('strategyLearningRatesSliders', 'Rolling Win Rate Threshold', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WIN_RATE_THRESHOLD');
+    createSlider('strategyLearningRatesSliders', 'Default Average Win Rate', config.STRATEGY_CONFIG, 'DEFAULT_AVERAGE_WIN_RATE');
 }
 
 
@@ -858,6 +920,7 @@ function resetAllParameters() {
     initializeAdvancedSettingsUI(); 
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
     handleStrategyChange();
+    hidePatternAlert(); // Hide warnings on reset
 }
 
 function saveParametersToFile() {
@@ -904,6 +967,7 @@ function loadParametersFromFile(event) {
     };
     reader.readAsText(file);
     event.target.value = '';
+    hidePatternAlert(); // Hide warnings on load
 }
 
 export function toggleParameterSliders(enable) {
@@ -983,16 +1047,16 @@ function attachToggleListeners() {
 
             if (stateKey === 'usePocketDistance') {
                 renderHistory();
-            } else if (stateKey === 'useAdvancedCalculations' || stateKey === 'useDynamicTerminalNeighbourCount' || stateKey === 'useAdaptivePlay' || stateKey === 'useLessStrict') { // ADDED: New toggles that require full re-simulation
-                updateActivePredictionTypes(); // Ensure this is called if it affects active types
+            } else {
+                // For most toggles, a strategy change means re-simulating and re-analyzing
                 handleStrategyChange();
+                // Redraw roulette wheel if inputs are present and last winning exists
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
                 const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
                 drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
-            } else {
-                handleStrategyChange();
             }
+            hidePatternAlert(); // Hide warnings on toggle change
         });
     }
 }
@@ -1055,7 +1119,7 @@ export function initializeUI() {
         'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
-        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton',
+        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert', // ADDED: patternAlert to DOM elements
         // NEW: Add new category toggle IDs here
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
@@ -1125,7 +1189,31 @@ export function initializeUI() {
                 learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
                 minWeight: params.minWeight, patternMinAttempts: params.patternMinAttempts,
                 patternSuccessThreshold: params.patternSuccessThreshold, triggerMinAttempts: params.triggerMinAttempts,
-                triggerSuccessThreshold: params.triggerSuccessThreshold
+                triggerSuccessThreshold: params.triggerSuccessThreshold,
+                // Apply new config parameters
+                hitRateThreshold: params.hitRateThreshold,
+                hitRateMultiplier: params.hitRateMultiplier,
+                maxStreakPoints: params.maxStreakPoints,
+                streakMultiplier: params.streakMultiplier,
+                proximityMaxDistance: params.proximityMaxDistance,
+                proximityMultiplier: params.proximityMultiplier,
+                maxNeighbourPoints: params.maxNeighbourPoints,
+                neighbourMultiplier: params.neighbourMultiplier,
+                aiConfidenceMultiplier: params.aiConfidenceMultiplier,
+                minAiPointsForReason: params.minAiPointsForReason,
+                ADAPTIVE_STRONG_PLAY_THRESHOLD: params.ADAPTIVE_STRONG_PLAY_THRESHOLD,
+                ADAPTIVE_PLAY_THRESHOLD: params.ADAPTIVE_PLAY_THRESHOLD,
+                LESS_STRICT_STRONG_PLAY_THRESHOLD: params.LESS_STRICT_STRONG_PLAY_THRESHOLD,
+                LESS_STRICT_PLAY_THRESHOLD: params.LESS_STRICT_PLAY_THRESHOLD,
+                LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: params.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
+                LESS_STRICT_MIN_STREAK: params.LESS_STRICT_MIN_STREAK,
+                SIMPLE_PLAY_THRESHOLD: params.SIMPLE_PLAY_THRESHOLD,
+                MIN_TREND_HISTORY_FOR_CONFIRMATION: params.MIN_TREND_HISTORY_FOR_CONFIRMATION,
+                WARNING_ROLLING_WINDOW_SIZE: params.WARNING_ROLLING_WINDOW_SIZE,
+                WARNING_MIN_PLAYS_FOR_EVAL: params.WARNING_MIN_PLAYS_FOR_EVAL,
+                WARNING_LOSS_STREAK_THRESHOLD: params.WARNING_LOSS_STREAK_THRESHOLD,
+                WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
+                DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE
             });
             Object.assign(config.ADAPTIVE_LEARNING_RATES, {
                 SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
@@ -1141,6 +1229,7 @@ export function initializeUI() {
             initializeAdvancedSettingsUI();
             updateOptimizationStatus('Best parameters applied!');
             handleStrategyChange();
+            hidePatternAlert(); // Hide warnings when applying params
         }
     });
 
