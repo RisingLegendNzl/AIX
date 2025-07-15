@@ -5,7 +5,9 @@ import * as state from './state.js';
 import * as config from './config.js';
 
 // Import specific UI functions needed, NOT the whole module
-import { updateAiStatus, updateOptimizationStatus, showOptimizationComplete, showOptimizationStopped } from './ui.js';
+import { updateAiStatus, updateOptimizationStatus, showOptimizationComplete, showOptimizationStopped, toggleParameterSliders } from './ui.js'; // ADDED: toggleParameterSliders
+import * as dom from './ui.js'; // Import dom elements from ui.js for button references
+
 
 // --- WORKER INITIALIZATION ---
 export let aiWorker;
@@ -14,7 +16,7 @@ export let optimizationWorker;
 export function initializeWorkers() {
     // Corrected paths to point inside the /js folder
     aiWorker = new Worker('js/aiWorker.js', { type: 'module' });
-    optimizationWorker = new Worker('js/optimizationWorker.js', { type: 'module' }); // Ensure optimizationWorker is initialized
+    optimizationWorker = new Worker('js/optimizationWorker.js', { type: 'module' });
 
     // --- WORKER MESSAGE HANDLERS ---
     aiWorker.onmessage = (event) => {
@@ -67,4 +69,5 @@ export function initializeWorkers() {
                 break;
         }
     };
+    
 }
