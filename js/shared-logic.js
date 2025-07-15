@@ -9,6 +9,7 @@
  * receive all necessary data (like the rouletteWheel, terminalMapping, configs)
  * as parameters. This makes them predictable and testable.
  */
+import * as config from './config.js'; // Added import for config
 
 function getNeighbours(number, count, rouletteWheel) {
     const index = rouletteWheel.indexOf(number);
