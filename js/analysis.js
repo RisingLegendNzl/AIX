@@ -69,6 +69,56 @@ export function labelHistoryFailures(sortedHistory) {
     });
 }
 
+/**
+ * Calculates rolling performance metrics for table change warnings.
+ * @param {Array} history - The full history log.
+ * @param {object} strategyConfig - The current strategy configuration.
+ * @returns {object} Contains rolling win rate and consecutive losses for plays.
+ */
+function calculateRollingPerformance(history, strategyConfig) {
+    let winsInWindow = 0;
+    let lossesInWindow = 0;
+    let playsInWindow = 0;
+    let consecutiveLosses = 0; // Consecutive losses for actual "Play" recommendations
+
+    const relevantHistory = [...history]
+        .filter(item => item.winningNumber !== null && item.recommendationDetails && item.recommendedGroupId) // Only confirmed plays with recommendations
+        .sort((a, b) => b.id - a.id); // From newest to oldest
+
+    for (let i = 0; i < relevantHistory.length; i++) {
+        const item = relevantHistory[i];
+
+        // Only count towards rolling window if it was an explicit "Play" signal
+        if (item.recommendationDetails.finalScore > 0) {
+            playsInWindow++;
+            if (item.hitTypes.includes(item.recommendedGroupId)) {
+                winsInWindow++;
+                consecutiveLosses = 0; // Reset on a win
+            } else {
+                lossesInWindow++;
+                consecutiveLosses++; // Increment consecutive losses
+            }
+        } else {
+            // If it was a 'Wait' signal, it doesn't count towards the rolling performance for warnings
+            // Nor does it break the consecutive losses of *plays*
+        }
+
+        // Stop once the window size is reached (or end of history)
+        if (playsInWindow >= strategyConfig.WARNING_ROLLING_WINDOW_SIZE) {
+            break;
+        }
+    }
+
+    const rollingWinRate = playsInWindow > 0 ? (winsInWindow / playsInWindow) * 100 : 0;
+
+    return {
+        rollingWinRate,
+        consecutiveLosses,
+        totalPlaysInWindow: playsInWindow
+    };
+}
+
+
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
@@ -96,7 +146,8 @@ function runSimulationOnHistory(spinsToProcess) {
             lastWinningNumber: localConfirmedWinsLog.length > 0 ? localConfirmedWinsLog[localConfirmedWinsLog.length - 1] : null,
             useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
-            useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, // Use the current config for simulation
+            useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, // Use the current config for simulation
             current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory, // Use current adaptive rates config
             activePredictionTypes: state.activePredictionTypes,
             useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
@@ -111,15 +162,6 @@ function runSimulationOnHistory(spinsToProcess) {
 
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
-
-        // Removed temporary debugging log for SimItem
-
-        // Update wins/losses for this specific simulation run
-        if (newHistoryItem.recommendedGroupId && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-            wins++;
-        } else if (newHistoryItem.recommendedGroupId) { // Only count as a loss if a recommendation was made
-            losses++;
-        }
 
         // Apply adaptive influence updates within the simulation
         if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
@@ -137,8 +179,6 @@ function runSimulationOnHistory(spinsToProcess) {
         }
     }
 
-    // Removed temporary debugging logs for Sim Wins/Losses/Ratio
-
     return localHistory;
 }
 
@@ -148,6 +188,9 @@ export async function runAllAnalyses(winningNumber = null) {
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    
+    // NEW: Calculate rolling performance for table change warnings
+    const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG);
 
     ui.renderAnalysisList(neighbourScores);
     ui.renderStrategyWeights();
@@ -174,6 +217,10 @@ export async function runAllAnalyses(winningNumber = null) {
             useNeighbourFocusBool: state.useNeighbourFocus, 
             isAiReadyBool: state.isAiReady, // <-- Pass the readiness state
             useTrendConfirmationBool: state.useTrendConfirmation,
+            useAdaptivePlayBool: state.useAdaptivePlay, // Pass adaptive play toggle
+            useLessStrictBool: state.useLessStrict,     // Pass less strict toggle
+            useTableChangeWarningsBool: state.useTableChangeWarnings, // PASS TABLE CHANGE WARNING TOGGLE
+            rollingPerformance: rollingPerformance, // PASS ROLLING PERFORMANCE DATA
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
