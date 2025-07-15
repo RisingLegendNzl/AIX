@@ -258,7 +258,7 @@ function calculateFitness(individual) {
         }
 
         // Calculate factor shift status for simulation
-        const simFactorShiftStatus = calculateFactorShift(simulatedHistory, SIM_STRATEGY_CONFIG); // NEW: Get factor shift status for simulation
+        const simFactorShiftStatus = shared.analyzeFactorShift(simulatedHistory, SIM_STRATEGY_CONFIG); // NEW: Get factor shift status for simulation
 
         const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
