@@ -62,7 +62,10 @@ export let ADAPTIVE_LEARNING_RATES = {
     MIN_INFLUENCE: 0.2, 
     MAX_INFLUENCE: 2.5,
     // NEW: Forgetfulness factor for adaptive influences
-    FORGET_FACTOR: 0.995 // Multiplier applied to influences each spin (e.g., 0.995 means 0.5% decay per spin)
+    FORGET_FACTOR: 0.995, // Multiplier applied to influences each spin (e.g., 0.995 means 0.5% decay per spin)
+    // NEW: Confidence weighting for adaptive influence updates
+    CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02, // How much finalScore impacts the influence change
+    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5, // Below this finalScore, confidence weighting has less effect
 };
 
 // --- DEFAULT PARAMETERS ---
@@ -115,7 +118,9 @@ export const DEFAULT_PARAMETERS = {
         FAILURE: 0.1,  
         MIN_INFLUENCE: 0.2, 
         MAX_INFLUENCE: 2.5,
-        FORGET_FACTOR: 0.995 // Default forgetfulness factor
+        FORGET_FACTOR: 0.995, // Default forgetfulness factor
+        CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02,
+        CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5
     },
     TOGGLES: {
         useTrendConfirmation: false,
@@ -162,7 +167,8 @@ export const STRATEGY_PRESETS = {
             FAILURE: 0.1,
             MIN_INFLUENCE: 0.2,
             MAX_INFLUENCE: 2.5,
-            FORGET_FACTOR: 0.99 // Slightly faster forgetting for potentially higher win rate
+            FORGET_FACTOR: 0.99, // Slightly faster forgetting for potentially higher win rate
+            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.03, // Higher influence change
         },
         TOGGLES: {
             ...DEFAULT_PARAMETERS.TOGGLES,
@@ -190,7 +196,8 @@ export const STRATEGY_PRESETS = {
         },
         ADAPTIVE_LEARNING_RATES: {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
-            FORGET_FACTOR: 0.998 // Slower forgetting for stability
+            FORGET_FACTOR: 0.998, // Slower forgetting for stability
+            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.015, // Moderate influence change
         },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
@@ -218,7 +225,8 @@ export const STRATEGY_PRESETS = {
         },
         ADAPTIVE_LEARNING_RATES: {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
-            FORGET_FACTOR: 0.98 // Very aggressive forgetting
+            FORGET_FACTOR: 0.98, // Very aggressive forgetting
+            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.025, // Higher influence change
         },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
