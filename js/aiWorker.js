@@ -196,20 +196,29 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         // MaxStreak can be a configurable value in config.js if needed.
         const maxStreakToNormalize = 10; 
 
+        // Get repeat and neighbor hit status for this specific item in context
+        // Ensure to pass config.rouletteWheel here
+        const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength);
+        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength, config.rouletteWheel, 1);
+
+
         return [
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            // NEW: Add categorical features for winning number properties
+            // Add categorical features for winning number properties
             props.isEven, props.isOdd, props.isRed, props.isBlack,
             props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
             props.isCol1, props.isCol2, props.isCol3,
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // NEW: Add consecutive hit/miss features for each prediction type
+            // Add consecutive hit/miss features for each prediction type
             ...config.allPredictionTypes.flatMap(type => [
                 Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),   // Normalized consecutive hits
                 Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1) // Normalized consecutive misses
-            ])
+            ]),
+            // NEW: Add repeat and neighbor hit features
+            isCurrentRepeat ? 1 : 0,
+            isCurrentNeighborHit ? 1 : 0
         ];
     };
 
@@ -383,20 +392,27 @@ async function predictWithEnsemble(historyData) {
 
         const maxStreakToNormalize = 10; // Must match training normalization
 
+        // Get repeat and neighbor hit status for this specific item in context
+        const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength);
+        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength, config.rouletteWheel, 1);
+
         return [
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            // NEW: Add categorical features for winning number properties
+            // Add categorical features for winning number properties
             props.isEven, props.isOdd, props.isRed, props.isBlack,
             props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
             props.isCol1, props.isCol2, props.isCol3,
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // NEW: Add consecutive hit/miss features for each prediction type
+            // Add consecutive hit/miss features for each prediction type
             ...config.allPredictionTypes.flatMap(type => [
                 Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),
                 Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1)
-            ])
+            ]),
+            // NEW: Add repeat and neighbor hit features
+            isCurrentRepeat ? 1 : 0,
+            isCurrentNeighborHit ? 1 : 0
         ];
     };
 
@@ -487,6 +503,61 @@ async function clearModelsFromStorage() {
     await Promise.all(clearPromises);
     ensemble.forEach(m => m.scaler = null);
     console.log('All TF.js models and scalers cleared.');
+}
+
+
+// Helper for isRepeatNumberInContext
+function isRepeatNumberInContext(winningNumber, historySubset, recentHistoryLength) {
+    if (historySubset.length === 0) return false;
+    const relevantHistory = historySubset
+        .filter(item => item.winningNumber !== null) // Only confirmed spins
+        .sort((a, b) => b.id - a.id) // Newest first
+        .slice(0, recentHistoryLength); // Get only the recent spins
+
+    return relevantHistory.some(item => item.winningNumber === winningNumber);
+}
+
+// Helper for isNeighborHitInContext
+function isNeighborHitInContext(winningNumber, historySubset, recentHistoryLength, rouletteWheel, neighborDistance = 1) {
+    if (historySubset.length === 0) return false;
+    const relevantHistory = historySubset
+        .filter(item => item.winningNumber !== null) // Only confirmed spins
+        .sort((a, b) => b.id - a.id) // Newest first
+        .slice(0, recentHistoryLength); // Get only the recent spins
+
+    for (const item of relevantHistory) {
+        const lastSpin = item.winningNumber;
+        if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
+        
+        // Use calculatePocketDistance (assuming it's available or imported correctly in worker scope)
+        // Since calculatePocketDistance is in shared-logic.js, we need to ensure it's imported or passed.
+        // For now, let's include a local implementation or ensure it's truly global in worker if needed.
+        // Given it's a small pure function, for worker context, a local copy or direct import might be considered.
+        // For a clean worker, let's locally define calculatePocketDistance if it's not imported.
+        // However, in our architecture, shared-logic.js is not imported into aiWorker.js.
+        // So, we'll need to pass rouletteWheel to the prediction function if calculatePocketDistance is in analysis.js.
+
+        // Re-implement a lightweight calculatePocketDistance for internal worker use, or ensure it's shared.
+        // Let's assume calculatePocketDistance from shared-logic.js is NOT directly available here.
+        // For simplicity, we can pass rouletteWheel and implement this helper locally if needed,
+        // or just use basic array index arithmetic if pocket distance definition is straightforward here.
+        // For this worker, direct array operations will be used for simplicity if calculatePocketDistance is not easily imported.
+
+        const getPocketDistanceLocal = (num1, num2, wheel) => {
+            const idx1 = wheel.indexOf(num1);
+            const idx2 = wheel.indexOf(num2);
+            if (idx1 === -1 || idx2 === -1) return Infinity;
+            const directDist = Math.abs(idx1 - idx2);
+            const wrapDist = wheel.length - directDist;
+            return Math.min(directDist, wrapDist);
+        };
+
+        const distance = getPocketDistanceLocal(winningNumber, lastSpin, rouletteWheel);
+        if (distance <= neighborDistance) {
+            return true;
+        }
+    }
+    return false;
 }
 
 
