@@ -6,7 +6,7 @@ import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDis
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
-import { aiWorker, optimizationWorker } from './workers.js'; 
+import { aiWorker, optimizationWorker, rlWorker } from './workers.js'; 
 import * as analysis from './analysis.js'; 
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
@@ -30,6 +30,9 @@ const parameterDefinitions = {
     FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },  // Corresponds to adaptiveFailureRate in GA
     MIN_INFLUENCE: { min: 0.0, max: 1.0, step: 0.01, category: 'adaptiveRates' },
     MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' },
+    FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001, category: 'adaptiveRates' }, // NEW: For RL tunable
+    CONFIDENCE_WEIGHTING_MULTIPLIER: { min: 0.001, max: 0.1, step: 0.001, category: 'adaptiveRates' }, // NEW: For RL tunable
+    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { min: 0, max: 50, step: 1, category: 'adaptiveRates' }, // NEW: For RL tunable
 
     // NEW: Table Change Warning Parameters for Sliders (Match config.js)
     WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' }, // Example range
@@ -51,11 +54,15 @@ const parameterMap = {
     patternSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Pattern Success %', container: 'patternThresholdsSliders' },
     triggerMinAttempts: { obj: config.STRATEGY_CONFIG, label: 'Trigger Min Attempts', container: 'patternThresholdsSliders' },
     triggerSuccessThreshold: { obj: config.STRATEGY_CONFIG, label: 'Trigger Success %', container: 'patternThresholdsSliders' },
-    // Adaptive Influence Rates
+    // Adaptive Influence Rates (now primarily read from state.getEffectiveAdaptiveLearningRates())
     SUCCESS: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Success Rate', container: 'adaptiveInfluenceSliders' },
     FAILURE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
     MIN_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Min Adaptive Influence', container: 'adaptiveInfluenceSliders' },
     MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' },
+    FORGET_FACTOR: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Forget Factor', container: 'adaptiveInfluenceSliders' }, // NEW
+    CONFIDENCE_WEIGHTING_MULTIPLIER: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Conf. Weight Multiplier', container: 'adaptiveInfluenceSliders' }, // NEW
+    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Conf. Weight Min Threshold', container: 'adaptiveInfluenceSliders' }, // NEW
+
     // Table Change Warning Parameters
     WARNING_ROLLING_WINDOW_SIZE: { obj: config.STRATEGY_CONFIG, label: 'Warn Window Size', container: 'warningParametersSliders' },
     WARNING_MIN_PLAYS_FOR_EVAL: { obj: config.STRATEGY_CONFIG, label: 'Warn Min Plays', container: 'warningParametersSliders' },
@@ -163,6 +170,7 @@ export function updateAllTogglesUI() {
     dom.neighbourFocusToggle.checked = state.useNeighbourFocus;
     dom.lessStrictModeToggle.checked = state.useLessStrict;
     dom.dynamicTerminalNeighbourCountToggle.checked = state.useDynamicTerminalNeighbourCount;
+    dom.reinforcementLearningToggle.checked = state.useReinforcementLearning; // NEW
 }
 
 export function updateWinLossCounter() {
@@ -175,7 +183,8 @@ export function updateWinLossCounter() {
         // 2. A winning number was entered for that round (item.winningNumber !== null)
         // 3. The recommendation had a positive final score (item.recommendationDetails.finalScore > 0),
         //    indicating it was an explicit "Play" signal, not "Wait for Signal" or "Low Confidence".
-        if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.finalScore > 0) {
+        // 4. It was NOT an 'Avoid Play' signal.
+        if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.finalScore > 0 && item.recommendationDetails.signal !== 'Avoid Play') {
             // Check if the recommended group hit
             if (item.hitTypes && item.hitTypes.includes(item.recommendedGroupId)) {
                 wins++;
@@ -222,7 +231,9 @@ export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) 
         const num2 = parseInt(dom.number2.value, 10);
 
         state.activePredictionTypes.forEach(type => {
-            const baseNum = config.allPredictionTypes.find(t => t.id === type.id).calculateBase(num1, num2);
+            const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
+            if (!predictionTypeDefinition) return;
+            const baseNum = predictionTypeDefinition.calculateBase(num1, num2);
             if (baseNum < 0 || baseNum > 36) return;
             
             const terminals = config.terminalMapping?.[baseNum] || [];
@@ -330,6 +341,11 @@ export function renderHistory() {
         // "Pocket Distance" detail
         if (state.usePocketDistance && item.status !== 'pending' && item.pocketDistance !== null) {
             detailsParts.push(`<span class="text-pink-500">Pocket Distance: <strong>${item.pocketDistance}</strong></span>`);
+        }
+
+        // "Failure Mode" detail (NEW)
+        if (item.failureMode && item.failureMode !== 'none' && item.failureMode !== 'pending_or_unresolved' && item.failureMode !== 'avoided_loss' && item.failureMode !== 'no_action_taken') {
+            detailsParts.push(`<span class="text-red-700">Failure Mode: <strong>${item.failureMode}</strong></span>`);
         }
 
         if (detailsParts.length > 0) {
@@ -465,6 +481,10 @@ export function updateAiStatus(message) {
     if (dom.aiModelStatus) dom.aiModelStatus.textContent = message;
 }
 
+export function updateRlStatus(message) { // NEW: Function to update RL status UI
+    if (dom.rlModelStatus) dom.rlModelStatus.textContent = message;
+}
+
 /**
  * Displays a warning message in the dedicated pattern alert section.
  * @param {string} message - The warning message to display.
@@ -507,6 +527,9 @@ function handleNewCalculation() {
     }
 
     // --- Gather all necessary stats before calling getRecommendation ---
+    // Use effective adaptive rates (could be RL-tuned)
+    const effectiveAdaptiveRates = state.getEffectiveAdaptiveLearningRates();
+
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -527,7 +550,8 @@ function handleNewCalculation() {
         winningNumber: null,
         pocketDistance: null,
         recommendedGroupId: null,
-        recommendationDetails: null
+        recommendationDetails: null,
+        failureMode: 'pending_or_unresolved' // Initialize failureMode
     };
     state.history.push(newHistoryItem);
 
@@ -554,7 +578,8 @@ function handleNewCalculation() {
             // NEW: Pass repeat/neighbor hit status to recommendation for potential special handling or display
             isCurrentRepeat: analysis.isRepeatNumber(lastWinning, state.history), // Use the exported function
             isCurrentNeighborHit: analysis.isNeighborHit(lastWinning, state.history), // Use the exported function
-            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, 
+            current_ADAPTIVE_LEARNING_RATES: effectiveAdaptiveRates, // Use effective rates here
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
@@ -676,7 +701,6 @@ function handleSubmitResult() {
     }
 
     // Apply winning number to the specific pending item identified
-    // We already ensured lastPendingForSubmission is not null in the checks above
     evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
 
     // Update confirmedWinsLog based on *all* confirmed spins
@@ -687,14 +711,43 @@ function handleSubmitResult() {
     state.setConfirmedWinsLog(newLog);
 
     // Re-label failures across the entire history based on the latest context
+    // This needs to happen BEFORE adaptive learning update for the current spin.
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
 
+    // Apply adaptive influence updates within the main thread immediately based on the last spin's outcome
+    // This mimics the logic previously in analysis.runAllAnalyses, but ensures it happens after failure mode labeling
+    if (lastPendingForSubmission.recommendedGroupId && lastPendingForSubmission.recommendationDetails?.primaryDrivingFactor && lastPendingForSubmission.failureMode) {
+        const primaryFactor = lastPendingForSubmission.recommendationDetails.primaryDrivingFactor;
+        const finalScore = lastPendingForSubmission.recommendationDetails.finalScore;
+        // Use the currently effective adaptive learning rates (which might be RL-tuned)
+        const effectiveAdaptiveRates = state.getEffectiveAdaptiveLearningRates(); 
+        const influenceChangeMagnitude = Math.max(0, finalScore - effectiveAdaptiveRates.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * effectiveAdaptiveRates.CONFIDENCE_WEIGHTING_MULTIPLIER;
+        
+        if (state.adaptiveFactorInfluences[primaryFactor] === undefined) state.adaptiveFactorInfluences[primaryFactor] = 1.0;
 
-    // --- CRITICAL: AI Prediction is asynchronous. Call runAllAnalyses AFTER current history update ---
-    // The previous runAllAnalyses was called directly here, but it also has AI prediction logic.
-    // To ensure the sequence is correct (update history item -> re-run ALL analyses/predictions for the *current* state of inputs),
-    // we need to call it again.
-    analysis.runAllAnalyses(winningNumber); // Pass winning number so it doesn't try to get a new one from input.
+        // Only update influences if it was an actionable signal (not 'Wait' or 'Avoid')
+        if (finalScore > 0 && lastPendingForSubmission.recommendationDetails.signal !== 'Avoid Play') {
+            if (lastPendingForSubmission.status === 'success') { // It was a hit
+                state.adaptiveFactorInfluences[primaryFactor] = Math.min(effectiveAdaptiveRates.MAX_INFLUENCE, state.adaptiveFactorInfluences[primaryFactor] + (effectiveAdaptiveRates.SUCCESS + influenceChangeMagnitude));
+            } else if (lastPendingForSubmission.status === 'fail') { // It was a miss
+                const failureMultiplier = effectiveAdaptiveRates.FAILURE_MULTIPLIERS[lastPendingForSubmission.failureMode] || 1.0;
+                state.adaptiveFactorInfluences[primaryFactor] = Math.max(effectiveAdaptiveRates.MIN_INFLUENCE, state.adaptiveFactorInfluences[primaryFactor] - (effectiveAdaptiveRates.FAILURE * failureMultiplier + influenceChangeMagnitude));
+            }
+        }
+    }
+
+    // NEW: Send spin result to RL Worker for learning
+    if (config.RL_CONFIG.enabled && rlWorker) {
+        rlWorker.postMessage({
+            type: 'spinResult',
+            payload: {
+                spinData: { ...lastPendingForSubmission } // Send a copy of the item
+            }
+        });
+    }
+
+    // Re-run all analyses to update UI and send current state to AI worker
+    analysis.runAllAnalyses(winningNumber); 
     renderHistory(); // Re-render history with updated item and win/loss counter
 
     dom.winningNumberInput.value = ''; // Clear the input field
@@ -769,8 +822,13 @@ function handleClearHistory() {
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     });
+    state.setAdaptiveLearningRatesOverride(null); // NEW: Clear RL override
     state.setIsAiReady(false);
     updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
+    updateRlStatus('RL Model: Reset.'); // NEW: Update RL status on clear
+
+    // Revert config.ADAPTIVE_LEARNING_RATES to default if RL was overriding
+    Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
     
     analysis.runAllAnalyses(); // Use analysis.runAllAnalyses after history clear
     renderHistory();
@@ -835,7 +893,12 @@ function handlePresetSelection(presetName) {
 
     Object.assign(config.STRATEGY_CONFIG, preset.STRATEGY_CONFIG);
     Object.assign(config.ADAPTIVE_LEARNING_RATES, preset.ADAPTIVE_LEARNING_RATES);
+    // Ensure FAILURE_MULTIPLIERS are correctly applied from preset
+    if (preset.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS) {
+        Object.assign(config.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS, preset.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS);
+    }
     state.setToggles(preset.TOGGLES);
+    state.setAdaptiveLearningRatesOverride(null); // Clear any RL override when a preset is selected
 
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
@@ -859,12 +922,29 @@ function createSlider(containerId, label, paramObj, paramName) {
     }
     const { min, max, step } = paramDef;
 
+    // Determine the current value from the actual config object, considering RL override for adaptive rates
+    let currentValue;
+    if (paramObj === config.ADAPTIVE_LEARNING_RATES) {
+        currentValue = state.getEffectiveAdaptiveLearningRates()[paramName] || paramObj[paramName];
+    } else {
+        currentValue = paramObj[paramName];
+    }
+
+    // Handle nested FAILURE_MULTIPLIERS for UI
+    if (paramName.includes('.')) { // Simple check for "dot notation" for nested properties
+        const [objKey, nestedKey] = paramName.split('.');
+        if (objKey === 'FAILURE_MULTIPLIERS' && paramObj[objKey]) {
+            currentValue = paramObj[objKey][nestedKey];
+        }
+    }
+
+
     const sliderGroup = document.createElement('div');
     sliderGroup.className = 'slider-group';
     sliderGroup.innerHTML = `
         <label for="${id}">${label}</label>
-        <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${paramObj[paramName]}">
-        <input type="number" id="${id}Input" min="${min}" max="${max}" step="${step}" value="${paramObj[paramName]}" class="form-input text-sm">
+        <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${currentValue}">
+        <input type="number" id="${id}Input" min="${min}" max="${max}" step="${step}" value="${currentValue}" class="form-input text-sm">
     `;
     container.appendChild(sliderGroup);
 
@@ -873,12 +953,27 @@ function createSlider(containerId, label, paramObj, paramName) {
 
     const updateValue = (newValue) => {
         let val = parseFloat(newValue);
-        if (isNaN(val)) val = paramObj[paramName];
+        if (isNaN(val)) val = currentValue; // Use the value from the UI if invalid
         val = Math.max(min, Math.min(max, val));
 
         slider.value = val;
         numberInput.value = val;
-        paramObj[paramName] = val;
+
+        // Update the correct config object or nested property
+        if (paramName.includes('.')) {
+            const [objKey, nestedKey] = paramName.split('.');
+            if (paramObj[objKey]) {
+                paramObj[objKey][nestedKey] = val;
+            }
+        } else {
+            paramObj[paramName] = val;
+        }
+
+        // If adaptive learning rates are changed manually, clear any RL override
+        if (paramObj === config.ADAPTIVE_LEARNING_RATES && state.adaptiveLearningRatesOverride !== null) {
+            state.setAdaptiveLearningRatesOverride(null);
+            updateRlStatus('RL Model: Override cleared (manual adjustment).');
+        }
 
         state.saveState(); 
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
@@ -928,11 +1023,20 @@ export function initializeAdvancedSettingsUI() {
     createSlider('patternThresholdsSliders', 'Trigger Min Attempts', config.STRATEGY_CONFIG, 'triggerMinAttempts');
     createSlider('patternThresholdsSliders', 'Trigger Success %', config.STRATEGY_CONFIG, 'triggerSuccessThreshold');
 
-    // Create sliders for Adaptive Influence Learning
+    // Create sliders for Adaptive Influence Learning (now reflecting the effective rates)
     createSlider('adaptiveInfluenceSliders', 'Adaptive Success Rate', config.ADAPTIVE_LEARNING_RATES, 'SUCCESS');
     createSlider('adaptiveInfluenceSliders', 'Adaptive Failure Rate', config.ADAPTIVE_LEARNING_RATES, 'FAILURE');
     createSlider('adaptiveInfluenceSliders', 'Min Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MIN_INFLUENCE');
     createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
+    createSlider('adaptiveInfluenceSliders', 'Forget Factor', config.ADAPTIVE_LEARNING_RATES, 'FORGET_FACTOR'); // NEW
+    createSlider('adaptiveInfluenceSliders', 'Conf. Weight Multiplier', config.ADAPTIVE_LEARNING_RATES, 'CONFIDENCE_WEIGHTING_MULTIPLIER'); // NEW
+    createSlider('adaptiveInfluenceSliders', 'Conf. Weight Min Threshold', config.ADAPTIVE_LEARNING_RATES, 'CONFIDENCE_WEIGHTING_MIN_THRESHOLD'); // NEW
+    
+    // Create sliders for Failure Multipliers (NEW)
+    for (const key of config.RL_CONFIG.tunableFailureMultipliers) {
+        createSlider('adaptiveInfluenceSliders', `Fail Mult: ${key}`, config.ADAPTIVE_LEARNING_RATES, `FAILURE_MULTIPLIERS.${key}`);
+    }
+
 
     // NEW: Add sliders for Table Change Warning Parameters
     if (warningParametersContainer) { // Only create if container exists
@@ -948,7 +1052,12 @@ export function initializeAdvancedSettingsUI() {
 function resetAllParameters() {
     Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
     Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
+    // Ensure FAILURE_MULTIPLIERS are correctly reset to defaults
+    Object.assign(config.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS);
+
     state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
+    state.setAdaptiveLearningRatesOverride(null); // NEW: Clear RL override on reset
+    
     updateAllTogglesUI(); 
     initializeAdvancedSettingsUI(); 
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
@@ -959,7 +1068,7 @@ function resetAllParameters() {
 function saveParametersToFile() {
     const parametersToSave = {
         STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, // This will save the currently effective rates if RL is active
         TOGGLES: {
             useTrendConfirmation: state.useTrendConfirmation, useWeightedZone: state.useWeightedZone, 
             useProximityBoost: state.useProximityBoost, usePocketDistance: state.usePocketDistance, 
@@ -967,8 +1076,10 @@ function saveParametersToFile() {
             useDynamicStrategy: state.useDynamicStrategy, useAdaptivePlay: state.useAdaptivePlay, 
             useTableChangeWarnings: state.useTableChangeWarnings, useDueForHit: state.useDueForHit, 
             useNeighbourFocus: state.useNeighbourFocus, useLessStrict: state.useLessStrict, 
-            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount
-        }
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+            useReinforcementLearning: state.useReinforcementLearning // NEW: Save RL toggle state
+        },
+        ADAPTIVE_LEARNING_RATES_OVERRIDE: state.adaptiveLearningRatesOverride // NEW: Also save the explicit RL override
     };
     const dataStr = JSON.stringify(parametersToSave, null, 2); 
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -988,8 +1099,21 @@ function loadParametersFromFile(event) {
         try {
             const loaded = JSON.parse(e.target.result);
             if (loaded.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, loaded.STRATEGY_CONFIG);
-            if (loaded.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, loaded.ADAPTIVE_LEARNING_RATES);
+            if (loaded.ADAPTIVE_LEARNING_RATES) {
+                Object.assign(config.ADAPTIVE_LEARNING_RATES, loaded.ADAPTIVE_LEARNING_RATES);
+                // Ensure FAILURE_MULTIPLIERS are correctly loaded
+                if (loaded.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS) {
+                    Object.assign(config.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS, loaded.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS);
+                }
+            }
             if (loaded.TOGGLES) state.setToggles(loaded.TOGGLES);
+            // Load RL override if present in the file
+            if (loaded.ADAPTIVE_LEARNING_RATES_OVERRIDE) {
+                state.setAdaptiveLearningRatesOverride(loaded.ADAPTIVE_LEARNING_RATES_OVERRIDE);
+            } else {
+                state.setAdaptiveLearningRatesOverride(null); // Clear if not in file
+            }
+            
             updateAllTogglesUI(); 
             initializeAdvancedSettingsUI(); 
             dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
@@ -1016,6 +1140,7 @@ export function toggleParameterSliders(enable) {
     dom.loadParametersInput.disabled = !enable;
 
     // Toggle individual parameter sliders based on their categories' optimization toggles
+    // or if RL is enabled for adaptive rates.
     for (const paramName in parameterMap) {
         const sliderElement = document.getElementById(`${paramName}Slider`);
         const numberInput = document.getElementById(`${paramName}SliderInput`);
@@ -1026,7 +1151,11 @@ export function toggleParameterSliders(enable) {
             if (parameterDefinitions[paramName].category === 'coreStrategy') {
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
             } else if (parameterDefinitions[paramName].category === 'adaptiveRates') {
-                categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
+                // Adaptive Rates are disabled if RL is enabled AND the RL override is active.
+                // Otherwise, they are enabled by the 'optimizeAdaptiveRatesToggle'
+                categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked && !(state.useReinforcementLearning && state.adaptiveLearningRatesOverride !== null);
+                // Also ensure that if RL is enabled but *not* overriding (e.g., still learning),
+                // the sliders are still interactable for manual tweaking if needed.
             }
             // NEW: Handle warning parameters category
             else if (parameterDefinitions[paramName].category === 'warningParameters') { 
@@ -1094,6 +1223,7 @@ export function attachOptimizationButtonListeners() {
                 useTableChangeWarnings: state.useTableChangeWarnings,
                 useDueForHit: state.useDueForHit,
                 useLessStrict: state.useLessStrict
+                // useReinforcementLearning: state.useReinforcementLearning // No need to send RL toggle to GA worker as it's separate
             };
 
             optimizationWorker.postMessage({ // This is the line that was causing ReferenceError before initialization
@@ -1156,15 +1286,19 @@ export function attachOptimizationButtonListeners() {
                     WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
                     DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE,
                     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: params.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
-                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
+                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER,
+                    NEAR_MISS_DISTANCE_THRESHOLD: params.NEAR_MISS_DISTANCE_THRESHOLD // NEW
                 });
                 Object.assign(config.ADAPTIVE_LEARNING_RATES, {
                     SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
                     MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence,
                     FORGET_FACTOR: params.FORGET_FACTOR,
                     CONFIDENCE_WEIGHTING_MULTIPLIER: params.CONFIDENCE_WEIGHTING_MULTIPLIER,
-                    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: params.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
+                    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: params.CONFIDENCE_WEIGHTING_MIN_THRESHOLD,
+                    FAILURE_MULTIPLIERS: config.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS // Keep current multipliers or derive from GA if GA also optimizes these
                 });
+                // NEW: If GA optimized adaptive rates, clear RL override
+                state.setAdaptiveLearningRatesOverride(null); 
 
                 if (toggles) {
                     state.setToggles(toggles);
@@ -1188,7 +1322,8 @@ function attachToggleListeners() {
         dynamicStrategyToggle: 'useDynamicStrategy', adaptivePlayToggle: 'useAdaptivePlay',
         tableChangeWarningsToggle: 'useTableChangeWarnings', dueForHitToggle: 'useDueForHit',
         neighbourFocusToggle: 'useNeighbourFocus', lessStrictModeToggle: 'useLessStrict',
-        dynamicTerminalNeighbourCountToggle: 'useDynamicTerminalNeighbourCount'
+        dynamicTerminalNeighbourCountToggle: 'useDynamicTerminalNeighbourCount',
+        reinforcementLearningToggle: 'useReinforcementLearning' // NEW
     };
 
     for (const [toggleId, stateKey] of Object.entries(toggles)) {
@@ -1196,6 +1331,30 @@ function attachToggleListeners() {
             const newToggleStates = { ...state };
             newToggleStates[stateKey] = dom[toggleId].checked;
             state.setToggles(newToggleStates);
+
+            if (stateKey === 'useReinforcementLearning') { // Handle RL toggle specifically
+                config.RL_CONFIG.enabled = dom[toggleId].checked; // Update config directly
+                if (dom[toggleId].checked) {
+                    // If RL is enabled, send initial state and rates to worker
+                    if (rlWorker) {
+                        rlWorker.postMessage({
+                            type: 'init',
+                            payload: {
+                                config: config.RL_CONFIG,
+                                currentAdaptiveRates: state.getEffectiveAdaptiveLearningRates()
+                            }
+                        });
+                        updateRlStatus('RL Model: Enabled and initialized.');
+                    }
+                } else {
+                    // If RL is disabled, clear any override and revert to default adaptive rates
+                    state.setAdaptiveLearningRatesOverride(null);
+                    Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES); // Ensure base is restored
+                    initializeAdvancedSettingsUI(); // Re-render sliders to show defaults
+                    updateRlStatus('RL Model: Disabled. Default rates applied.');
+                }
+                toggleParameterSliders(true); // Re-evaluate slider disabled states based on new RL toggle
+            }
 
             if (stateKey === 'usePocketDistance') {
                 renderHistory();
@@ -1262,7 +1421,8 @@ export function initializeUI() {
         'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
         'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
         'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
-        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
+        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'reinforcementLearningToggle', // NEW
+        'videoUpload', 'videoUploadLabel',
         'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
         'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
         'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
@@ -1272,7 +1432,7 @@ export function initializeUI() {
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
-        'warningParametersSliders',
+        'warningParametersSliders', 'rlModelStatus', // NEW
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
