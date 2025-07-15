@@ -3,7 +3,6 @@
 // Keep the module imports to ensure the library code executes and defines globals
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@latest/dist/tf-core.min.js';
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@latest/dist/tf-layers.min.js';
-// APPLIED FIX: Import the CPU backend
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@latest/dist/tf-backend-cpu.min.js';
 
 
@@ -24,7 +23,6 @@ async function initTensorFlow() {
         await tf.ready();
 
         tf.enableProdMode();
-        // Ensure backend is explicitly set after it's imported and ready
         tf.setBackend('cpu');
         if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
     } catch (err) {
@@ -43,7 +41,6 @@ console.log('TensorFlow.js tf object in aiWorker (from self.tf):', tf);
 const ENSEMBLE_CONFIG = config.AI_CONFIG.ensemble_config;
 const SEQUENCE_LENGTH = config.AI_CONFIG.sequenceLength;
 const TRAINING_MIN_HISTORY = config.AI_CONFIG.trainingMinHistory;
-// NEW: Get failure modes from the config
 const failureModes = config.AI_CONFIG.failureModes;
 
 let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
@@ -51,7 +48,7 @@ let terminalMapping = {};
 let rouletteWheel = [];
 let isTraining = false;
 
-// Helper to get number properties (unchanged)
+// Helper to get number properties
 function getNumberProperties(num) {
     const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
     const getRouletteNumberColor = (number) => {
@@ -78,13 +75,6 @@ function getNumberProperties(num) {
     };
 }
 
-/**
- * Calculates the consecutive hits/misses for each prediction type up to a given history item.
- * This is a helper function for prepareDataForLSTM and predictWithEnsemble.
- * @param {Array} historySubset - A slice of history ending at the current point.
- * @param {Array} allPredictionTypes - All prediction type definitions.
- * @returns {object} An object with current consecutive hits and misses for each prediction type ID.
- */
 function getConsecutivePerformanceForAI(historySubset, allPredictionTypes) {
     const consecutiveHits = {};
     const consecutiveMisses = {};
@@ -96,74 +86,51 @@ function getConsecutivePerformanceForAI(historySubset, allPredictionTypes) {
 
     if (historySubset.length === 0) return { consecutiveHits, consecutiveMisses };
 
-    // Iterate backwards from the most recent item in the subset
     for (let i = historySubset.length - 1; i >= 0; i--) {
         const item = historySubset[i];
         if (item.status === 'pending' || item.winningNumber === null) {
-            // If the item is pending or missing winningNumber, it breaks the streak for all types
-            // that were active up to this point, effectively resetting counts.
-            // For robust AI features, we might need a more nuanced approach for pending.
-            // For now, let's assume only fully evaluated history items contribute to consecutive counts.
             break; 
         }
 
-        let allTypesEvaluatedForThisItem = false;
         allPredictionTypes.forEach(type => {
             if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
-                allTypesEvaluatedForThisItem = true; // At least one type was evaluated
-                // Only count if not already started, or if continuing same streak
                 if ((consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) || 
                     (item.typeSuccessStatus[type.id] && consecutiveHits[type.id] > 0) ||
                     (!item.typeSuccessStatus[type.id] && consecutiveMisses[type.id] > 0)) {
                     
-                    if (item.typeSuccessStatus[type.id]) { // Hit
+                    if (item.typeSuccessStatus[type.id]) {
                         consecutiveHits[type.id]++; 
-                        consecutiveMisses[type.id] = 0; // Reset miss streak
-                    } else { // Miss
+                        consecutiveMisses[type.id] = 0;
+                    } else {
                         consecutiveMisses[type.id]++; 
-                        consecutiveHits[type.id] = 0; // Reset hit streak
+                        consecutiveHits[type.id] = 0;
                     }
                 } else {
-                    // This means the streak for this specific type was broken by an opposite result earlier in the historySliceForThisItem
-                    // So we effectively stop counting for this type beyond this point for this specific snapshot.
-                    // This logic ensures we're only capturing the *current* consecutive streak.
-                    consecutiveHits[type.id] = 0; // Reset if streak broke earlier
-                    consecutiveMisses[type.id] = 0; // Reset if streak broke earlier
+                    consecutiveHits[type.id] = 0;
+                    consecutiveMisses[type.id] = 0;
                 }
             } else {
-                // If type success status isn't available for this type in this item,
-                // it means this type wasn't active or calculated. Break the streak.
-                // Reset for this specific type
                 consecutiveHits[type.id] = 0;
                 consecutiveMisses[type.id] = 0;
             }
         });
-        // If no types were evaluated in this item at all, it's like a break in the chain for all relevant types.
-        // This outer break is likely not needed if inner loop handles it for each type.
-        // Removing for now for more precise per-type tracking.
-        // if (!allTypesEvaluatedForThisItem) {
-        //     break;
-        // }
     }
 
     return { consecutiveHits, consecutiveMisses };
 }
 
-// FIXED: Move scaleFeature to global scope so it's accessible by predictWithEnsemble
 const scaleFeature = (value, index, scaler) => {
     if (!scaler || scaler.min[index] === undefined || scaler.max[index] === undefined) {
-        // Fallback or error if scaler is not valid
         console.warn('Scaler is invalid or missing min/max for index', index, scaler);
-        return value; // Return original value or handle as error
+        return value;
     }
     const featureMin = scaler.min[index];
     const featureMax = scaler.max[index];
-    if (featureMax === featureMin) return 0; // Avoid division by zero if feature is constant
+    if (featureMax === featureMin) return 0;
     return (value - featureMin) / (featureMax - featureMin);
 };
 
 
-// Function to prepare data, now includes consecutive hit/miss features
 function prepareDataForLSTM(historyData, historicalStreakData) {
     const validHistory = historyData.filter(item => item.status === 'success' || (item.status === 'fail' && item.winningNumber !== null));
     if (validHistory.length < SEQUENCE_LENGTH + 1) {
@@ -174,34 +141,24 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     const getFeatures = (item, currentHistorySliceForContext) => {
         const props = getNumberProperties(item.winningNumber);
         
-        // Calculate consecutive performance up to this item
         const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(currentHistorySliceForContext, config.allPredictionTypes);
-
-        // Normalize consecutive counts (e.g., max 10 for misses/hits, or use a sigmoid for very long streaks)
-        // MaxStreak can be a configurable value in config.js if needed.
         const maxStreakToNormalize = 10; 
 
-        // Get repeat and neighbor hit status for this specific item in context
-        // Ensure to pass config.rouletteWheel here
         const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength);
-        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength, config.rouletteWheel, 1);
-
+        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength, rouletteWheel, 1);
 
         return [
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            // Add categorical features for winning number properties
             props.isEven, props.isOdd, props.isRed, props.isBlack,
             props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
             props.isCol1, props.isCol2, props.isCol3,
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // Add consecutive hit/miss features for each prediction type
             ...config.allPredictionTypes.flatMap(type => [
-                Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),   // Normalized consecutive hits
-                Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1) // Normalized consecutive misses
+                Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),
+                Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1)
             ]),
-            // NEW: Add repeat and neighbor hit features
             isCurrentRepeat ? 1 : 0,
             isCurrentNeighborHit ? 1 : 0
         ];
@@ -209,7 +166,6 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
 
     let rawFeatures = [];
     let rawGroupLabels = [];
-    // NEW: Add array for failure mode labels
     let rawFailureLabels = [];
     let rawStreakLengthLabels = [];
 
@@ -217,16 +173,13 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         const sequence = validHistory.slice(i, i + SEQUENCE_LENGTH);
         const targetItem = validHistory[i + SEQUENCE_LENGTH];
 
-        // For each item in the sequence, get its features, passing the history slice *up to that item*
         const xs_row = sequence.map((item, idx) => {
-            const historySliceForThisItem = validHistory.slice(0, i + idx + 1); // Slice up to the current item being processed in the overall history
+            const historySliceForThisItem = validHistory.slice(0, i + idx + 1);
             return getFeatures(item, historySliceForThisItem);
         });
         rawFeatures.push(xs_row);
 
         rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
-        
-        // NEW: Create the one-hot encoded label for the failure mode
         rawFailureLabels.push(failureModes.map(mode => (targetItem.failureMode === mode ? 1 : 0)));
 
         const streakLengthLabel = config.allPredictionTypes.map(type => {
@@ -238,16 +191,14 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
 
     const featureCount = rawFeatures.length > 0 ? rawFeatures[0][0].length : 0;
 
-    // Apply scaling to the entire feature set after generating all features
     const newScaler = {
         min: Array(featureCount).fill(Infinity),
         max: Array(featureCount).fill(-Infinity)
     };
     
-    // Recalculate min/max for scaling across all features
-    for (let i = 0; i < rawFeatures.length; i++) { // Iterate over sequences
-        for (let j = 0; j < rawFeatures[i].length; j++) { // Iterate over items in sequence
-            for (let k = 0; k < rawFeatures[i][j].length; k++) { // Iterate over features in item
+    for (let i = 0; i < rawFeatures.length; i++) {
+        for (let j = 0; j < rawFeatures[i].length; j++) {
+            for (let k = 0; k < rawFeatures[i][j].length; k++) {
                 const val = rawFeatures[i][j][k];
                 newScaler.min[k] = Math.min(newScaler.min[k], val);
                 newScaler.max[k] = Math.max(newScaler.max[k], val);
@@ -255,17 +206,15 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         }
     }
 
-    // Apply scaling to rawFeatures
     const scaledFeatures = rawFeatures.map(sequence => 
         sequence.map(itemFeatures => 
-            itemFeatures.map((val, idx) => scaleFeature(val, idx, newScaler)) // Pass newScaler here
+            itemFeatures.map((val, idx) => scaleFeature(val, idx, newScaler))
         )
     );
 
     const xs = scaledFeatures.length > 0 ? tf.tensor3d(scaledFeatures) : null;
     const ys = {
         group_output: rawGroupLabels.length > 0 ? tf.tensor2d(rawGroupLabels) : null,
-        // NEW: Add failure labels tensor
         failure_output: rawFailureLabels.length > 0 ? tf.tensor2d(rawFailureLabels) : null,
         streak_output: rawStreakLengthLabels.length > 0 ? tf.tensor2d(rawStreakLengthLabels) : null
     };
@@ -273,7 +222,6 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     return { xs, ys, scaler: newScaler, featureCount };
 }
 
-// NEW: Function to create model now includes a third output for failure modes
 function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputUnits, streakOutputUnits, lstmUnits) {
     const input = tf.input({ shape: inputShape });
     const lstmLayer = tf.layers.lstm({
@@ -286,7 +234,6 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
     const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
 
     const groupOutput = tf.layers.dense({ units: groupOutputUnits, activation: 'sigmoid', name: 'group_output' }).apply(dropoutLayer);
-    // NEW: Add the failure mode output layer with softmax for multi-class classification
     const failureOutput = tf.layers.dense({ units: failureOutputUnits, activation: 'softmax', name: 'failure_output' }).apply(dropoutLayer);
     const streakOutput = tf.layers.dense({ units: streakOutputUnits, activation: 'relu', name: 'streak_output' }).apply(dropoutLayer);
 
@@ -296,7 +243,6 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
         optimizer: tf.train.adam(),
         loss: {
             'group_output': 'binaryCrossentropy',
-            // NEW: Use categoricalCrossentropy for the softmax failure output
             'failure_output': 'categoricalCrossentropy',
             'streak_output': 'meanSquaredError'
         },
@@ -305,7 +251,6 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
     return model;
 }
 
-// Main training function (updated for new data)
 async function trainEnsemble(historyData, historicalStreakData) {
     await tfInitializedPromise;
 
@@ -327,7 +272,6 @@ async function trainEnsemble(historyData, historicalStreakData) {
     ensemble.forEach(member => member.scaler = scaler);
 
     const groupLabelCount = config.allPredictionTypes.length;
-    // NEW: Get the count for failure mode labels
     const failureLabelCount = failureModes.length;
     const streakLabelCount = config.allPredictionTypes.length;
 
@@ -336,7 +280,6 @@ async function trainEnsemble(historyData, historicalStreakData) {
             self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name}...` });
             if (member.model) member.model.dispose();
 
-            // NEW: Create the model with the failure output units
             member.model = createMultiOutputLSTMModel([SEQUENCE_LENGTH, featureCount], groupLabelCount, failureLabelCount, streakLabelCount, member.lstmUnits);
 
             await member.model.fit(xs, ys, {
@@ -358,14 +301,12 @@ async function trainEnsemble(historyData, historicalStreakData) {
 
     xs.dispose();
     if (ys.group_output) ys.group_output.dispose();
-    // NEW: Dispose the failure tensor
     if (ys.failure_output) ys.failure_output.dispose();
     if (ys.streak_output) ys.streak_output.dispose();
     isTraining = false;
     self.postMessage({ type: 'status', message: 'AI Ensemble: Ready!' });
 }
 
-// Prediction function (updated for new features)
 async function predictWithEnsemble(historyData) {
     await tfInitializedPromise;
 
@@ -377,34 +318,29 @@ async function predictWithEnsemble(historyData) {
 
     const lastSequence = validHistory.slice(-SEQUENCE_LENGTH);
 
-    const scaler = activeModels[0].scaler; // Assuming all models use the same scaler
+    const scaler = activeModels[0].scaler;
 
-    // Helper to get features including consecutive performance
     const getFeaturesForPrediction = (item, historySliceForContext) => {
         const props = getNumberProperties(item.winningNumber);
         const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(historySliceForContext, config.allPredictionTypes);
 
-        const maxStreakToNormalize = 10; // Must match training normalization
+        const maxStreakToNormalize = 10;
 
-        // Get repeat and neighbor hit status for this specific item in context
         const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength);
-        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength, config.rouletteWheel, 1);
+        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength, rouletteWheel, 1);
 
         return [
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            // Add categorical features for winning number properties
             props.isEven, props.isOdd, props.isRed, props.isBlack,
             props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
             props.isCol1, props.isCol2, props.isCol3,
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // Add consecutive hit/miss features for each prediction type
             ...config.allPredictionTypes.flatMap(type => [
                 Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),
                 Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1)
             ]),
-            // NEW: Add repeat and neighbor hit features
             isCurrentRepeat ? 1 : 0,
             isCurrentNeighborHit ? 1 : 0
         ];
@@ -414,24 +350,20 @@ async function predictWithEnsemble(historyData) {
     let inputTensor = null;
     try {
         const inputFeatures = lastSequence.map((item, idx) => {
-            // For prediction, the context slice should be up to the current item being processed in the sequence relative to the *full* validHistory.
             const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
-            return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler)); // Pass scaler here
+            return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler));
         });
         
         inputTensor = tf.tensor3d([inputFeatures]);
 
         const allPredictions = await Promise.all(activeModels.map(m => m.model.predict(inputTensor)));
 
-        // Average the predictions
         const averagedGroupProbs = new Float32Array(config.allPredictionTypes.length).fill(0);
-        // NEW: Add array for failure probabilities
         const averagedFailureProbs = new Float32Array(failureModes.length).fill(0);
         const averagedStreakPreds = new Float32Array(config.allPredictionTypes.length).fill(0);
 
         for (const prediction of allPredictions) {
             const groupProbs = await prediction[0].data();
-            // NEW: Get failure probabilities from the second output
             const failureProbs = await prediction[1].data();
             const streakPreds = await prediction[2].data();
 
@@ -448,7 +380,6 @@ async function predictWithEnsemble(historyData) {
         averagedFailureProbs.forEach((p, i) => averagedFailureProbs[i] /= allPredictions.length);
         averagedStreakPreds.forEach((p, i) => averagedStreakPreds[i] /= allPredictions.length);
 
-        // NEW: Include failure probabilities in the final result
         const finalResult = { groups: {}, failures: {}, streakPredictions: {} };
         config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
@@ -465,7 +396,6 @@ async function predictWithEnsemble(historyData) {
 }
 
 
-// Storage functions (unchanged)
 async function loadModelsFromStorage() {
     await tfInitializedPromise;
 
@@ -502,42 +432,26 @@ async function clearModelsFromStorage() {
 }
 
 
-// Helper for isRepeatNumberInContext
 function isRepeatNumberInContext(winningNumber, historySubset, recentHistoryLength) {
     if (historySubset.length === 0) return false;
     const relevantHistory = historySubset
-        .filter(item => item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, recentHistoryLength); // Get only the recent spins
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, recentHistoryLength);
 
     return relevantHistory.some(item => item.winningNumber === winningNumber);
 }
 
-// Helper for isNeighborHitInContext
 function isNeighborHitInContext(winningNumber, historySubset, recentHistoryLength, rouletteWheel, neighborDistance = 1) {
     if (historySubset.length === 0) return false;
     const relevantHistory = historySubset
-        .filter(item => item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, recentHistoryLength); // Get only the recent spins
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, recentHistoryLength);
 
     for (const item of relevantHistory) {
         const lastSpin = item.winningNumber;
-        if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
-        
-        // Use calculatePocketDistance (assuming it's available or imported correctly in worker scope)
-        // Since calculatePocketDistance is in shared-logic.js, we need to ensure it's imported or passed.
-        // For now, let's include a local implementation or ensure it's truly global in worker if needed.
-        // Given it's a small pure function, for worker context, a local copy or direct import might be considered.
-        // For a clean worker, let's locally define calculatePocketDistance if it's not imported.
-        // However, in our architecture, shared-logic.js is not imported into aiWorker.js.
-        // So, we'll need to pass rouletteWheel to the prediction function if calculatePocketDistance is in analysis.js.
-
-        // Re-implement a lightweight calculatePocketDistance for internal worker use, or ensure it's shared.
-        // Let's assume calculatePocketDistance from shared-logic.js is NOT directly available here.
-        // For simplicity, we can pass rouletteWheel and implement this helper locally if needed,
-        // or just use basic array index arithmetic if pocket distance definition is straightforward here.
-        // For this worker, direct array operations will be used for simplicity if calculatePocketDistance is not easily imported.
+        if (lastSpin === winningNumber) continue;
 
         const getPocketDistanceLocal = (num1, num2, wheel) => {
             const idx1 = wheel.indexOf(num1);
@@ -557,7 +471,6 @@ function isNeighborHitInContext(winningNumber, historySubset, recentHistoryLengt
 }
 
 
-// --- Message Handling for Web Worker (Updated) ---
 self.onmessage = async (event) => {
     const { type, payload } = event.data;
 
