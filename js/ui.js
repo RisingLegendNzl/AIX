@@ -47,11 +47,11 @@ const parameterMap = {
     FAILURE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
     MIN_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Min Adaptive Influence', container: 'adaptiveInfluenceSliders' },
     MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' },
-    WARNING_ROLLING_WINDOW_SIZE: { obj: config.STRATEGY_CONFIG, label: 'Warn Window Size', container: 'warningParametersSliders' },
-    WARNING_MIN_PLAYS_FOR_EVAL: { obj: config.STRATEGY_CONFIG, label: 'Warn Min Plays', container: 'warningParametersSliders' },
-    WARNING_LOSS_STREAK_THRESHOLD: { obj: config.STRATEGY_CONFIG, label: 'Warn Loss Streak', container: 'warningParametersSliders' },
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: { obj: config.STRATEGY_CONFIG, label: 'Warn Win Rate %', container: 'warningParametersSliders' },
-    DEFAULT_AVERAGE_WIN_RATE: { obj: config.STRATEGY_CONFIG, label: 'Default Avg Win Rate', container: 'warningParametersSliders' }
+    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' },
+    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' },
+    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' },
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' }
 };
 
 
@@ -345,7 +345,9 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -552,7 +554,6 @@ function handleSubmitResult() {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
         setTimeout(() => {
-            // Changed from dom.calculateButton to dom.submitCalculationButton
             if(dom.submitCalculationButton) dom.submitCalculationButton.click(); 
         }, 50);
     }
@@ -760,7 +761,6 @@ export function toggleParameterSliders(enable) {
 }
 
 function attachMainActionListeners() {
-    // Changed from calculateButton to submitCalculationButton
     if (dom.submitCalculationButton) dom.submitCalculationButton.addEventListener('click', handleNewCalculation); 
     if (dom.submitResultButton) dom.submitResultButton.addEventListener('click', handleSubmitResult);
     if (dom.clearInputsButton) dom.clearInputsButton.addEventListener('click', handleClearInputs);
@@ -929,23 +929,32 @@ export function initializeUI() {
     const elementIds = [
         'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
         'boardStateConclusion', 'historicalNumbersInput', 'analyzeHistoricalDataButton', 
-        'historicalAnalysisMessage', 'aiModelStatus', 'recalculateAnalysisButton',
-        'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
-        'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
-        'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
-        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'rouletteWheelContainer', 
-        'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput', 'winCount', 'lossCount', 
+        'historicalAnalysisMessage', 'aiModelStatus', 
+        // 'recalculateAnalysisButton' was previously defined in elementIds twice and not in HTML. 
+        // Removing from elementIds for now as it's not present in HTML.
+        // If you add it to HTML, uncomment it here:
+        // 'recalculateAnalysisButton',
+        
+        // Corrected IDs for toggles based on your HTML structure:
+        'dynamicStrategyToggle', 'adaptivePlayToggle', 'tableChangeWarningsToggle', 
+        'dueForHitToggle', 'neighbourFocusToggle', 'lessStrictModeToggle', 
+        'dynamicTerminalNeighbourCountToggle',
+
+        'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput', 
+        'winCount', 'lossCount', 
         'optimizationStatus', 'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 
         'applyBestParamsButton', 'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'loadParametersInput', 'submitResultButton', 'patternAlert',
-        // ADDED MISSING IDS:
+        
+        // These preset buttons are now correctly located within advancedSettingsContent in HTML
         'setHighestWinRatePreset', 'setBalancedSafePreset', 'setAggressiveSignalsPreset', 
         'resetParametersButton', 'saveParametersButton', 'loadParametersLabel',
-        // Ensure 'calculateButton' is actually 'submitCalculationButton' in HTML
+        
+        // Renamed 'calculateButton' to 'submitCalculationButton' in HTML, reflecting here
         'submitCalculationButton', 
 
         'advancedStrategyGuideHeader', 'advancedStrategyGuideContent', 'systemStatusDisplay', 'trendAnalysisDisplay',
-        'clearInputsButton', 'swapButton', 'clearHistoryButton', 'recalculateAnalysisButton',
+        'clearInputsButton', 'swapButton', 'clearHistoryButton',
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
         // 'historyInfoToggle', 'historyInfoDropdown' // If you add these to HTML, uncomment them here
     ];
