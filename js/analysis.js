@@ -5,7 +5,7 @@ import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSha
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
-import { aiWorker } from './workers.js';
+import { aiWorker, rlWorker } from './workers.js'; // ADDED rlWorker
 import { calculatePocketDistance } from './shared-logic.js'; // Ensure calculatePocketDistance is imported for local helpers
 
 
@@ -48,28 +48,64 @@ export function getAiPrediction(history) {
 
 export function labelHistoryFailures(sortedHistory) {
     let lastSuccessfulType = null;
-    sortedHistory.forEach((item) => {
-        if (item.status === 'pending' || item.winningNumber === null) return;
-        if (item.status === 'success') {
-            item.failureMode = 'none';
-            if (item.recommendedGroupId && item.hitTypes.includes(item.recommendedGroupId)) {
+    // Iterate in chronological order to correctly determine streak breaks and section shifts
+    const chronologicalHistory = [...sortedHistory].sort((a, b) => a.id - b.id);
+
+    chronologicalHistory.forEach((item, index) => {
+        if (item.status === 'pending' || item.winningNumber === null) {
+            item.failureMode = 'pending_or_unresolved'; // Cannot determine failure mode yet
+            return;
+        }
+
+        // Determine if it was an actionable "Play" signal or an "Avoid Play" signal
+        const wasActionablePlay = item.recommendedGroupId && item.recommendationDetails?.finalScore > 0 && item.recommendationDetails?.signal !== 'Avoid Play';
+
+        if (item.status === 'success' && wasActionablePlay) {
+            item.failureMode = 'none'; // No failure, it was a hit
+            if (item.recommendedGroupId) {
                 lastSuccessfulType = item.recommendedGroupId;
             }
             return;
         }
-        if (item.recommendedGroupId) {
-            if (lastSuccessfulType && item.recommendedGroupId === lastSuccessfulType) {
-                item.failureMode = 'streakBreak';
-            } else if (lastSuccessfulType && item.recommendedGroupId !== lastSuccessfulType) {
-                item.failureMode = 'sectionShift';
-            } else {
-                item.failureMode = 'normalLoss';
-            }
-        } else {
-            item.failureMode = 'normalLoss';
+        
+        // If it was an 'Avoid Play' signal, label it correctly.
+        if (item.recommendationDetails?.signal === 'Avoid Play') {
+            item.failureMode = 'avoided_loss';
+            return;
         }
+
+        // If it wasn't an actionable play (e.g., "Wait for Signal")
+        if (!wasActionablePlay) {
+            item.failureMode = 'no_action_taken';
+            return;
+        }
+
+        // If we reach here, it means item.status is 'fail' AND it was an actionable 'Play'
+        item.failureMode = 'normalLoss'; // Default to normalLoss
+
+        // Detect streakBreak
+        if (lastSuccessfulType && item.recommendedGroupId === lastSuccessfulType) {
+            item.failureMode = 'streakBreak';
+        } 
+        
+        // Detect nearMiss
+        if (item.pocketDistance !== null && item.pocketDistance <= config.STRATEGY_CONFIG.NEAR_MISS_DISTANCE_THRESHOLD) {
+            item.failureMode = 'nearMiss';
+        }
+
+        // Detect sectionShift: More complex. Requires analyzing if the winning number's characteristics
+        // (e.g., parity, color, dozen, column) are consistently different from the recommended group's.
+        // For a basic implementation: if the last successful play was from a very different type/group category.
+        // This is a placeholder for advanced logic as it requires defining "sections" clearly.
+        // For instance, if you define "sections" like 'High', 'Low', 'Red', 'Black', 'Dozens', etc.,
+        // you would check if the current winning number is in a section that was not predicted,
+        // but was a successful section in the immediate past when your strategy failed.
+        // For now, let's keep it simple or expand later.
+        // Example (conceptual): if (lastWinningNumberSection && currentWinningNumberSection !== recommendedSection && currentWinningNumberSection === lastWinningNumberSection) item.failureMode = 'sectionShift';
+
     });
 }
+
 
 /**
  * Calculates rolling performance metrics for table change warnings.
@@ -91,7 +127,7 @@ export function calculateRollingPerformance(history, strategyConfig) {
         const item = relevantHistory[i];
 
         // Only count towards rolling window if it was an explicit "Play" signal
-        if (item.recommendationDetails.finalScore > 0) {
+        if (item.recommendationDetails.finalScore > 0 && item.recommendationDetails.signal !== 'Avoid Play') {
             playsInWindow++;
             if (item.hitTypes.includes(item.recommendedGroupId)) {
                 winsInWindow++;
@@ -101,7 +137,7 @@ export function calculateRollingPerformance(history, strategyConfig) {
                 consecutiveLosses++; // Increment consecutive losses
             }
         } else {
-            // If it was a 'Wait' signal, it doesn't count towards the rolling performance for warnings
+            // If it was a 'Wait' or 'Avoid' signal, it doesn't count towards the rolling performance for warnings
             // Nor does it break the consecutive losses of *plays*
         }
 
@@ -301,6 +337,7 @@ export function isNeighborHit(winningNumber, history, recentHistoryLength = conf
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
+    // Ensure that simulation uses the effective rates (default or RL-tuned for the simulation context)
     let localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
@@ -316,8 +353,9 @@ function runSimulationOnHistory(spinsToProcess) {
         const winningNumber = spinsToProcess[i];
         
         // --- Apply forget factor to adaptive influences before current spin's recommendation ---
+        const effectiveAdaptiveRates = state.getEffectiveAdaptiveLearningRates(); // Get current rates (default or RL)
         for (const factorName in localAdaptiveFactorInfluences) {
-            localAdaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+            localAdaptiveFactorInfluences[factorName] = Math.max(effectiveAdaptiveRates.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * effectiveAdaptiveRates.FORGET_FACTOR);
         }
 
         const trendStats = calculateTrendStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -332,7 +370,8 @@ function runSimulationOnHistory(spinsToProcess) {
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, // Use the current config for simulation
-            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory, // Use current adaptive rates config
+            current_ADAPTIVE_LEARNING_RATES: effectiveAdaptiveRates, // Use effective adaptive rates for simulation
+            currentHistoryForTrend: localHistory, // Use current adaptive rates config
             activePredictionTypes: state.activePredictionTypes,
             useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
             terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
@@ -344,20 +383,46 @@ function runSimulationOnHistory(spinsToProcess) {
             recommendationDetails: recommendation.bestCandidate?.details || null
         };
 
+        // This must run before labelHistoryFailures so pocketDistance is populated
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+        
+        // Label failure mode for this simulated item
+        // For simulation, we need a simplified way to label the failure as labelHistoryFailures
+        // works on the whole chronological history and relies on `lastSuccessfulType` etc.
+        // For a full simulation, a more complex tracking of lastSuccessfulType within `runSimulationOnHistory` is needed.
+        // For now, let's keep it simple:
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.finalScore > 0 && newHistoryItem.recommendationDetails.signal !== 'Avoid Play') {
+            if (newHistoryItem.status === 'success') {
+                newHistoryItem.failureMode = 'none';
+            } else {
+                newHistoryItem.failureMode = 'normalLoss'; // Default for simulation
+                if (newHistoryItem.pocketDistance !== null && newHistoryItem.pocketDistance <= config.STRATEGY_CONFIG.NEAR_MISS_DISTANCE_THRESHOLD) {
+                    newHistoryItem.failureMode = 'nearMiss';
+                }
+                // Streak break and section shift require proper history context in simulation, so we'll omit for now or simplify.
+            }
+        } else if (newHistoryItem.recommendationDetails?.signal === 'Avoid Play') {
+            newHistoryItem.failureMode = 'avoided_loss';
+        } else {
+            newHistoryItem.failureMode = 'no_action_taken';
+        }
+
+
         localHistory.push(newHistoryItem);
 
         // Apply adaptive influence updates within the simulation
-        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor && newHistoryItem.failureMode) {
             const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
-            // Calculate influence change magnitude based on finalScore
-            const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+            const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - effectiveAdaptiveRates.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * effectiveAdaptiveRates.CONFIDENCE_WEIGHTING_MULTIPLIER;
             
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
-            if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)); // Add confidence-weighted part
-            } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)); // Subtract confidence-weighted part
+            if (newHistoryItem.recommendationDetails.finalScore > 0 && newHistoryItem.recommendationDetails.signal !== 'Avoid Play') {
+                if (newHistoryItem.status === 'success') { // Hit
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.min(effectiveAdaptiveRates.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (effectiveAdaptiveRates.SUCCESS + influenceChangeMagnitude)); // Add confidence-weighted part
+                } else { // Miss
+                    const failureMultiplier = effectiveAdaptiveRates.FAILURE_MULTIPLIERS[newHistoryItem.failureMode] || 1.0;
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.max(effectiveAdaptiveRates.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (effectiveAdaptiveRates.FAILURE * failureMultiplier + influenceChangeMagnitude)); // Subtract confidence-weighted part
+                }
             }
         }
 
@@ -371,8 +436,9 @@ function runSimulationOnHistory(spinsToProcess) {
 
 export async function runAllAnalyses(winningNumber = null) {
     // --- Apply forget factor to current adaptive influences BEFORE calculating new recommendation ---
+    const effectiveAdaptiveRates = state.getEffectiveAdaptiveLearningRates(); // Get current effective rates
     for (const factorName in state.adaptiveFactorInfluences) {
-        state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+        state.adaptiveFactorInfluences[factorName] = Math.max(effectiveAdaptiveRates.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * effectiveAdaptiveRates.FORGET_FACTOR);
     }
     state.saveState(); // Save state after applying forget factor
 
@@ -421,7 +487,8 @@ export async function runAllAnalyses(winningNumber = null) {
             // NEW: Pass repeat/neighbor hit status to recommendation for potential special handling or display
             isCurrentRepeat: isRepeatNumber(lastWinning, state.history), // Use the exported function
             isCurrentNeighborHit: isNeighborHit(lastWinning, state.history), // Use the exported function
-            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, 
+            current_ADAPTIVE_LEARNING_RATES: effectiveAdaptiveRates, // Use the effective rates from state
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
@@ -435,7 +502,31 @@ export async function runAllAnalyses(winningNumber = null) {
             lastPendingItem.recommendationDetails.reason = recommendation.reason; // Ensure reason is stored
 
             if (winningNumber !== null) {
+                // This must run before labelHistoryFailures so pocketDistance is populated
                 evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+
+                // Re-label failures across the entire history based on the latest context
+                // This must happen BEFORE adaptive learning update for the current spin (if done here)
+                labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
+                
+                // Apply adaptive influence updates here, after evaluation and labeling
+                if (lastPendingItem.recommendedGroupId && lastPendingItem.recommendationDetails?.primaryDrivingFactor && lastPendingItem.failureMode) {
+                    const primaryFactor = lastPendingItem.recommendationDetails.primaryDrivingFactor;
+                    const finalScore = lastPendingItem.recommendationDetails.finalScore;
+                    const influenceChangeMagnitude = Math.max(0, finalScore - effectiveAdaptiveRates.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * effectiveAdaptiveRates.CONFIDENCE_WEIGHTING_MULTIPLIER;
+                    
+                    if (state.adaptiveFactorInfluences[primaryFactor] === undefined) state.adaptiveFactorInfluences[primaryFactor] = 1.0;
+
+                    // Only update influences if it was an actionable signal (not 'Wait' or 'Avoid')
+                    if (finalScore > 0 && lastPendingItem.recommendationDetails.signal !== 'Avoid Play') {
+                        if (lastPendingItem.status === 'success') { // It was a hit
+                            state.adaptiveFactorInfluences[primaryFactor] = Math.min(effectiveAdaptiveRates.MAX_INFLUENCE, state.adaptiveFactorInfluences[primaryFactor] + (effectiveAdaptiveRates.SUCCESS + influenceChangeMagnitude));
+                        } else if (lastPendingItem.status === 'fail') { // It was a miss
+                            const failureMultiplier = effectiveAdaptiveRates.FAILURE_MULTIPLIERS[lastPendingItem.failureMode] || 1.0;
+                            state.adaptiveFactorInfluences[primaryFactor] = Math.max(effectiveAdaptiveRates.MIN_INFLUENCE, state.adaptiveFactorInfluences[primaryFactor] - (effectiveAdaptiveRates.FAILURE * failureMultiplier + influenceChangeMagnitude));
+                        }
+                    }
+                }
 
                 if (lastPendingItem.winningNumber !== null) {
                     const newLog = state.history
@@ -485,7 +576,7 @@ export async function handleHistoricalAnalysis() {
     
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
-    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // Label failures after full simulation
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
     await runAllAnalyses();
@@ -510,6 +601,19 @@ export async function handleHistoricalAnalysis() {
         state.setIsAiReady(false);
         ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
     }
+
+    // NEW: Initialize RL worker with historical data if enabled
+    if (config.RL_CONFIG.enabled && rlWorker) {
+        rlWorker.postMessage({
+            type: 'init', // Re-initialize with potentially new history data
+            payload: {
+                config: config.RL_CONFIG,
+                currentAdaptiveRates: state.getEffectiveAdaptiveLearningRates(),
+                history: state.history // Send entire history for initial state representation
+            }
+        });
+        ui.updateRlStatus('RL Model: Initialized with historical data.');
+    }
 }
 
 export async function handleStrategyChange() {
@@ -519,7 +623,7 @@ export async function handleStrategyChange() {
         const simulatedHistory = runSimulationOnHistory(currentWinningNumbers);
         state.setHistory(simulatedHistory);
         state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
-        labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+        labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // Label failures after full simulation
     }
     
     await runAllAnalyses();
