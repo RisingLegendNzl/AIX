@@ -158,17 +158,17 @@ export function updateWinLossCounter() {
     let losses = 0;
 
     state.history.forEach(item => {
-        // Only count wins/losses if a recommendation was explicitly made
-        // and a winning number was entered for that round.
-        if (item.recommendedGroupId && item.winningNumber !== null) {
+        // Only count wins/losses if:
+        // 1. A recommendation was explicitly made (recommendedGroupId exists)
+        // 2. A winning number was entered for that round (item.winningNumber !== null)
+        // 3. The recommendation had a positive final score (item.recommendationDetails.finalScore > 0),
+        //    indicating it was an explicit "Play" signal, not "Wait for Signal" or "Low Confidence".
+        if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.finalScore > 0) {
             // Check if the recommended group hit
             if (item.hitTypes && item.hitTypes.includes(item.recommendedGroupId)) {
                 wins++;
             } else {
-                // Only count as a loss if an explicit "Play" signal was given (finalScore > 0)
-                if (item.recommendationDetails && item.recommendationDetails.finalScore > 0) {
-                     losses++;
-                }
+                losses++;
             }
         }
     });
@@ -282,12 +282,26 @@ export function renderHistory() {
             const recommendedHit = item.hitTypes.includes(item.recommendedGroupId);
 
             let resultText = '';
+            // Determine result text for display purposes (HIT/MISS/WAIT)
             if (item.status !== 'pending') {
-                resultText = recommendedHit ? ' - HIT' : ' - MISS';
+                if (details.finalScore > 0) { // Was an actionable "Play" signal
+                    resultText = recommendedHit ? ' - HIT' : ' - MISS';
+                } else { // Was a "Wait for Signal" or "Low Confidence"
+                    resultText = ' - WAIT';
+                }
             }
 
             stateBadgeContent = `Top: ${recommendedLabel} (${hitRate.toFixed(1)}%) ${resultText}`;
-            stateBadgeClass = recommendedHit ? (recommendedType?.colorClass || 'bg-green-500') : 'bg-red-500';
+            
+            // Determine badge color
+            if (item.status !== 'pending' && details.finalScore <= 0) {
+                 stateBadgeClass = 'bg-gray-500'; // "Wait" signal should be gray
+            } else if (recommendedHit) {
+                stateBadgeClass = recommendedType?.colorClass || 'bg-green-500'; // Green or type color for hits
+            } else {
+                stateBadgeClass = 'bg-red-500'; // Red for misses
+            }
+
         } else {
             stateBadgeContent = 'No Recommendation';
             stateBadgeClass = 'bg-gray-500';
@@ -327,7 +341,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -557,10 +571,32 @@ function handleNewCalculation() {
 function handleSubmitResult() {
     if (!dom.winningNumberInput || !dom.number1 || !dom.number2) return;
 
-    const lastItem = [...state.history].reverse().find(item => item.status === 'pending');
-    if (!lastItem) {
-        alert("Please perform a calculation first before submitting a winning number.");
-        return;
+    // Find the truly last PENDING item where the user is expected to submit a winning number.
+    // This looks for an item that is 'pending' AND has not yet had a winning number assigned.
+    const lastPendingForSubmission = [...state.history].reverse().find(
+        item => item.status === 'pending' && item.winningNumber === null
+    );
+
+    if (!lastPendingForSubmission) {
+        // If there are genuinely NO pending calculations awaiting a winning number,
+        // then either:
+        // 1. No calculations have been performed yet.
+        // 2. All previous pending calculations have already been resolved (e.g., by historical analysis or optimization re-simulations).
+        // In these cases, we don't want to show the "Please perform a calculation first" alert
+        // if the user is just accidentally pressing Enter or clicking Submit.
+
+        const hasAnyCalculations = state.history.length > 0;
+        if (hasAnyCalculations) {
+            // There's history, but no current input needing a result from the user.
+            // This is the scenario after re-simulation where old pending items are resolved.
+            // We just silently return, preventing the alert.
+            console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
+            return;
+        } else {
+            // No calculations have been performed at all. Show the original alert.
+            alert("Please perform a calculation first before submitting a winning number.");
+            return;
+        }
     }
 
     const winningNumberVal = dom.winningNumberInput.value;
@@ -574,21 +610,37 @@ function handleSubmitResult() {
         return;
     }
 
-    runAllAnalyses(winningNumber);
-    renderHistory();
+    // Apply winning number to the specific pending item identified
+    // We already ensured lastPendingForSubmission is not null in the checks above
+    evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
 
-    dom.winningNumberInput.value = '';
+    // Update confirmedWinsLog based on *all* confirmed spins
+    const newLog = state.history
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => a.id - b.id)
+        .map(item => item.winningNumber);
+    state.setConfirmedWinsLog(newLog);
 
-    const prevNum2 = parseInt(lastItem.num2, 10);
+    // Re-label failures across the entire history based on the latest context
+    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
+
+    runAllAnalyses(); // This will re-evaluate recommendations for current inputs
+    renderHistory(); // This will update the UI and win/loss counter
+
+    dom.winningNumberInput.value = ''; // Clear the input field
+
+    // Auto-populate for next calculation, if applicable
+    const prevNum2 = parseInt(lastPendingForSubmission.num2, 10); // Use num2 from the just-resolved item
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
         setTimeout(() => {
+            // Trigger calculation for the next spin
             document.getElementById('calculateButton').click();
         }, 50);
     } else {
-        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', lastItem.num2);
+        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
     }
 }
 
