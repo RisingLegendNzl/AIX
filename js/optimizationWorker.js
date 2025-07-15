@@ -119,6 +119,26 @@ function calculateFitness(individual) {
         patternSuccessThreshold: individual.patternSuccessThreshold,
         triggerMinAttempts: individual.triggerMinAttempts,
         triggerSuccessThreshold: individual.triggerSuccessThreshold,
+        // Include new scoring parameters for the optimizer's simulation
+        hitRateThreshold: individual.hitRateThreshold,
+        hitRateMultiplier: individual.hitRateMultiplier,
+        maxStreakPoints: individual.maxStreakPoints,
+        streakMultiplier: individual.streakMultiplier,
+        proximityMaxDistance: individual.proximityMaxDistance,
+        proximityMultiplier: individual.proximityMultiplier,
+        maxNeighbourPoints: individual.maxNeighbourPoints,
+        neighbourMultiplier: individual.neighbourMultiplier,
+        aiConfidenceMultiplier: individual.aiConfidenceMultiplier,
+        minAiPointsForReason: individual.minAiPointsForReason,
+
+        ADAPTIVE_STRONG_PLAY_THRESHOLD: individual.ADAPTIVE_STRONG_PLAY_THRESHOLD,
+        ADAPTIVE_PLAY_THRESHOLD: individual.ADAPTIVE_PLAY_THRESHOLD,
+        LESS_STRICT_STRONG_PLAY_THRESHOLD: individual.LESS_STRICT_STRONG_PLAY_THRESHOLD,
+        LESS_STRICT_PLAY_THRESHOLD: individual.LESS_STRICT_PLAY_THRESHOLD,
+        LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: individual.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
+        LESS_STRICT_MIN_STREAK: individual.LESS_STRICT_MIN_STREAK,
+        SIMPLE_PLAY_THRESHOLD: individual.SIMPLE_PLAY_THRESHOLD,
+        MIN_TREND_HISTORY_FOR_CONFIRMATION: individual.MIN_TREND_HISTORY_FOR_CONFIRMATION
     };
     const SIM_ADAPTIVE_LEARNING_RATES = {
         SUCCESS: individual.adaptiveSuccessRate,
@@ -140,8 +160,8 @@ function calculateFitness(individual) {
         if (rawItem.winningNumber === null) continue; // Skip if no winning number is available for evaluation
 
         const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
+        const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.toggles.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         
         const recommendation = shared.getRecommendation({
             trendStats, boardStats, neighbourScores, inputNum1: rawItem.num1, inputNum2: rawItem.num2,
@@ -149,7 +169,10 @@ function calculateFitness(individual) {
             lastWinningNumber: tempConfirmedWinsLog.length > 0 ? tempConfirmedWinsLog[tempConfirmedWinsLog.length - 1] : null,
             useProximityBoostBool: sharedData.toggles.useProximityBoost, useWeightedZoneBool: sharedData.toggles.useWeightedZone,
             useNeighbourFocusBool: sharedData.toggles.useNeighbourFocus, isAiReadyBool: false,
-            useTrendConfirmationBool: sharedData.toggles.useTrendConfirmation, current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
+            useTrendConfirmationBool: sharedData.toggles.useTrendConfirmation, 
+            useAdaptivePlayBool: sharedData.toggles.useAdaptivePlay, // PASSING NEW TOGGLE
+            useLessStrictBool: sharedData.toggles.useLessStrict,   // PASSING NEW TOGGLE
+            current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: simulatedHistory,
             useDynamicTerminalNeighbourCount: sharedData.toggles.useDynamicTerminalNeighbourCount,
             activePredictionTypes: config.allPredictionTypes, allPredictionTypes: config.allPredictionTypes,
@@ -161,7 +184,7 @@ function calculateFitness(individual) {
         simItem.recommendationDetails = recommendation.bestCandidate?.details || null; 
         
         // Evaluate the simulation item against its actual winning number
-        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
+        shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.toggles.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
         
         // --- UPDATED WIN/LOSS COUNTING LOGIC FOR OPTIMIZATION ---
         // Only count wins/losses if:
