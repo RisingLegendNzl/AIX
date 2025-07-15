@@ -11,9 +11,9 @@ import {
     showOptimizationComplete, 
     showOptimizationStopped, 
     toggleParameterSliders,
-    renderTrendAnalysis // NEW: Import the trend analysis renderer
+    renderTrendAnalysis 
 } from './ui.js';
-import * as dom from './ui.js'; // Import dom elements from ui.js for button references
+import * as dom from './ui.js';
 
 
 // --- WORKER INITIALIZATION ---
@@ -87,7 +87,7 @@ export function initializeWorkers() {
             case 'trendReport':
                 // Update the central state with the new analysis
                 state.setTrendWorkerAnalysis(payload);
-                // NEW: Render the new UI component with the analysis payload
+                // Render the new UI component with the analysis payload
                 renderTrendAnalysis(payload);
                 if (config.DEBUG_MODE) {
                     console.log('Trend Analysis Report Updated:', payload);
