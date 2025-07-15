@@ -54,10 +54,12 @@ export let STRATEGY_CONFIG = {
     WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.8, // If primary factors are too diverse (e.g., >80% are different), warn
     WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 50, // Min percentage of one factor needed for it to be 'dominant'
 
-
     // NEW: Pocket Distance Prioritization Multipliers (for useLowestPocketDistance)
     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5, // Multiplier to boost score if distance is 0 or 1
-    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5 // Multiplier to suppress score if distance is > 1 but others are low
+    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5, // Multiplier to suppress score if distance is > 1 but others are low
+
+    // NEW: Threshold for 'nearMiss' detection
+    NEAR_MISS_DISTANCE_THRESHOLD: 2, // e.g., if winning number is 1 or 2 pockets away from hit zone
 };
 
 // --- Adaptive Learning Rates for Factor Influences ---
@@ -67,11 +69,56 @@ export let ADAPTIVE_LEARNING_RATES = {
     MIN_INFLUENCE: 0.2, 
     MAX_INFLUENCE: 2.5,
     // NEW: Forgetfulness factor for adaptive influences
-    FORGET_FACTOR: 0.995, // Multiplier applied to influences each spin (e.g., 0.995 means 0.5% decay per spin)
+    FORGET_FACTOR: 0.995, // Multiplier applied to influences each spin (e.g., 0.5% decay per spin)
     // NEW: Confidence weighting for adaptive influence updates
-    CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02, // How much finalScore impacts the influence change
-    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5, // Below this finalScore, confidence weighting has less effect
+    CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02,
+    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5,
+
+    // NEW: Multipliers for different failure modes
+    FAILURE_MULTIPLIERS: {
+        normalLoss: 1.0,      // Standard impact
+        streakBreak: 1.5,     // Higher penalty for breaking a streak
+        sectionShift: 1.8,    // Even higher penalty for a significant shift
+        nearMiss: 0.5,        // Lower penalty (or even a slight boost) for a near miss, as the strategy was almost right
+        avoided_loss: 0.0,    // No penalty for a correctly avoided loss
+        no_action_taken: 0.0  // No penalty if no play was recommended
+    }
 };
+
+// --- NEW: RL Configuration for Adaptive Influence Tuning ---
+export const RL_CONFIG = {
+    enabled: true, // Master switch for RL
+    learningInterval: 5, // How often (in spins) the RL agent processes and potentially updates adaptive rates
+    explorationRate: 0.1, // Probability of taking a random action to explore
+    learningRate: 0.01, // How much the RL agent adjusts its policy (separate from strategy learning rates)
+    discountFactor: 0.95, // Importance of future rewards
+    episodeLength: 20, // Number of spins in an RL "episode" for learning
+    // Parameters the RL agent will tune
+    tunableAdaptiveRates: [
+        'SUCCESS', 'FAILURE', 'MIN_INFLUENCE', 'MAX_INFLUENCE', 'FORGET_FACTOR',
+        'CONFIDENCE_WEIGHTING_MULTIPLIER', 'CONFIDENCE_WEIGHTING_MIN_THRESHOLD'
+    ],
+    tunableFailureMultipliers: [
+        'normalLoss', 'streakBreak', 'sectionShift', 'nearMiss'
+    ],
+    // Defines the possible adjustment steps for RL agent
+    adjustmentSteps: {
+        SUCCESS: 0.01,
+        FAILURE: 0.01,
+        MIN_INFLUENCE: 0.01,
+        MAX_INFLUENCE: 0.05,
+        FORGET_FACTOR: 0.001,
+        CONFIDENCE_WEIGHTING_MULTIPLIER: 0.001,
+        CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 1,
+        // For failure multipliers, define discrete steps or ranges
+        multiplierAdjustment: 0.1 // Adjusts existing multipliers by this much
+    }
+};
+
+// This object will hold the adaptive rates if overridden by the RL agent.
+// If null, the app uses ADAPTIVE_LEARNING_RATES.
+export let ADAPTIVE_LEARNING_RATES_OVERRIDE = null;
+
 
 // --- DEFAULT PARAMETERS ---
 export const DEFAULT_PARAMETERS = {
@@ -119,7 +166,9 @@ export const DEFAULT_PARAMETERS = {
 
         // Defaults for new Pocket Distance Prioritization
         LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5,
-        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5
+        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5,
+
+        NEAR_MISS_DISTANCE_THRESHOLD: 2, //
     },
     ADAPTIVE_LEARNING_RATES: {
         SUCCESS: 0.15, 
@@ -128,7 +177,15 @@ export const DEFAULT_PARAMETERS = {
         MAX_INFLUENCE: 2.5,
         FORGET_FACTOR: 0.995,
         CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02,
-        CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5
+        CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5,
+        FAILURE_MULTIPLIERS: {
+            normalLoss: 1.0,
+            streakBreak: 1.5,
+            sectionShift: 1.8,
+            nearMiss: 0.5,
+            avoided_loss: 0.0,
+            no_action_taken: 0.0
+        }
     },
     TOGGLES: {
         useTrendConfirmation: false,
@@ -148,6 +205,8 @@ export const DEFAULT_PARAMETERS = {
 };
 
 // --- STRATEGY PRESETS ---
+// ... (STRATEGY_PRESETS remain the same, ensure they use DEFAULT_PARAMETERS for new fields) ...
+
 export const STRATEGY_PRESETS = {
     highestWinRate: {
         STRATEGY_CONFIG: {
@@ -180,6 +239,9 @@ export const STRATEGY_PRESETS = {
             MAX_INFLUENCE: 2.5,
             FORGET_FACTOR: 0.99, // Slightly faster forgetting for potentially higher win rate
             CONFIDENCE_WEIGHTING_MULTIPLIER: 0.03, // Higher influence change
+            FAILURE_MULTIPLIERS: { // Inherit or customize
+                normalLoss: 1.0, streakBreak: 1.5, sectionShift: 1.8, nearMiss: 0.5, avoided_loss: 0.0, no_action_taken: 0.0
+            }
         },
         TOGGLES: {
             ...DEFAULT_PARAMETERS.TOGGLES,
@@ -212,6 +274,9 @@ export const STRATEGY_PRESETS = {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
             FORGET_FACTOR: 0.998, // Slower forgetting for stability
             CONFIDENCE_WEIGHTING_MULTIPLIER: 0.015, // Moderate influence change
+            FAILURE_MULTIPLIERS: { // Inherit or customize
+                normalLoss: 1.0, streakBreak: 1.5, sectionShift: 1.8, nearMiss: 0.5, avoided_loss: 0.0, no_action_taken: 0.0
+            }
         },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
@@ -244,6 +309,9 @@ export const STRATEGY_PRESETS = {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
             FORGET_FACTOR: 0.98, // Very aggressive forgetting
             CONFIDENCE_WEIGHTING_MULTIPLIER: 0.025, // Higher influence change
+            FAILURE_MULTIPLIERS: { // Inherit or customize
+                normalLoss: 1.0, streakBreak: 1.5, sectionShift: 1.8, nearMiss: 0.5, avoided_loss: 0.0, no_action_taken: 0.0
+            }
         },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
@@ -301,7 +369,7 @@ export const GA_CONFIG = {
 export const AI_CONFIG = {
     sequenceLength: 5,
     trainingMinHistory: 10,
-    failureModes: ['none', 'normalLoss', 'streakBreak', 'sectionShift'],
+    failureModes: ['none', 'normalLoss', 'streakBreak', 'sectionShift', 'nearMiss', 'avoided_loss', 'no_action_taken'], // Updated
     ensemble_config: [
         {
             name: 'Specialist',
