@@ -25,6 +25,8 @@ export let STRATEGY_CONFIG = {
     neighbourMultiplier: 0.5,    // Points = neighbourWeightedScore * multiplier
     aiConfidenceMultiplier: 25,  // Points = mlProbability * multiplier
     minAiPointsForReason: 5,     // Min AI points for 'AI Conf' to appear in reason list
+    // NEW: Points to add if the Trend Worker identifies a dominant group
+    TREND_WORKER_BOOST: 20,
 
     // NEW: Adaptive Play Signal Thresholds (used in shared-logic.js)
     // When useAdaptivePlay is ON
@@ -97,6 +99,7 @@ export const DEFAULT_PARAMETERS = {
         neighbourMultiplier: 0.5,
         aiConfidenceMultiplier: 25,
         minAiPointsForReason: 5,
+        TREND_WORKER_BOOST: 20,
 
         ADAPTIVE_STRONG_PLAY_THRESHOLD: 50,
         ADAPTIVE_PLAY_THRESHOLD: 20,
