@@ -22,9 +22,7 @@ function getNeighbours(number, count, rouletteWheel) {
     return Array.from(neighbours);
 }
 
-export function calculatePocketDistance(num1, num2, rouletteWheel)
-
- {
+export function calculatePocketDistance(num1, num2, rouletteWheel) {
     const index1 = rouletteWheel.indexOf(num1);
     const index2 = rouletteWheel.indexOf(num2);
     if (index1 === -1 || index2 === -1) return Infinity;
@@ -207,10 +205,11 @@ export function getRecommendation(context) {
         isForWeightUpdate = false, aiPredictionData = null,
         currentAdaptiveInfluences, lastWinningNumber,
         useProximityBoostBool, useWeightedZoneBool, useNeighbourFocusBool,
-        isAiReadyBool, useTrendConfirmationBool,
+        isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool, // ADDED: new toggles
         current_STRATEGY_CONFIG,
+        current_ADAPTIVE_LEARNING_RATES, // Pass this to context
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
-        currentHistoryForTrend // Add this for trend confirmation checks
+        currentHistoryForTrend 
     } = context;
 
     const currentNum1 = inputNum1;
@@ -225,15 +224,15 @@ export function getRecommendation(context) {
             predictiveDistance: Infinity,
             proximityBoostApplied: false,
             weightedZoneBoostApplied: false,
-            patternBoostApplied: false, // Not implemented in this context, but kept for consistency
-            patternBoostMultiplier: 1, // Not implemented in this context, but kept for consistency
+            patternBoostApplied: false, 
+            patternBoostMultiplier: 1, 
             mlProbability: (aiPredictionData && aiPredictionData.groups && aiPredictionData.groups[type.id] !== undefined) ? aiPredictionData.groups[type.id] : 0,
             mlBoostApplied: false,
-            aiLowPocketBoostApplied: false, // Not implemented in this context, but kept for consistency
+            aiLowPocketBoostApplied: false, 
             finalScore: 0,
             primaryDrivingFactor: "N/A",
             adaptiveInfluenceUsed: 1.0,
-            confluenceBonus: 1.0, // Not implemented in this context, but kept for consistency
+            confluenceBonus: 1.0, 
             reason: [],
             individualScores: {}
         };
@@ -244,20 +243,19 @@ export function getRecommendation(context) {
         if (baseNum < 0 || baseNum > 36) return null;
 
         const terminals = terminalMapping?.[baseNum] || [];
-        // Use context.useDynamicTerminalNeighbourCount for internal hitZone calculation
         const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
 
         // --- Calculate Raw Score Components ---
         let rawScore = 0;
 
         // 1. Base Score from Hit Rate
-        const rawHitRatePoints = Math.max(0, details.hitRate - 40) * 0.5;
+        const rawHitRatePoints = Math.max(0, details.hitRate - current_STRATEGY_CONFIG.hitRateThreshold) * current_STRATEGY_CONFIG.hitRateMultiplier;
         rawScore += rawHitRatePoints;
         details.individualScores['Hit Rate'] = rawHitRatePoints;
         if (rawHitRatePoints > 1) details.reason.push(`Hit Rate`);
 
         // 2. Momentum Score from Current Streak
-        const rawStreakPoints = Math.min(15, details.currentStreak * 5);
+        const rawStreakPoints = Math.min(current_STRATEGY_CONFIG.maxStreakPoints, details.currentStreak * current_STRATEGY_CONFIG.streakMultiplier);
         rawScore += rawStreakPoints;
         details.individualScores['Streak'] = rawStreakPoints;
         if (rawStreakPoints > 0) details.reason.push(`Streak`);
@@ -268,9 +266,9 @@ export function getRecommendation(context) {
                 const dist = calculatePocketDistance(zoneNum, lastWinningNumber, rouletteWheel);
                 if (dist < details.predictiveDistance) details.predictiveDistance = dist;
             }
-            details.proximityBoostApplied = details.predictiveDistance <= 5;
+            details.proximityBoostApplied = details.predictiveDistance <= current_STRATEGY_CONFIG.proximityMaxDistance;
             if (details.proximityBoostApplied) {
-                const rawProximityPoints = (5 - details.predictiveDistance) * 2;
+                const rawProximityPoints = (current_STRATEGY_CONFIG.proximityMaxDistance - details.predictiveDistance) * current_STRATEGY_CONFIG.proximityMultiplier;
                 rawScore += rawProximityPoints;
                 details.individualScores['Proximity to Last Spin'] = rawProximityPoints;
                 details.reason.push(`Proximity`);
@@ -280,7 +278,7 @@ export function getRecommendation(context) {
         // 4. Neighbour Score (IF TOGGLED)
         if (useWeightedZoneBool) {
             const neighbourWeightedScore = hitZone.reduce((sum, num) => sum + (neighbourScores[num]?.success || 0), 0);
-            const rawNeighbourPoints = Math.min(10, neighbourWeightedScore * 0.5);
+            const rawNeighbourPoints = Math.min(current_STRATEGY_CONFIG.maxNeighbourPoints, neighbourWeightedScore * current_STRATEGY_CONFIG.neighbourMultiplier);
             rawScore += rawNeighbourPoints;
             details.individualScores['Hot Zone Weighting'] = rawNeighbourPoints;
             details.weightedZoneBoostApplied = rawNeighbourPoints > 0;
@@ -289,17 +287,17 @@ export function getRecommendation(context) {
 
         // 5. AI Confidence Score
         if (isAiReadyBool && details.mlProbability > 0) {
-            const rawAiPoints = details.mlProbability * 25;
+            const rawAiPoints = details.mlProbability * current_STRATEGY_CONFIG.aiConfidenceMultiplier;
             rawScore += rawAiPoints;
             details.individualScores['High AI Confidence'] = rawAiPoints;
             details.mlBoostApplied = rawAiPoints > 0;
-            if (rawAiPoints > 5) details.reason.push(`AI Conf`);
+            if (rawAiPoints > current_STRATEGY_CONFIG.minAiPointsForReason) details.reason.push(`AI Conf`);
         }
 
         // --- APPLY ADAPTIVE INFLUENCES ---
         let finalCalculatedScore = 0;
         let mostInfluentialFactor = "N/A";
-        let highestInfluencedScore = 0;
+        let highestInfluencedScore = -Infinity; // Initialize with negative infinity
 
         for (const factorName in currentAdaptiveInfluences) {
             const influence = currentAdaptiveInfluences[factorName];
@@ -317,11 +315,11 @@ export function getRecommendation(context) {
         if (mostInfluentialFactor === "N/A" && details.reason.length > 0) {
             mostInfluentialFactor = details.reason[0];
         } else if (mostInfluentialFactor === "N/A") {
-            mostInfluentialFactor = "Statistical Trends";
+            mostInfluentialFactor = "Statistical Trends"; // Default if no specific factor dominated
         }
 
         details.finalScore = finalCalculatedScore;
-        details.baseScore = rawHitRatePoints + rawStreakPoints;
+        details.baseScore = rawHitRatePoints + rawStreakPoints; // Re-calculate baseScore with actual points
         details.primaryDrivingFactor = mostInfluentialFactor;
         details.adaptiveInfluenceUsed = currentAdaptiveInfluences[mostInfluentialFactor] || 1.0;
 
@@ -345,6 +343,7 @@ export function getRecommendation(context) {
     candidates.sort((a, b) => b.score - a.score);
     let bestCandidate = candidates[0];
 
+    // Handle scenario where best candidate has very low or zero score
     if (bestCandidate.score <= 0) {
         return { html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong recommendations based on current data.</span>', bestCandidate: null, details: null };
     }
@@ -355,35 +354,87 @@ export function getRecommendation(context) {
 
     let signal = "Wait";
     let signalColor = "text-gray-500";
-    let reason = "(Low Confidence)";
+    let reason = "(Low Confidence)"; // Default reason for 'Wait'
 
     // Use current_STRATEGY_CONFIG passed from optimizer OR global ones
     const effectiveStrategyConfig = current_STRATEGY_CONFIG;
 
-
-    if (bestCandidate.score > 50) {
-        signal = "Strong Play";
-        signalColor = "text-green-600";
-        reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
-    } else if (bestCandidate.score > 20) {
-        signal = "Play";
-        signalColor = "text-purple-700";
-        reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
+    // --- REFINED PLAY SIGNAL LOGIC ---
+    if (useAdaptivePlayBool) {
+        if (useLessStrictBool) {
+            // Less Strict Mode: Lower thresholds or special conditions for high confidence
+            if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_STRONG_PLAY_THRESHOLD ||
+                (bestCandidate.details.hitRate >= effectiveStrategyConfig.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && bestCandidate.details.currentStreak >= effectiveStrategyConfig.LESS_STRICT_MIN_STREAK)) {
+                signal = "Strong Play";
+                signalColor = "text-green-600";
+                reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+            } else if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_PLAY_THRESHOLD) {
+                signal = "Play";
+                signalColor = "text-purple-700";
+                reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+            } else {
+                signal = "Wait for Signal";
+                signalColor = "text-gray-500";
+                reason = `(Low Confidence)`;
+            }
+        } else {
+            // Standard Adaptive Play Logic
+            if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_STRONG_PLAY_THRESHOLD) {
+                signal = "Strong Play";
+                signalColor = "text-green-600";
+                reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+            } else if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_PLAY_THRESHOLD) {
+                signal = "Play";
+                signalColor = "text-purple-700";
+                reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+            } else {
+                signal = "Wait for Signal";
+                signalColor = "text-gray-500";
+                reason = `(Low Confidence)`;
+            }
+        }
+    } else {
+        // Fallback to simpler logic if Adaptive Play is off (similar to original, but uses new scores)
+        if (bestCandidate.score > effectiveStrategyConfig.SIMPLE_PLAY_THRESHOLD) {
+            signal = "Play";
+            signalColor = "text-purple-700";
+            reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
+        } else {
+            signal = "Wait for Signal";
+            signalColor = "text-gray-500";
+            reason = `(Low Confidence)`;
+        }
     }
 
-    // Use useTrendConfirmationBool parameter
-    if (useTrendConfirmationBool && trendStats.lastSuccessState.length > 0 && !trendStats.lastSuccessState.includes(bestCandidate.type.id)) {
-        signal = 'Wait for Signal';
-        signalColor = "text-gray-500";
-        reason = `(Waiting for ${bestCandidate.type.label} trend confirmation)`;
-    } else if (useTrendConfirmationBool && trendStats.lastSuccessState.length === 0 && currentHistoryForTrend.filter(item => item.status === 'success').length > 0) {
-        signal = 'Wait for Signal';
-        signalColor = "text-gray-500";
-        reason = `(No established trend to confirm)`;
+    // --- Trend Confirmation Override (IF TOGGLED AND APPLICABLE) ---
+    // This override always happens AFTER adaptive play signals have been determined.
+    if (useTrendConfirmationBool) {
+        const successfulPlaysInHistory = currentHistoryForTrend.filter(item => item.status === 'success' && item.winningNumber !== null).length;
+        
+        // If there's an established trend (at least one previous successful play)
+        // AND the best candidate's group does NOT match the last successful state
+        if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length > 0 && !trendStats.lastSuccessState.includes(bestCandidate.type.id)) {
+            signal = 'Wait for Signal';
+            signalColor = "text-gray-500";
+            reason = `(Waiting for ${bestCandidate.type.label} trend confirmation)`;
+        } else if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length === 0) {
+            // If there are successful plays but no lastSuccessState (e.g., initial plays after clear history), still wait for trend to establish
+            signal = 'Wait for Signal';
+            signalColor = "text-gray-500";
+            reason = `(No established trend to confirm)`;
+        } else if (successfulPlaysInHistory < effectiveStrategyConfig.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
+             // Optionally, if not enough history to even define a trend (e.g., less than 3 successful plays)
+             signal = 'Wait for Signal';
+             signalColor = "text-gray-500";
+             reason = `(Not enough trend history)`;
+        }
     }
+
 
     let finalHtml = `<strong class="${signalColor}">${signal}:</strong> Play <strong style="color: ${bestCandidate.type.textColor};">${bestCandidate.type.label}</strong><br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
-    if (signal.includes('Wait')) {
+    
+    // If the final signal is "Wait" (after all overrides), simplify the HTML output
+    if (signal.includes('Wait') || signal.includes('Avoid')) {
         finalHtml = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
     }
 
