@@ -5,7 +5,7 @@ import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
 import * as analysis from './analysis.js';
-import { initializeWorkers } from './workers.js';
+import { initializeWorkers, rlWorker } from './workers.js'; // ADDED: rlWorker
 
 // --- STATE MANAGEMENT ---
 function loadState() {
@@ -24,7 +24,8 @@ function loadState() {
         ...item,
         recommendedGroupId: item.recommendedGroupId || null,
         recommendedGroupPocketDistance: item.recommendedGroupPocketDistance ?? null,
-        recommendationDetails: item.recommendationDetails || null
+        recommendationDetails: item.recommendationDetails || null,
+        failureMode: item.failureMode || 'none' // Ensure failureMode is loaded
     }));
     state.setHistory(newHistory);
     state.setConfirmedWinsLog(appState.confirmedWinsLog || []);
@@ -36,7 +37,17 @@ function loadState() {
     if (appState.patternMemory) state.setPatternMemory(appState.patternMemory);
     if (appState.adaptiveFactorInfluences) Object.assign(state.adaptiveFactorInfluences, appState.adaptiveFactorInfluences); // Ensure this is merged, not overwritten
     if (appState.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, appState.STRATEGY_CONFIG);
-    if (appState.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, appState.ADAPTIVE_LEARNING_RATES);
+    if (appState.ADAPTIVE_LEARNING_RATES) {
+        Object.assign(config.ADAPTIVE_LEARNING_RATES, appState.ADAPTIVE_LEARNING_RATES);
+        // Ensure FAILURE_MULTIPLIERS are correctly merged if they exist in saved state
+        if (appState.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS) {
+            Object.assign(config.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS, appState.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS);
+        }
+    }
+    // NEW: Load ADAPTIVE_LEARNING_RATES_OVERRIDE if it exists
+    if (appState.ADAPTIVE_LEARNING_RATES_OVERRIDE) {
+        state.setAdaptiveLearningRatesOverride(appState.ADAPTIVE_LEARNING_RATES_OVERRIDE);
+    }
 
     analysis.updateActivePredictionTypes();
     ui.updateAllTogglesUI();
@@ -67,6 +78,18 @@ analysis.initializeAi();
 
 // NEW: Attach optimization button listeners *after* workers are initialized
 ui.attachOptimizationButtonListeners(); // FIXED: Call the new function here
+
+// NEW: Initialize RL Worker (send initial config)
+if (config.RL_CONFIG.enabled && rlWorker) {
+    rlWorker.postMessage({
+        type: 'init',
+        payload: {
+            config: config.RL_CONFIG,
+            currentAdaptiveRates: state.getEffectiveAdaptiveLearningRates() // Send initial rates
+        }
+    });
+}
+
 
 // Read initial values directly for startup sequence
 const initialNum1 = parseInt(document.getElementById('number1').value, 10);
