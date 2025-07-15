@@ -157,11 +157,21 @@ function calculateFitness(individual) {
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
         simItem.recommendationDetails = recommendation.bestCandidate?.details || null; 
         shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
-        if (simItem.recommendedGroupId && simItem.hitTypes.includes(simItem.recommendedGroupId)) {
-            wins++;
-        } else if (simItem.recommendedGroupId) {
-            losses++;
+        
+        // --- MODIFIED LOSS COUNTING LOGIC FOR OPTIMIZATION ---
+        // Only count wins/losses if a recommendation was explicitly made (recommendedGroupId is not null)
+        // AND the recommendation score was above 0 (indicating an actual "Play" signal).
+        if (simItem.recommendedGroupId) {
+            if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
+                wins++;
+            } else if (simItem.recommendationDetails && simItem.recommendationDetails.finalScore > 0) {
+                // Only count as a loss if an explicit "Play" signal was given (score > 0)
+                losses++;
+            }
+            // If simItem.recommendationDetails.finalScore is 0 or less, it was a 'Wait for Signal' or 'No Recommendation',
+            // so we do not count it as a loss.
         }
+
         if (simItem.recommendedGroupId && recommendation.bestCandidate?.details?.primaryDrivingFactor) {
             const primaryFactor = recommendation.bestCandidate.details.primaryDrivingFactor;
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
