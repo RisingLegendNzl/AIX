@@ -200,7 +200,10 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            ...Object.values(props),
+            // NEW: Add categorical features for winning number properties
+            props.isEven, props.isOdd, props.isRed, props.isBlack,
+            props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
+            props.isCol1, props.isCol2, props.isCol3,
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
             // NEW: Add consecutive hit/miss features for each prediction type
             ...config.allPredictionTypes.flatMap(type => [
@@ -384,9 +387,12 @@ async function predictWithEnsemble(historyData) {
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            ...Object.values(props),
+            // NEW: Add categorical features for winning number properties
+            props.isEven, props.isOdd, props.isRed, props.isBlack,
+            props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
+            props.isCol1, props.isCol2, props.isCol3,
             ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // Add consecutive hit/miss features for each prediction type
+            // NEW: Add consecutive hit/miss features for each prediction type
             ...config.allPredictionTypes.flatMap(type => [
                 Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),
                 Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1)
