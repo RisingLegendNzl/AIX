@@ -50,7 +50,11 @@ const parameterSpace = {
     FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001 },
     // NEW: Confidence weighting for adaptive influence updates
     CONFIDENCE_WEIGHTING_MULTIPLIER: { min: 0.001, max: 0.1, step: 0.001 },
-    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { min: 0, max: 50, step: 1 }
+    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { min: 0, max: 50, step: 1 },
+    // NEW: Primary Factor Shift Detection Parameters
+    WARNING_FACTOR_SHIFT_WINDOW_SIZE: { min: 1, max: 20, step: 1 },
+    WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: { min: 0.1, max: 1.0, step: 0.05 },
+    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: { min: 0, max: 100, step: 1 }
 };
 let historyData = [];
 let sharedData = {};
@@ -175,6 +179,9 @@ function calculateFitness(individual) {
         WARNING_LOSS_STREAK_THRESHOLD: individual.WARNING_LOSS_STREAK_THRESHOLD,
         WARNING_ROLLING_WIN_RATE_THRESHOLD: individual.WARNING_ROLLING_WIN_RATE_THRESHOLD,
         DEFAULT_AVERAGE_WIN_RATE: individual.DEFAULT_AVERAGE_WIN_RATE,
+        WARNING_FACTOR_SHIFT_WINDOW_SIZE: individual.WARNING_FACTOR_SHIFT_WINDOW_SIZE, // NEW Factor Shift Parameter
+        WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: individual.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD, // NEW Factor Shift Parameter
+        WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: individual.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT, // NEW Factor Shift Parameter
         // NEW: Pocket Distance Prioritization Multipliers
         LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: individual.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
         HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: individual.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
@@ -250,6 +257,9 @@ function calculateFitness(individual) {
             localAdaptiveFactorInfluences[factorName] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * SIM_ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
         }
 
+        // Calculate factor shift status for simulation
+        const simFactorShiftStatus = calculateFactorShift(simulatedHistory, SIM_STRATEGY_CONFIG); // NEW: Get factor shift status for simulation
+
         const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.toggles.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
@@ -265,6 +275,7 @@ function calculateFitness(individual) {
             useLessStrictBool: sharedData.toggles.useLessStrict,
             useTableChangeWarningsBool: sharedData.toggles.useTableChangeWarnings, // Pass toggle to recommendation
             rollingPerformance: simRollingPerformance, // Pass current rolling performance to recommendation
+            factorShiftStatus: simFactorShiftStatus, // NEW: Pass factor shift status to recommendation
             useLowestPocketDistanceBool: sharedData.toggles.useLowestPocketDistance, // Pass toggle
             current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: simulatedHistory,
