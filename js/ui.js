@@ -1121,7 +1121,7 @@ function attachGuideAndInfoListeners() {
     // Guide toggles
     document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
     document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
-    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
     document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
 
 
