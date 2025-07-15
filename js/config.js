@@ -48,7 +48,11 @@ export let STRATEGY_CONFIG = {
     WARNING_MIN_PLAYS_FOR_EVAL: 5,        // Minimum number of plays within window to trigger evaluation
     WARNING_LOSS_STREAK_THRESHOLD: 4,     // Consecutive "play" losses to trigger a warning
     WARNING_ROLLING_WIN_RATE_THRESHOLD: 40, // Rolling win rate % below which a warning is triggered
-    DEFAULT_AVERAGE_WIN_RATE: 45          // Baseline expected win rate if insufficient history for true average
+    DEFAULT_AVERAGE_WIN_RATE: 45,          // Baseline expected win rate if insufficient history for true average
+
+    // NEW: Pocket Distance Prioritization Multipliers (for useLowestPocketDistance)
+    LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5, // Multiplier to boost score if distance is 0 or 1
+    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5 // Multiplier to suppress score if distance is > 1 but others are low
 };
 
 // --- Adaptive Learning Rates for Factor Influences ---
@@ -98,7 +102,11 @@ export const DEFAULT_PARAMETERS = {
         WARNING_MIN_PLAYS_FOR_EVAL: 5,
         WARNING_LOSS_STREAK_THRESHOLD: 4,
         WARNING_ROLLING_WIN_RATE_THRESHOLD: 40,
-        DEFAULT_AVERAGE_WIN_RATE: 45
+        DEFAULT_AVERAGE_WIN_RATE: 45,
+
+        // Defaults for new Pocket Distance Prioritization
+        LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5,
+        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5
     },
     ADAPTIVE_LEARNING_RATES: {
         SUCCESS: 0.15, 
@@ -111,11 +119,11 @@ export const DEFAULT_PARAMETERS = {
         useWeightedZone: false,
         useProximityBoost: false,
         usePocketDistance: false,
-        useLowestPocketDistance: false,
+        useLowestPocketDistance: false, // Default to OFF
         useAdvancedCalculations: false,
         useDynamicStrategy: false,
         useAdaptivePlay: false, 
-        useTableChangeWarnings: false, // Default to OFF
+        useTableChangeWarnings: false, 
         useDueForHit: false,
         useNeighbourFocus: false,
         useLessStrict: false, 
@@ -143,6 +151,8 @@ export const STRATEGY_PRESETS = {
             // Adjust warning thresholds for this preset if desired
             WARNING_LOSS_STREAK_THRESHOLD: 5, // More tolerant of losses for high win rate
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 35, // More tolerant of lower rolling win rate
+            // Pocket distance for preset
+            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 2.0, // More aggressive boost
         },
         ADAPTIVE_LEARNING_RATES: {
             SUCCESS: 0.15,
@@ -161,7 +171,8 @@ export const STRATEGY_PRESETS = {
             useNeighbourFocus: true,
             useDynamicTerminalNeighbourCount: true,
             useLessStrict: false,
-            useTableChangeWarnings: true // Enable for this preset
+            useTableChangeWarnings: true, 
+            useLowestPocketDistance: true // Enable for this preset
         }
     },
     balancedSafe: {
@@ -170,6 +181,8 @@ export const STRATEGY_PRESETS = {
             // Maybe tighter warning thresholds for a "safe" preset
             WARNING_LOSS_STREAK_THRESHOLD: 3,
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 45,
+            // Pocket distance for preset
+            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.2, // Moderate boost
         },
         ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
         TOGGLES: { 
@@ -179,7 +192,8 @@ export const STRATEGY_PRESETS = {
             useProximityBoost: true,
             useAdaptivePlay: true, 
             useLessStrict: false,
-            useTableChangeWarnings: true // Enable for this preset
+            useTableChangeWarnings: true, 
+            useLowestPocketDistance: true // Enable for this preset
         }
     },
     aggressiveSignals: {
@@ -191,6 +205,9 @@ export const STRATEGY_PRESETS = {
             // Less strict warnings for aggressive play
             WARNING_LOSS_STREAK_THRESHOLD: 6,
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 30,
+            // Pocket distance for preset
+            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.8, // Aggressive boost
+            HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2 // More aggressive suppression
         },
         ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
         TOGGLES: { 
@@ -200,7 +217,8 @@ export const STRATEGY_PRESETS = {
             useProximityBoost: true, 
             useLessStrict: true, 
             useAdaptivePlay: true,
-            useTableChangeWarnings: true // Enable for this preset
+            useTableChangeWarnings: true, 
+            useLowestPocketDistance: true // Enable for this preset
         }
     }
 };
