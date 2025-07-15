@@ -47,10 +47,10 @@ const parameterMap = {
     FAILURE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
     MIN_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Min Adaptive Influence', container: 'adaptiveInfluenceSliders' },
     MAX_INFLUENCE: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' },
-    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' },
-    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' },
-    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' },
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' },
+    WARNING_ROLLING_WINDOW_SIZE: { obj: config.STRATEGY_CONFIG, label: 'Warn Window Size', container: 'warningParametersSliders' },
+    WARNING_MIN_PLAYS_FOR_EVAL: { obj: config.STRATEGY_CONFIG, label: 'Warn Min Plays', container: 'warningParametersSliders' },
+    WARNING_LOSS_STREAK_THRESHOLD: { obj: config.STRATEGY_CONFIG, label: 'Warn Loss Streak', container: 'warningParametersSliders' },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { obj: config.STRATEGY_CONFIG, label: 'Warn Win Rate %', container: 'warningParametersSliders' },
     DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' }
 };
 
@@ -346,7 +346,7 @@ export function renderHistory() {
             </div>
             <div class="flex items-center space-x-2">
                 <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg></button>
             </div>
             ${aiDetailsHtml}
@@ -695,8 +695,16 @@ export function initializeAdvancedSettingsUI() {
     const slidersContainer = dom.advancedSettingsContent;
     if (!slidersContainer) return;
 
+    // Clear previous content to avoid duplicates if called multiple times
+    slidersContainer.innerHTML = ''; 
+
     slidersContainer.innerHTML = `
         <div class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <button id="setHighestWinRatePreset" class="w-full btn btn-secondary text-sm">Highest Win Rate</button>
+                <button id="setBalancedSafePreset" class="w-full btn btn-secondary text-sm">Balanced Safe</button>
+                <button id="setAggressiveSignalsPreset" class="w-full btn btn-secondary text-sm">Aggressive Signals</button>
+            </div>
             <div class="space-y-3">
                 <h3 class="text-lg font-semibold text-gray-700">Optimization Categories</h3>
                 <p class="text-sm text-gray-600 mb-4">Toggle which parameter categories the optimizer should consider.</p>
@@ -926,50 +934,59 @@ function attachGuideAndInfoListeners() {
 }
 
 export function initializeUI() {
-    const elementIds = [
+    // 1. First, get references to top-level containers and elements that are NOT dynamically created
+    const elementIdsBeforeDynamicLoad = [
         'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
         'boardStateConclusion', 'historicalNumbersInput', 'analyzeHistoricalDataButton', 
         'historicalAnalysisMessage', 'aiModelStatus', 
-        // 'recalculateAnalysisButton' was previously defined in elementIds twice and not in HTML. 
-        // Removing from elementIds for now as it's not present in HTML.
-        // If you add it to HTML, uncomment it here:
-        // 'recalculateAnalysisButton',
-        
-        // Corrected IDs for toggles based on your HTML structure:
-        'dynamicStrategyToggle', 'adaptivePlayToggle', 'tableChangeWarningsToggle', 
-        'dueForHitToggle', 'neighbourFocusToggle', 'lessStrictModeToggle', 
-        'dynamicTerminalNeighbourCountToggle',
-
         'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput', 
         'winCount', 'lossCount', 
-        'optimizationStatus', 'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 
-        'applyBestParamsButton', 'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
-        'advancedSettingsContent', 'loadParametersInput', 'submitResultButton', 'patternAlert',
-        
-        // These preset buttons are now correctly located within advancedSettingsContent in HTML
-        'setHighestWinRatePreset', 'setBalancedSafePreset', 'setAggressiveSignalsPreset', 
-        'resetParametersButton', 'saveParametersButton', 'loadParametersLabel',
-        
-        // Renamed 'calculateButton' to 'submitCalculationButton' in HTML, reflecting here
-        'submitCalculationButton', 
-
+        'optimizationStatus', 'optimizationResult', 'bestFitnessResult', 'applyBestParamsButton', 
+        'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
+        'advancedSettingsContent', 'submitResultButton', 'patternAlert',
         'advancedStrategyGuideHeader', 'advancedStrategyGuideContent', 'systemStatusDisplay', 'trendAnalysisDisplay',
-        'clearInputsButton', 'swapButton', 'clearHistoryButton',
-        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
+        'clearInputsButton', 'swapButton', 'clearHistoryButton', 'submitCalculationButton',
+        // 'recalculateAnalysisButton' is not in the HTML currently, leaving it out to avoid warning.
+        // If you add it to HTML, uncomment it here:
+        // 'recalculateAnalysisButton',
         // 'historyInfoToggle', 'historyInfoDropdown' // If you add these to HTML, uncomment them here
     ];
-    elementIds.forEach(id => { 
+    elementIdsBeforeDynamicLoad.forEach(id => { 
         const element = document.getElementById(id);
         if(element) {
             dom[id] = element;
         } else {
-            console.warn(`UI element with ID '${id}' not found in DOM. Ensure it exists in index.html.`);
+            console.warn(`UI element with ID '${id}' not found in DOM (initial scan). Ensure it exists in index.html.`);
         }
     });
-    
+
+    // 2. Initialize Advanced Settings UI, which dynamically creates many elements
+    initializeAdvancedSettingsUI(); 
+
+    // 3. Now, get references to elements that were dynamically created by initializeAdvancedSettingsUI
+    // and other toggle elements that were missed in previous iterations.
+    const elementIdsAfterDynamicLoad = [
+        'setHighestWinRatePreset', 'setBalancedSafePreset', 'setAggressiveSignalsPreset', 
+        'resetParametersButton', 'saveParametersButton', 'loadParametersLabel', 'loadParametersInput',
+        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
+        'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
+        'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle', 
+        'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 
+        'neighbourFocusToggle', 'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle',
+    ];
+    elementIdsAfterDynamicLoad.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            dom[id] = element;
+        } else {
+            console.warn(`UI element with ID '${id}' not found in DOM (after dynamic load). Ensure it exists in index.html and is created by initializeAdvancedSettingsUI, or moved to 'elementIdsBeforeDynamicLoad'.`);
+        }
+    });
+
+
+    // 4. Attach all event listeners
     attachMainActionListeners();
     attachToggleListeners();
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
-    initializeAdvancedSettingsUI();
 }
