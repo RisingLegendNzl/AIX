@@ -345,7 +345,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -552,7 +552,8 @@ function handleSubmitResult() {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
         setTimeout(() => {
-            if(dom.calculateButton) dom.calculateButton.click();
+            // Changed from dom.calculateButton to dom.submitCalculationButton
+            if(dom.submitCalculationButton) dom.submitCalculationButton.click(); 
         }, 50);
     }
     hidePatternAlert();
@@ -739,13 +740,14 @@ export function initializeAdvancedSettingsUI() {
 export function toggleParameterSliders(enable) {
     if (!dom.advancedSettingsContent) return;
 
-    dom.setHighestWinRatePreset.disabled = !enable;
-    dom.setBalancedSafePreset.disabled = !enable;
-    dom.setAggressiveSignalsPreset.disabled = !enable;
-    dom.resetParametersButton.disabled = !enable;
-    dom.saveParametersButton.disabled = !enable;
-    dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
-    dom.loadParametersInput.disabled = !enable;
+    // These elements are now correctly added to the dom object in initializeUI
+    if (dom.setHighestWinRatePreset) dom.setHighestWinRatePreset.disabled = !enable;
+    if (dom.setBalancedSafePreset) dom.setBalancedSafePreset.disabled = !enable;
+    if (dom.setAggressiveSignalsPreset) dom.setAggressiveSignalsPreset.disabled = !enable;
+    if (dom.resetParametersButton) dom.resetParametersButton.disabled = !enable;
+    if (dom.saveParametersButton) dom.saveParametersButton.disabled = !enable;
+    if (dom.loadParametersLabel) dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
+    if (dom.loadParametersInput) dom.loadParametersInput.disabled = !enable;
     
     for (const paramName in parameterMap) {
         const sliderElement = document.getElementById(`${paramName}Slider`);
@@ -758,7 +760,8 @@ export function toggleParameterSliders(enable) {
 }
 
 function attachMainActionListeners() {
-    if (dom.calculateButton) dom.calculateButton.addEventListener('click', handleNewCalculation);
+    // Changed from calculateButton to submitCalculationButton
+    if (dom.submitCalculationButton) dom.submitCalculationButton.addEventListener('click', handleNewCalculation); 
     if (dom.submitResultButton) dom.submitResultButton.addEventListener('click', handleSubmitResult);
     if (dom.clearInputsButton) dom.clearInputsButton.addEventListener('click', handleClearInputs);
     if (dom.swapButton) dom.swapButton.addEventListener('click', handleSwap);
@@ -935,12 +938,25 @@ export function initializeUI() {
         'optimizationStatus', 'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 
         'applyBestParamsButton', 'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'loadParametersInput', 'submitResultButton', 'patternAlert',
+        // ADDED MISSING IDS:
         'setHighestWinRatePreset', 'setBalancedSafePreset', 'setAggressiveSignalsPreset', 
+        'resetParametersButton', 'saveParametersButton', 'loadParametersLabel',
+        // Ensure 'calculateButton' is actually 'submitCalculationButton' in HTML
+        'submitCalculationButton', 
+
         'advancedStrategyGuideHeader', 'advancedStrategyGuideContent', 'systemStatusDisplay', 'trendAnalysisDisplay',
-        'clearInputsButton', 'swapButton', 'clearHistoryButton', 'recalculateAnalysisButton', 'loadParametersLabel',
+        'clearInputsButton', 'swapButton', 'clearHistoryButton', 'recalculateAnalysisButton',
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
+        // 'historyInfoToggle', 'historyInfoDropdown' // If you add these to HTML, uncomment them here
     ];
-    elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
+    elementIds.forEach(id => { 
+        const element = document.getElementById(id);
+        if(element) {
+            dom[id] = element;
+        } else {
+            console.warn(`UI element with ID '${id}' not found in DOM. Ensure it exists in index.html.`);
+        }
+    });
     
     attachMainActionListeners();
     attachToggleListeners();
