@@ -198,6 +198,58 @@ export function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, 
     return analysis;
 }
 
+// Re-defining analyzeFactorShift here for export from shared-logic
+// This function exists in analysis.js but is not exported from shared-logic.
+// So, we need to ensure it's either imported from analysis.js directly into optimizationWorker.js,
+// or exported from here if it's meant to be a shared utility.
+// Given the current import structure (optimizationWorker imports * as shared), it needs to be exported from here.
+export function analyzeFactorShift(history, strategyConfig) {
+    let factorShiftDetected = false;
+    let reason = '';
+
+    const relevantSuccessfulPlays = [...history]
+        .filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.primaryDrivingFactor !== "N/A")
+        .sort((a, b) => b.id - a.id) // Newest first
+        .slice(0, strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE); // Get only the recent successful plays
+
+    if (relevantSuccessfulPlays.length < strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE) {
+        return { factorShiftDetected: false, reason: 'Not enough successful plays to detect factor shift.' };
+    }
+
+    const factorCounts = {};
+    relevantSuccessfulPlays.forEach(item => {
+        const factor = item.recommendationDetails.primaryDrivingFactor;
+        factorCounts[factor] = (factorCounts[factor] || 0) + 1;
+    });
+
+    const totalFactorsConsidered = relevantSuccessfulPlays.length;
+    let dominantFactor = null;
+    let dominantFactorPercentage = 0;
+    let diversityScore = 0; // Higher diversity means more spread out factors
+
+    Object.keys(factorCounts).forEach(factor => {
+        const percentage = (factorCounts[factor] / totalFactorsConsidered) * 100;
+        if (percentage > dominantFactorPercentage) {
+            dominantFactorPercentage = percentage;
+            dominantFactor = factor;
+        }
+        diversityScore += Math.pow(factorCounts[factor] / totalFactorsConsidered, 2);
+    });
+
+    if (dominantFactorPercentage < strategyConfig.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT) {
+        factorShiftDetected = true;
+        reason = `No single dominant primary factor (${dominantFactorPercentage.toFixed(1)}%) in recent successful plays.`;
+    }
+
+    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) {
+        factorShiftDetected = true;
+        reason = `High diversity of primary factors in recent successful plays.`;
+    }
+    
+    return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
+}
+
+
 export function getRecommendation(context) {
     const {
         trendStats, boardStats, neighbourScores,
@@ -206,7 +258,7 @@ export function getRecommendation(context) {
         currentAdaptiveInfluences, lastWinningNumber,
         useProximityBoostBool, useWeightedZoneBool, useNeighbourFocusBool,
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
-        useTableChangeWarningsBool, rollingPerformance, factorShiftStatus, // ADDED: factorShiftStatus
+        useTableChangeWarningsBool, rollingPerformance, factorShiftStatus,
         useLowestPocketDistanceBool, 
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
@@ -426,7 +478,6 @@ export function getRecommendation(context) {
             signalColor = "text-gray-500";
             reason = `(No established trend to confirm)`;
         } else if (successfulPlaysInHistory < effectiveStrategyConfig.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
-             // Optionally, if not enough history to even define a trend (e.g., less than 3 successful plays)
              signal = 'Wait for Signal';
              signalColor = "text-gray-500";
              reason = `(Not enough trend history)`;
@@ -451,7 +502,7 @@ export function getRecommendation(context) {
             warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
         }
 
-        // NEW: Check for Primary Factor Shift
+        // Check for Primary Factor Shift
         if (!tableChangeDetected && factorShiftStatus && factorShiftStatus.factorShiftDetected) {
             tableChangeDetected = true;
             warningReason = `Factor Shift: ${factorShiftStatus.reason}`;
@@ -520,12 +571,12 @@ export function getRecommendation(context) {
         // Re-evaluate signal and reason based on potentially new bestCandidate score
         if (useAdaptivePlayBool) {
             if (useLessStrictBool) {
-                if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_STRONG_PLAY_THRESHOLD ||
-                    (bestCandidate.details.hitRate >= effectiveStrategyConfig.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && bestCandidate.details.currentStreak >= effectiveStrategyConfig.LESS_STRICT_MIN_STREAK)) {
+                if (bestCandidate.score >= effectiveStrategy_CONFIG.LESS_STRICT_STRONG_PLAY_THRESHOLD ||
+                    (bestCandidate.details.hitRate >= effectiveStrategy_CONFIG.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && bestCandidate.details.currentStreak >= effectiveStrategy_CONFIG.LESS_STRICT_MIN_STREAK)) {
                     signal = "Strong Play";
                     signalColor = "text-green-600";
                     reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
-                } else if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_PLAY_THRESHOLD) {
+                } else if (bestCandidate.score >= effectiveStrategy_CONFIG.LESS_STRICT_PLAY_THRESHOLD) {
                     signal = "Play";
                     signalColor = "text-purple-700";
                     reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
@@ -535,11 +586,11 @@ export function getRecommendation(context) {
                     reason = `(Low Confidence)`;
                 }
             } else {
-                if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_STRONG_PLAY_THRESHOLD) {
+                if (bestCandidate.score >= effectiveStrategy_CONFIG.ADAPTIVE_STRONG_PLAY_THRESHOLD) {
                     signal = "Strong Play";
                     signalColor = "text-green-600";
                     reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
-                } else if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_PLAY_THRESHOLD) {
+                } else if (bestCandidate.score >= effectiveStrategy_CONFIG.ADAPTIVE_PLAY_THRESHOLD) {
                     signal = "Play";
                     signalColor = "text-purple-700";
                     reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
@@ -550,7 +601,7 @@ export function getRecommendation(context) {
                 }
             }
         } else {
-            if (bestCandidate.score > effectiveStrategyConfig.SIMPLE_PLAY_THRESHOLD) {
+            if (bestCandidate.score > effectiveStrategy_CONFIG.SIMPLE_PLAY_THRESHOLD) {
                 signal = "Play";
                 signalColor = "text-purple-700";
                 reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
@@ -572,7 +623,7 @@ export function getRecommendation(context) {
                 signal = 'Wait for Signal';
                 signalColor = "text-gray-500";
                 reason = `(No established trend to confirm)`;
-            } else if (successfulPlaysInHistory < effectiveStrategyConfig.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
+            } else if (successfulPlaysInHistory < effectiveStrategy_CONFIG.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
                  signal = 'Wait for Signal';
                  signalColor = "text-gray-500";
                  reason = `(Not enough trend history)`;
@@ -580,19 +631,19 @@ export function getRecommendation(context) {
         }
 
         // Re-apply Table Change Warning if it's active
-        if (useTableChangeWarningsBool && rollingPerformance && rollingPerformance.totalPlaysInWindow >= effectiveStrategyConfig.WARNING_MIN_PLAYS_FOR_EVAL) {
+        if (useTableChangeWarningsBool && rollingPerformance && rollingPerformance.totalPlaysInWindow >= effectiveStrategy_CONFIG.WARNING_MIN_PLAYS_FOR_EVAL) {
             let tableChangeDetected = false;
             let warningReason = '';
 
-            if (rollingPerformance.consecutiveLosses >= effectiveStrategyConfig.WARNING_LOSS_STREAK_THRESHOLD) {
+            if (rollingPerformance.consecutiveLosses >= effectiveStrategy_CONFIG.WARNING_LOSS_STREAK_THRESHOLD) {
                 tableChangeDetected = true;
                 warningReason = `Consecutive Losses: ${rollingPerformance.consecutiveLosses}`;
             }
-            if (!tableChangeDetected && rollingPerformance.rollingWinRate < effectiveStrategyConfig.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
+            if (!tableChangeDetected && rollingPerformance.rollingWinRate < effectiveStrategy_CONFIG.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
                 tableChangeDetected = true;
                 warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
             }
-            // NEW: Check for Primary Factor Shift
+            // Check for Primary Factor Shift
             if (!tableChangeDetected && factorShiftStatus && factorShiftStatus.factorShiftDetected) {
                 tableChangeDetected = true;
                 warningReason = `Factor Shift: ${factorShiftStatus.reason}`;
@@ -633,7 +684,7 @@ export function getRecommendation(context) {
                 .map(n => n.num);
 
             if (hotNumbers.length > 0) {
-                finalHtml += `<br><span class="text-xs text-gray-600">Focus on hot neighbours: <strong>${hotNumbers.join(', ')}</strong></span>`;
+                finalHtml += `<br><span class=\"text-xs text-gray-600\">Focus on hot neighbours: <strong>${hotNumbers.join(', ')}</strong></span>`;
             }
         }
     }
