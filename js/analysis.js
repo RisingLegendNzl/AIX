@@ -14,7 +14,7 @@ import { aiWorker } from './workers.js';
  * @param {Array} history - The current history to send for prediction.
  * @returns {Promise<object|null>} A promise that resolves with the prediction data or null.
  */
-export function getAiPrediction(history) { // FIXED: Exported this function
+export function getAiPrediction(history) {
     // Immediately return null if the AI isn't ready, to prevent delays.
     if (!state.isAiReady || !aiWorker) {
         return Promise.resolve(null);
@@ -75,7 +75,7 @@ export function labelHistoryFailures(sortedHistory) {
  * @param {object} strategyConfig - The current strategy configuration.
  * @returns {object} Contains rolling win rate and consecutive losses for plays.
  */
-export function calculateRollingPerformance(history, strategyConfig) { // Exported this function
+export function calculateRollingPerformance(history, strategyConfig) {
     let winsInWindow = 0;
     let lossesInWindow = 0;
     let playsInWindow = 0;
@@ -333,29 +333,31 @@ export async function handleStrategyChange() {
 
 // FIX: Renamed to be more specific. This is for retraining on load.
 export function trainAiOnLoad() {
-    if (!aiWorker || !state.isAiReady) return;
-
-    const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
-    if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
-        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
-        return;
+    if (!aiWorker || !state.isAiReady) { // Check if aiWorker and isAiReady are available
+        return; // Exit if pre-conditions aren't met
     }
 
+    const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
+
+    // FIXED: Corrected the 'else' syntax error by restructuring the if/else logic
+    if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
+        state.setIsAiReady(false);
+        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
+        return; // Exit the function after updating status
+    }
+
+    // If we reach here, history is sufficient, so proceed with training
     ui.updateAiStatus('AI Model: Re-training with loaded history...');
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); 
     aiWorker.postMessage({ 
-            type: 'train', 
-            payload: { 
-                history: state.history,
-                historicalStreakData: trendStats.streakData,
-                terminalMapping: config.terminalMapping,
-                rouletteWheel: config.rouletteWheel
-            } 
-        });
-    } else {
-        state.setIsAiReady(false);
-        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
-    }
+        type: 'train', 
+        payload: { 
+            history: state.history,
+            historicalStreakData: trendStats.streakData,
+            terminalMapping: config.terminalMapping,
+            rouletteWheel: config.rouletteWheel
+        } 
+    });
 }
 
 // FIX: New function to properly initialize the AI worker on startup.
