@@ -3,13 +3,6 @@
 // This file contains core calculation logic shared between the main app (index.html)
 // and the optimization web worker (optimizationWorker.js).
 
-/**
- * NOTE: These functions are designed to be "pure" where possible.
- * They do not access global variables from index.html directly. Instead, they
- * receive all necessary data (like the rouletteWheel, terminalMapping, configs)
- * as parameters. This makes them predictable and testable.
- */
-
 function getNeighbours(number, count, rouletteWheel) {
     const index = rouletteWheel.indexOf(number);
     if (index === -1) return [];
@@ -250,7 +243,7 @@ export function getRecommendation(context) {
         trendStats, boardStats, neighbourScores,
         inputNum1, inputNum2,
         isForWeightUpdate = false, aiPredictionData = null,
-        systemMode, // NEW: Receive the system's current operational mode
+        systemMode,
         currentAdaptiveInfluences, lastWinningNumber,
         useProximityBoostBool, useWeightedZoneBool, useNeighbourFocusBool,
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
@@ -258,23 +251,25 @@ export function getRecommendation(context) {
         useLowestPocketDistanceBool, 
         trendWorkerAnalysis,
         current_STRATEGY_CONFIG,
+        // FIXED: Receive the conductor config through the context object
+        current_CONDUCTOR_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
         currentHistoryForTrend 
     } = context;
 
-    // NEW: Define play thresholds dynamically based on the system mode
+    // FIXED: Use the passed-in conductor config to define thresholds
     let currentPlayThresholds = {
-        strong: config.CONDUCTOR_CONFIG.MODES.standard.STRONG_PLAY_THRESHOLD,
-        play: config.CONDUCTOR_CONFIG.MODES.standard.PLAY_THRESHOLD
+        strong: current_CONDUCTOR_CONFIG.MODES.standard.STRONG_PLAY_THRESHOLD,
+        play: current_CONDUCTOR_CONFIG.MODES.standard.PLAY_THRESHOLD
     };
 
     if (systemMode === 'aggressive') {
-        currentPlayThresholds.strong = config.CONDUCTOR_CONFIG.MODES.aggressive.STRONG_PLAY_THRESHOLD;
-        currentPlayThresholds.play = config.CONDUCTOR_CONFIG.MODES.aggressive.PLAY_THRESHOLD;
+        currentPlayThresholds.strong = current_CONDUCTOR_CONFIG.MODES.aggressive.STRONG_PLAY_THRESHOLD;
+        currentPlayThresholds.play = current_CONDUCTOR_CONFIG.MODES.aggressive.PLAY_THRESHOLD;
     } else if (systemMode === 'defensive') {
-        currentPlayThresholds.strong = config.CONDUCTOR_CONFIG.MODES.defensive.STRONG_PLAY_THRESHOLD;
-        currentPlayThresholds.play = config.CONDUCTOR_CONFIG.MODES.defensive.PLAY_THRESHOLD;
+        currentPlayThresholds.strong = current_CONDUCTOR_CONFIG.MODES.defensive.STRONG_PLAY_THRESHOLD;
+        currentPlayThresholds.play = current_CONDUCTOR_CONFIG.MODES.defensive.PLAY_THRESHOLD;
     }
 
     const currentNum1 = inputNum1;
