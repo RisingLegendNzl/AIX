@@ -69,7 +69,7 @@ export function labelHistoryFailures(sortedHistory) {
     });
 }
 
-// NOTE: This function is still present for historical simulation but not directly used by new single spin processing
+// NOTE: This is the original runSimulationOnHistory logic (not the unified processSingleSpin)
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
@@ -107,20 +107,18 @@ function runSimulationOnHistory(spinsToProcess) {
         const newHistoryItem = {
             id: Date.now() + i, num1, num2, difference: Math.abs(num2 - num1), status: 'pending', 
             hitTypes: [], typeSuccessStatus: {}, winningNumber, recommendedGroupId: recommendation.bestCandidate?.type.id || null,
-            recommendationDetails: recommendation.bestCandidate?.details || null,
-            signalType: recommendation.signalType 
+            recommendationDetails: recommendation.bestCandidate?.details || null
+            // signalType is NOT stored here
         };
 
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
-        // Update wins/losses for this specific simulation run (only for Play/Strong Play)
-        if (newHistoryItem.recommendedGroupId && (newHistoryItem.signalType === 'Play' || newHistoryItem.signalType === 'Strong Play')) {
-            if (newHistoryItem.hitTypes && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-                wins++;
-            } else if (newHistoryItem.winningNumber !== null) { 
-                losses++;
-            }
+        // Original win/loss counting logic (counts any recommendation)
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
+            wins++;
+        } else if (newHistoryItem.recommendedGroupId) { 
+            losses++;
         }
 
         // Apply adaptive influence updates within the simulation
@@ -182,8 +180,7 @@ export async function runAllAnalyses(winningNumber = null) {
         if (lastPendingItem) {
             lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
             lastPendingItem.recommendationDetails = recommendation.details;
-            lastPendingItem.signalType = recommendation.signalType; 
-
+            // signalType is NOT set here
             if (winningNumber !== null) {
                 evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
 
@@ -199,83 +196,12 @@ export async function runAllAnalyses(winningNumber = null) {
     }
 }
 
-// NEW: Unified function to process a single spin
-export async function processSingleSpin(num1, num2, winningNumber = null) {
-    if (isNaN(num1) || isNaN(num2)) {
-        console.warn("Invalid numbers provided for spin processing.");
-        return;
-    }
+// Removed processSingleSpin - reverted to direct calls from handleNewCalculation, handleSubmitResult, handleHistoricalAnalysis
+// Removed handleLiveSpin - as it was tied to the unified processSingleSpin and live data card
 
-    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
-
-    const recommendation = getRecommendation({
-        trendStats, boardStats, neighbourScores, inputNum1: num1, inputNum2: num2,
-        isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: state.adaptiveFactorInfluences,
-        lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
-        useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady,
-        useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-        current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: state.history,
-        activePredictionTypes: state.activePredictionTypes,
-        useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
-        terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
-    });
-
-    const newHistoryItem = {
-        id: Date.now() + Math.random(), 
-        num1: num1,
-        num2: num2,
-        difference: Math.abs(num2 - num1),
-        status: 'pending', 
-        hitTypes: [],
-        typeSuccessStatus: {},
-        winningNumber: winningNumber,
-        pocketDistance: null,
-        recommendedGroupId: recommendation.bestCandidate?.type.id || null,
-        recommendationDetails: recommendation.details,
-        signalType: recommendation.signalType 
-    };
-
-    if (winningNumber !== null) {
-        evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    }
-    
-    // Add to history
-    state.history.push(newHistoryItem);
-
-    // After updating history, re-run analyses and render UI
-    await runAllAnalyses(winningNumber); 
-    ui.renderHistory();
-    ui.drawRouletteWheel(newHistoryItem.difference, newHistoryItem.winningNumber);
-
-    // If it's a confirmed spin and AI training criteria met, trigger AI training
-    const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
-    if (winningNumber !== null && successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
-        if (!state.isAiReady) { 
-            ui.updateAiStatus('AI Model: Training with new spin...');
-            const trendStatsForAI = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-            aiWorker.postMessage({
-                type: 'train',
-                payload: {
-                    history: state.history,
-                    historicalStreakData: trendStatsForAI.streakData,
-                    terminalMapping: config.terminalMapping,
-                    rouletteWheel: config.rouletteWheel
-                }
-            });
-        }
-    } else if (winningNumber !== null) { 
-        state.setIsAiReady(false);
-        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
-    }
-
-    return newHistoryItem; // Return the processed item
-}
-
-// MODIFIED: handleNewCalculation now calls unified processSingleSpin
 export function handleNewCalculation() {
+    if (!document.getElementById('number1') || !document.getElementById('number2') || !document.getElementById('resultDisplay')) return;
+
     const num1Val = parseInt(document.getElementById('number1').value, 10);
     const num2Val = parseInt(document.getElementById('number2').value, 10);
 
@@ -284,44 +210,165 @@ export function handleNewCalculation() {
         document.getElementById('resultDisplay').classList.remove('hidden');
         return;
     }
-    processSingleSpin(num1Val, num2Val); 
+
+    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const lastWinningNumber = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+
+    const newHistoryItem = {
+        id: Date.now(),
+        num1: num1Val,
+        num2: num2Val,
+        difference: Math.abs(num2Val - num1Val),
+        status: 'pending',
+        hitTypes: [],
+        typeSuccessStatus: {},
+        winningNumber: null,
+        pocketDistance: null,
+        recommendedGroupId: null,
+        recommendationDetails: null
+    };
+    state.history.push(newHistoryItem);
+
+    const aiPredictionData = null; // AI prediction will come later via runAllAnalyses
+    const recommendation = getRecommendation({
+        trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
+        isForWeightUpdate: false, aiPredictionData: aiPredictionData, currentAdaptiveInfluences: state.adaptiveFactorInfluences,
+        lastWinningNumber: lastWinningNumber, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
+        useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady,
+        useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: state.history,
+        activePredictionTypes: state.activePredictionTypes,
+        useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
+        terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
+    });
+
+    newHistoryItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+    newHistoryItem.recommendationDetails = recommendation.details;
+    // signalType is NOT set here
+
+    let fullResultHtml = `
+        <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
+        <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
+            ${recommendation.html}
+        </div>
+        <h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3>
+        <div class="space-y-2">
+    `;
+
+    state.activePredictionTypes.forEach(type => {
+        const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
+        if (!predictionTypeDefinition) return;
+
+        const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val);
+        if (baseNum < 0 || baseNum > 36) return;
+
+        const terminals = config.terminalMapping?.[baseNum] || [];
+        
+        const streak = trendStats.currentStreaks[type.id] || 0;
+        let confirmedByHtml = '';
+        if (streak >= 2) {
+            confirmedByHtml = ` <strong style="color: #16a34a;">- Confirmed by ${streak}</strong>`;
+        }
+
+        const stats = boardStats[type.id] || { success: 0, total: 0 };
+        const hitRate = stats.total > 0 ? (stats.success / stats.total * 100) : 0;
+        let pocketDistanceHtml = '';
+
+        if (state.usePocketDistance && lastWinningNumber !== null) {
+            const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
+            let minDistance = Infinity;
+            if (hitZone.length > 0) {
+                hitZone.forEach(zoneNum => {
+                    const dist = calculatePocketDistance(zoneNum, lastWinningNumber, config.rouletteWheel);
+                    if (dist < minDistance) minDistance = dist;
+                });
+            }
+            if(minDistance !== Infinity) {
+                 pocketDistanceHtml = `<span class="text-pink-500">Dist: <strong>${minDistance}</strong></span>`;
+            }
+        }
+
+        fullResultHtml += `
+            <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
+                <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
+                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
+                <div class="group-stats">
+                    <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
+                    ${pocketDistanceHtml}
+                </div>
+            </div>
+        `;
+    });
+
+    fullResultHtml += '</div>';
+    document.getElementById('resultDisplay').innerHTML = fullResultHtml;
+    document.getElementById('resultDisplay').classList.remove('hidden');
+
+    runAllAnalyses();
+    ui.renderHistory();
+    ui.drawRouletteWheel(newHistoryItem.difference, lastWinningNumber);
 }
 
-// MODIFIED: handleSubmitResult now updates existing item and triggers re-analysis
+
 export function handleSubmitResult() {
-    const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending');
-    if (!lastPendingItem) {
+    if (!document.getElementById('winningNumberInput') || !document.getElementById('number1') || !document.getElementById('number2')) return;
+
+    const lastItem = [...state.history].reverse().find(item => item.status === 'pending');
+    if (!lastItem) {
         alert("Please perform a calculation first before submitting a winning number.");
         return;
     }
 
     const winningNumberVal = document.getElementById('winningNumberInput').value;
-    const winningNumber = winningNumberVal.trim() !== '' ? parseInt(winningNumberVal, 10) : null;
+    let winningNumber = null;
+    if (winningNumberVal.trim() !== '') {
+        winningNumber = parseInt(winningNumberVal, 10);
+    }
 
     if (winningNumber === null || isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
         alert("Please enter a valid winning number (0-36).");
         return;
     }
 
-    lastPendingItem.winningNumber = winningNumber;
-    evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    
-    state.confirmedWinsLog.push(winningNumber); 
-    runAllAnalyses(winningNumber); 
+    runAllAnalyses(winningNumber);
     ui.renderHistory();
 
     document.getElementById('winningNumberInput').value = '';
 
-    const prevNum2 = parseInt(lastPendingItem.num2, 10);
+    const prevNum2 = parseInt(lastItem.num2, 10);
+
     if (!isNaN(prevNum2)) {
         document.getElementById('number1').value = prevNum2;
         document.getElementById('number2').value = winningNumber;
         setTimeout(() => {
-            handleNewCalculation(); 
+            document.getElementById('calculateButton').click();
         }, 50);
+    } else {
+        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', lastItem.num2);
     }
 }
 
+
+export function updateActivePredictionTypes() {
+    const newActiveTypes = state.useAdvancedCalculations 
+        ? config.allPredictionTypes 
+        : config.allPredictionTypes.filter(type => type.id.startsWith('diff'));
+    state.setActivePredictionTypes(newActiveTypes);
+    
+    ui.updateRouletteLegend();
+    
+    if (aiWorker) {
+        aiWorker.postMessage({ 
+            type: 'update_config', 
+            payload: { 
+                terminalMapping: config.terminalMapping,
+                rouletteWheel: config.rouletteWheel
+            } 
+        });
+    }
+}
 
 export async function handleHistoricalAnalysis() {
     const historicalNumbersInput = document.getElementById('historicalNumbersInput');
@@ -336,25 +383,16 @@ export async function handleHistoricalAnalysis() {
     }
 
     const historicalSpinsChronological = numbers.slice().reverse();
-    state.setHistory([]); 
-    state.setConfirmedWinsLog([]); 
-    state.setPatternMemory({}); 
-    state.setAdaptiveFactorInfluences({ 
-        'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
-        'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
-    });
-
-    for (let i = 2; i < historicalSpinsChronological.length; i++) {
-        const num1 = historicalSpinsChronological[i - 2];
-        const num2 = historicalSpinsChronological[i - 1];
-        const winningNumber = historicalSpinsChronological[i];
-        await processSingleSpin(num1, num2, winningNumber); 
-    }
+    const simulatedHistory = runSimulationOnHistory(historicalSpinsChronological);
     
+    state.setHistory(simulatedHistory);
+    state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
+    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
-    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
-    ui.renderHistory(); 
-    ui.drawRouletteWheel(); 
+    await runAllAnalyses();
+    ui.renderHistory();
+    ui.drawRouletteWheel();
     
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
     if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
@@ -376,28 +414,16 @@ export async function handleHistoricalAnalysis() {
     }
 }
 
-
 export async function handleStrategyChange() {
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
-    state.setHistory([]); 
-    state.setConfirmedWinsLog([]); 
-    state.setPatternMemory({}); 
-    state.setAdaptiveFactorInfluences({ 
-        'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
-        'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
-    });
-
     if (currentWinningNumbers.length >= 3) {
-        for (let i = 2; i < currentWinningNumbers.length; i++) {
-            const num1 = currentWinningNumbers[i - 2];
-            const num2 = currentWinningNumbers[i - 1];
-            const winningNumber = currentWinningNumbers[i];
-            await processSingleSpin(num1, num2, winningNumber);
-        }
+        const simulatedHistory = runSimulationOnHistory(currentWinningNumbers);
+        state.setHistory(simulatedHistory);
+        state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
+        labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     }
     
-    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     await runAllAnalyses();
     ui.renderHistory();
 
@@ -407,6 +433,7 @@ export async function handleStrategyChange() {
     ui.drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
 }
 
+// FIX: Renamed to be more specific. This is for retraining on load.
 export function trainAiOnLoad() {
     if (!aiWorker || !state.isAiReady) return;
 
@@ -430,6 +457,7 @@ export function trainAiOnLoad() {
     });
 }
 
+// FIX: New function to properly initialize the AI worker on startup.
 export function initializeAi() {
     if (!aiWorker) return;
     const savedScaler = localStorage.getItem('roulette-ml-scaler');
