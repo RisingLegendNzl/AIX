@@ -24,7 +24,7 @@ function getNeighbours(number, count, rouletteWheel) {
 
 export function calculatePocketDistance(num1, num2, rouletteWheel) {
     const index1 = rouletteWheel.indexOf(num1);
-    const index2 = rouletteWheel.indexOf(num2); // FIXED: Re-added missing definition for index2
+    const index2 = rouletteWheel.indexOf(num2);
     if (index1 === -1 || index2 === -1) return Infinity;
     const directDistance = Math.abs(index1 - index2);
     const wrapAroundDistance = rouletteWheel.length - directDistance;
@@ -206,7 +206,7 @@ export function getRecommendation(context) {
         currentAdaptiveInfluences, lastWinningNumber,
         useProximityBoostBool, useWeightedZoneBool, useNeighbourFocusBool,
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
-        useTableChangeWarningsBool, rollingPerformance,
+        useTableChangeWarningsBool, rollingPerformance, useLowestPocketDistanceBool, // ADDED: useLowestPocketDistanceBool
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
@@ -460,6 +460,141 @@ export function getRecommendation(context) {
             let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
             
             return { html: finalHtmlForAvoid, bestCandidate: null, details: tempDetails, signal: signal, reason: reason };
+        }
+    }
+
+    // --- NEW: Refine Pocket Distance Prioritization (useLowestPocketDistance toggle) ---
+    if (useLowestPocketDistanceBool && lastWinningNumber !== null) {
+        let bestCandidateHasLowestPocketDistance = false;
+        let lowestOverallPocketDistance = Infinity;
+
+        // Find the lowest pocket distance among all *active* prediction types for the current inputs
+        activePredictionTypes.forEach(type => {
+            const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
+            if (!predictionTypeDefinition) return;
+            const baseNum = predictionTypeDefinition.calculateBase(currentNum1, currentNum2);
+            if (baseNum < 0 || baseNum > 36) return; // Invalid base number
+
+            const terminals = terminalMapping?.[baseNum] || [];
+            const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
+            
+            let minDistanceForThisType = Infinity;
+            if (hitZone.length > 0) {
+                hitZone.forEach(zoneNum => {
+                    const dist = calculatePocketDistance(zoneNum, lastWinningNumber, rouletteWheel);
+                    if (dist < minDistanceForThisType) minDistanceForThisType = dist;
+                });
+            }
+            if (minDistanceForThisType < lowestOverallPocketDistance) {
+                lowestOverallPocketDistance = minDistanceForThisType;
+            }
+        });
+
+        // If the best candidate's predictive distance is among the very lowest (e.g., 0 or 1), boost it.
+        // If its distance is NOT the lowest, and lowest is very low (0 or 1), consider suppressing it.
+        if (bestCandidate.details.predictiveDistance === 0 || bestCandidate.details.predictiveDistance === 1) {
+            if (lowestOverallPocketDistance === 0 || lowestOverallPocketDistance === 1) { // Other candidates also have very low distance
+                // Strongly boost this candidate if it's one of the "very closest"
+                bestCandidate.score *= current_STRATEGY_CONFIG.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER;
+                bestCandidate.details.aiLowPocketBoostApplied = true; // Renamed from aiLowPocketBoostApplied
+                bestCandidate.details.reason.push(`Low Pocket Dist: ${bestCandidate.details.predictiveDistance}`);
+            }
+        } else if ((lowestOverallPocketDistance === 0 || lowestOverallPocketDistance === 1) && bestCandidate.details.predictiveDistance > 1) {
+            // If there's a *very low* pocket distance candidate somewhere else, but our best candidate isn't one of them, suppress current best.
+            bestCandidate.score *= current_STRATEGY_CONFIG.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER;
+            bestCandidate.details.reason.push(`Suppressed due to high Pocket Dist: ${bestCandidate.details.predictiveDistance} (Lowest overall: ${lowestOverallPocketDistance})`);
+        }
+        
+        // After potential boost/suppression, re-sort candidates based on new scores to find the actual best.
+        // This is important because the lowest pocket distance logic might change the best candidate.
+        candidates.sort((a, b) => b.score - a.score);
+        bestCandidate = candidates[0]; // Re-assign bestCandidate after re-sort
+        
+        // Re-evaluate signal and reason based on potentially new bestCandidate score
+        if (useAdaptivePlayBool) {
+            if (useLessStrictBool) {
+                if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_STRONG_PLAY_THRESHOLD ||
+                    (bestCandidate.details.hitRate >= effectiveStrategyConfig.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && bestCandidate.details.currentStreak >= effectiveStrategyConfig.LESS_STRICT_MIN_STREAK)) {
+                    signal = "Strong Play";
+                    signalColor = "text-green-600";
+                    reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+                } else if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_PLAY_THRESHOLD) {
+                    signal = "Play";
+                    signalColor = "text-purple-700";
+                    reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+                } else {
+                    signal = "Wait for Signal";
+                    signalColor = "text-gray-500";
+                    reason = `(Low Confidence)`;
+                }
+            } else {
+                if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_STRONG_PLAY_THRESHOLD) {
+                    signal = "Strong Play";
+                    signalColor = "text-green-600";
+                    reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+                } else if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_PLAY_THRESHOLD) {
+                    signal = "Play";
+                    signalColor = "text-purple-700";
+                    reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
+                } else {
+                    signal = "Wait for Signal";
+                    signalColor = "text-gray-500";
+                    reason = `(Low Confidence)`;
+                }
+            }
+        } else {
+            if (bestCandidate.score > effectiveStrategyConfig.SIMPLE_PLAY_THRESHOLD) {
+                signal = "Play";
+                signalColor = "text-purple-700";
+                reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
+            } else {
+                signal = "Wait for Signal";
+                signalColor = "text-gray-500";
+                reason = `(Low Confidence)`;
+            }
+        }
+
+        // Re-apply Trend Confirmation if it's active
+        if (useTrendConfirmationBool) {
+            const successfulPlaysInHistory = currentHistoryForTrend.filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendedGroupId && item.recommendationDetails && item.recommendationDetails.finalScore > 0).length;
+            if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length > 0 && !trendStats.lastSuccessState.includes(bestCandidate.type.id)) {
+                signal = 'Wait for Signal';
+                signalColor = "text-gray-500";
+                reason = `(Waiting for ${bestCandidate.type.label} trend confirmation)`;
+            } else if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length === 0) {
+                signal = 'Wait for Signal';
+                signalColor = "text-gray-500";
+                reason = `(No established trend to confirm)`;
+            } else if (successfulPlaysInHistory < effectiveStrategyConfig.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
+                 signal = 'Wait for Signal';
+                 signalColor = "text-gray-500";
+                 reason = `(Not enough trend history)`;
+            }
+        }
+
+        // Re-apply Table Change Warning if it's active
+        if (useTableChangeWarningsBool && rollingPerformance && rollingPerformance.totalPlaysInWindow >= effectiveStrategyConfig.WARNING_MIN_PLAYS_FOR_EVAL) {
+            let tableChangeDetected = false;
+            let warningReason = '';
+
+            if (rollingPerformance.consecutiveLosses >= effectiveStrategyConfig.WARNING_LOSS_STREAK_THRESHOLD) {
+                tableChangeDetected = true;
+                warningReason = `Consecutive Losses: ${rollingPerformance.consecutiveLosses}`;
+            }
+            if (!tableChangeDetected && rollingPerformance.rollingWinRate < effectiveStrategyConfig.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
+                tableChangeDetected = true;
+                warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
+            }
+
+            if (tableChangeDetected) {
+                signal = 'Avoid Play';
+                signalColor = "text-red-700";
+                reason = `(Table Change Warning: ${warningReason})`;
+                bestCandidate = null; // No active recommendation
+                let tempDetails = { ...bestCandidate?.details, signal: signal, reason: reason };
+                let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore?.toFixed(2) || 'N/A'}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
+                return { html: finalHtmlForAvoid, bestCandidate: null, details: tempDetails, signal: signal, reason: reason };
+            }
         }
     }
 
