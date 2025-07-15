@@ -38,129 +38,133 @@ let rlConfig = {};
 let currentAdaptiveRates = {}; // The rates the RL agent is currently using/tuning
 let currentEpisodeHistory = []; // History within the current RL episode
 let episodeSpinsCount = 0; // Counter for spins within the current episode
-
-// Placeholder for a simple RL "model" (e.g., a policy network)
-// For a simple start, we can just use direct parameter adjustments.
-// A full RL agent would have state representation, action space, and a Q-network or policy network.
-// Let's define a minimal TF.js model here as a placeholder for future expansion.
 let rlPolicyModel = null;
 
-// This function would build a simple model to output adjustments (actions)
+// This function builds a simple policy network to output adjustments (actions)
 function createRlPolicyModel(inputShape, outputUnits) {
     const input = tf.input({ shape: [inputShape] });
-    const dense1 = tf.layers.dense({ units: 32, activation: 'relu' }).apply(input);
-    const dense2 = tf.layers.dense({ units: 16, activation: 'relu' }).apply(dense1);
-    // Output layer should map to adjustments for each tunable parameter.
-    // For now, let's just make it output `outputUnits` values, which we'll interpret as deltas.
-    const output = tf.layers.dense({ units: outputUnits, activation: 'linear' }).apply(dense2);
-    const model = tf.model({ inputs: input, outputs: [output] }); // Output needs to be an array for tf.model if it's one tensor
-    model.compile({ optimizer: tf.train.adam(), loss: 'meanSquaredError' });
+    const dense1 = tf.layers.dense({ units: 32, activation: 'relu', kernelInitializer: 'heNormal' }).apply(input);
+    const dropout1 = tf.layers.dropout({ rate: 0.2 }).apply(dense1);
+    const dense2 = tf.layers.dense({ units: 16, activation: 'relu', kernelInitializer: 'heNormal' }).apply(dropout1);
+    const dropout2 = tf.layers.dropout({ rate: 0.1 }).apply(dense2);
+    // Output layer: 'linear' activation for predicting continuous delta values
+    const output = tf.layers.dense({ units: outputUnits, activation: 'linear' }).apply(dropout2);
+    const model = tf.model({ inputs: input, outputs: output });
+    model.compile({ optimizer: tf.train.adam(rlConfig.learningRate), loss: 'meanSquaredError' });
     return model;
 }
 
 // Function to get the RL agent's state representation (input to the policy model)
+// This state should capture the performance context relevant to adaptive rates
 function getRlState(history, currentRates) {
-    // This is a simplified state for demonstration.
-    // A real RL state would be more complex: e.g., win/loss streaks, avg win rate,
-    // distribution of failure modes, current adaptive influence values.
-    let totalPlays = 0;
-    let totalWins = 0;
-    let totalLosses = 0;
-    let totalNearMisses = 0;
-    let totalStreakBreaks = 0;
+    // Collect rolling performance metrics over a window (e.g., last `episodeLength` spins)
+    const recentPlays = history.slice(-rlConfig.episodeLength).filter(item => 
+        item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails?.finalScore > 0 && item.recommendationDetails?.signal !== 'Avoid Play'
+    );
 
-    history.forEach(item => {
-        if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails?.finalScore > 0 && item.recommendationDetails?.signal !== 'Avoid Play') {
-            totalPlays++;
-            if (item.status === 'success') {
-                totalWins++;
-            } else {
-                totalLosses++;
-                if (item.failureMode === 'nearMiss') totalNearMisses++;
-                if (item.failureMode === 'streakBreak') totalStreakBreaks++;
-            }
-        }
-    });
+    let totalPlaysConsidered = recentPlays.length;
+    let wins = recentPlays.filter(item => item.status === 'success').length;
+    let losses = recentPlays.filter(item => item.status === 'fail').length;
 
-    const winRate = totalPlays > 0 ? totalWins / totalPlays : 0.5;
-    const lossRate = totalPlays > 0 ? totalLosses / totalPlays : 0.5;
+    let totalStreakBreaks = recentPlays.filter(item => item.failureMode === 'streakBreak').length;
+    let totalNearMisses = recentPlays.filter(item => item.failureMode === 'nearMiss').length;
+    let totalSectionShifts = recentPlays.filter(item => item.failureMode === 'sectionShift').length;
+    let totalNormalLosses = recentPlays.filter(item => item.failureMode === 'normalLoss').length;
 
-    // Simple state vector: [winRate, lossRate, nearMissRate, streakBreakRate, current_SUCCESS, current_FAILURE, ...]
+    const winRate = totalPlaysConsidered > 0 ? wins / totalPlaysConsidered : 0.5;
+    const lossRate = totalPlaysConsidered > 0 ? losses / totalPlaysConsidered : 0.5;
+
+    // Feature scaling for state values (0 to 1 range)
+    const scale = (val, max) => Math.min(1, val / max);
+
+    // State vector: [winRate, lossRate, scaled_streakBreaks, scaled_nearMisses, scaled_sectionShifts, scaled_normalLosses, current_adaptive_rates...]
     const stateVector = [
         winRate,
         lossRate,
-        totalLosses > 0 ? totalNearMisses / totalLosses : 0,
-        totalLosses > 0 ? totalStreakBreaks / totalLosses : 0,
+        scale(totalStreakBreaks, rlConfig.episodeLength),
+        scale(totalNearMisses, rlConfig.episodeLength),
+        scale(totalSectionShifts, rlConfig.episodeLength),
+        scale(totalNormalLosses, rlConfig.episodeLength),
         currentRates.SUCCESS,
         currentRates.FAILURE,
         currentRates.MIN_INFLUENCE,
         currentRates.MAX_INFLUENCE,
         currentRates.FORGET_FACTOR,
         currentRates.CONFIDENCE_WEIGHTING_MULTIPLIER,
-        currentRates.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
+        currentRates.CONFIDENCE_WEIGHTING_MIN_THRESHOLD / 50 // Assuming max threshold is 50 for scaling
     ];
 
-    // Add failure multipliers to state as well
+    // Add scaled failure multipliers to state as well
     for (const key of rlConfig.tunableFailureMultipliers) {
-        stateVector.push(currentRates.FAILURE_MULTIPLIERS[key] || 1.0);
+        stateVector.push((currentRates.FAILURE_MULTIPLIERS[key] || 1.0) / 5.0); // Assuming max multiplier is 5 for scaling
     }
     
     return tf.tensor2d([stateVector]);
 }
 
 // Function to calculate the reward for the current episode
+// Reward is based on win/loss ratio, adjusted by specific failure modes.
 function calculateReward(episodeHistory) {
     let episodeWins = 0;
     let episodeLosses = 0;
     let episodeAvoidedLosses = 0;
-    let totalPlaysConsidered = 0; // Plays where a recommendation was made and not 'Avoid'
+    let totalPlaysConsidered = 0;
+    let netReward = 0;
 
     episodeHistory.forEach(item => {
-        // Only count as a "play" for reward if a recommendation was made and it wasn't an explicit 'Avoid Play'
         if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails?.finalScore > 0) {
             if (item.recommendationDetails.signal === 'Avoid Play') {
                 episodeAvoidedLosses++;
+                netReward += 0.1; // Small positive reward for correctly avoiding a bad play
             } else {
                 totalPlaysConsidered++;
                 if (item.status === 'success') {
                     episodeWins++;
+                    netReward += 1.0; // Base reward for a win
                 } else {
                     episodeLosses++;
-                    // Penalize specific failure modes more
-                    if (item.failureMode === 'streakBreak') episodeLosses += 0.5; // Additional penalty
-                    if (item.failureMode === 'sectionShift') episodeLosses += 0.8; // Even higher additional penalty
-                    if (item.failureMode === 'nearMiss') episodeLosses -= 0.2; // Small reward for near miss, reduces overall loss impact
+                    // Base penalty for a loss
+                    netReward -= 1.0; 
+
+                    // Adjust penalty based on failure mode
+                    switch (item.failureMode) {
+                        case 'streakBreak':
+                            netReward -= 0.5; // Additional penalty for breaking a streak
+                            break;
+                        case 'sectionShift':
+                            netReward -= 0.8; // Higher additional penalty for a significant shift
+                            break;
+                        case 'nearMiss':
+                            netReward += 0.3; // Small positive adjustment, meaning it was "almost right"
+                            break;
+                        case 'normalLoss':
+                        default:
+                            // Already included in base penalty
+                            break;
+                    }
                 }
             }
         }
     });
 
-    // Reward based on win/loss ratio, with bonus for avoided losses
-    let reward = 0;
-    if (totalPlaysConsidered > 0) {
-        reward = (episodeWins - episodeLosses) / totalPlaysConsidered; // Simple win rate contribution
-    } else {
-        reward = 0; // No plays, neutral reward
+    // Normalize net reward based on the number of plays considered in the episode
+    if (totalPlaysConsidered + episodeAvoidedLosses > 0) {
+        // Average reward per decision, clamped to a reasonable range
+        return Math.max(-1.5, Math.min(1.5, netReward / (totalPlaysConsidered + episodeAvoidedLosses)));
     }
     
-    // Add a bonus for avoided losses, as they represent successful strategy application
-    reward += episodeAvoidedLosses * 0.1; // Small bonus per avoided loss
-
-    // Clamp reward to a reasonable range
-    reward = Math.max(-1, Math.min(1, reward));
-
-    return reward;
+    return 0; // Neutral reward if no actionable decisions were made
 }
 
-// Function to interpret model output as actions and apply them to rates
-function applyActionsToRates(rates, actions) {
+// Function to interpret model output as actions (deltas) and apply them to rates
+function applyActionsToRates(rates, actionDeltas) {
     const newRates = { 
         ...rates,
         FAILURE_MULTIPLIERS: { ...rates.FAILURE_MULTIPLIERS } // Deep copy failure multipliers
     };
     const tunableParams = rlConfig.tunableAdaptiveRates;
     const tunableMultipliers = rlConfig.tunableFailureMultipliers;
-    const actionValues = actions.arraySync()[0]; // Get the actual numerical values from the tensor
+    const actionValues = actionDeltas.arraySync()[0]; // Get the actual numerical values from the tensor
     let actionIndex = 0;
 
     // Apply adjustments to main adaptive rates
@@ -188,10 +192,10 @@ function applyActionsToRates(rates, actions) {
     return newRates;
 }
 
-// Main RL learning loop (simplified for initial implementation)
+// Main RL learning loop
 async function learnFromEpisode() {
     if (episodeSpinsCount < rlConfig.episodeLength) return; // Not enough data for an episode yet
-    if (currentEpisodeHistory.length === 0) { // Should not happen if episodeSpinsCount is met
+    if (currentEpisodeHistory.length === 0) {
         self.postMessage({ type: 'status', payload: { message: 'RL Model: No history for episode.' } });
         return;
     }
@@ -203,45 +207,53 @@ async function learnFromEpisode() {
     const reward = calculateReward(currentEpisodeHistory);
     const currentStateTensor = getRlState(currentEpisodeHistory, currentAdaptiveRates);
 
-    // Get the current predicted actions (deltas) from the model
+    // Predict current actions (deltas) from the policy model
     const currentPredictedActionsTensor = rlPolicyModel.predict(currentStateTensor);
-    const currentPredictedActions = currentPredictedActionsTensor.arraySync()[0];
+    const currentPredictedActionsArray = currentPredictedActionsTensor.arraySync()[0];
 
     // Calculate "target" actions for training. This is a very simplified policy gradient idea:
-    // If reward is good, try to reinforce the current actions. If bad, try to move away.
-    // A more robust RL setup would use a value function or more complex policy gradient.
+    // We adjust the `currentPredictedActions` by `(reward * learningRate)` to create a `targetAction`.
+    // The model is then trained to produce this `targetAction` from the `currentStateTensor`.
+    // This implicitly guides the policy towards actions that lead to higher rewards.
     const numTunableParams = rlConfig.tunableAdaptiveRates.length + rlConfig.tunableFailureMultipliers.length;
-    const targetActions = new Array(numTunableParams);
+    const targetActionsArray = new Array(numTunableParams);
 
     for(let i = 0; i < numTunableParams; i++) {
-        // This is a heuristic. A positive reward reinforces the current action/direction,
-        // a negative reward pushes it in the opposite direction.
-        // The strength of this reinforcement is scaled by the learning rate.
-        targetActions[i] = currentPredictedActions[i] + (reward * rlConfig.learningRate);
+        // Use an epsilon-greedy approach for exploration during learning
+        let actionDelta = currentPredictedActionsArray[i];
+        if (Math.random() < rlConfig.explorationRate) {
+            // Explore: add random noise to the action
+            actionDelta += (Math.random() * 2 - 1) * 0.1; // Random value between -0.1 and 0.1
+        }
+        
+        // Scale action by reward and learning rate.
+        // A positive reward moves actions in the predicted direction, negative moves opposite.
+        targetActionsArray[i] = actionDelta + (reward * rlConfig.learningRate * rlConfig.adjustmentSteps[Object.keys(rlConfig.adjustmentSteps)[i] || 'multiplierAdjustment']); // Heuristic adjustment
+        // This adjustment step mapping is still a bit raw, ideally actions are directly interpretable deltas.
     }
-    const targetActionsTensor = tf.tensor2d([targetActions]);
+    const targetActionsTensor = tf.tensor2d([targetActionsArray]);
 
-    // Train the model to output these "target" actions from the current state
+    // Train the model
     await rlPolicyModel.fit(currentStateTensor, targetActionsTensor, {
         epochs: 1, // Train for one epoch per learning step
         verbose: 0, // Suppress verbose output
         callbacks: {
             onEpochEnd: (epoch, logs) => {
-                if (config.DEBUG_MODE) console.log(`RL Model: Training loss: ${logs.loss.toFixed(4)}`);
+                if (config.DEBUG_MODE) console.log(`RL Model: Training loss: ${logs.loss ? logs.loss.toFixed(4) : 'N/A'}`);
             }
         }
     });
 
-    // After training, update the current adaptive rates by making a new prediction from the current state.
-    // This uses the newly updated policy.
-    const newPredictedActions = rlPolicyModel.predict(currentStateTensor);
-    currentAdaptiveRates = applyActionsToRates(currentAdaptiveRates, newPredictedActions);
+    // After training, predict the *new* actions from the same current state
+    // These new actions represent the refined policy, which we then apply to get the next `currentAdaptiveRates`.
+    const newPredictedActionsTensor = rlPolicyModel.predict(currentStateTensor);
+    currentAdaptiveRates = applyActionsToRates(currentAdaptiveRates, newPredictedActionsTensor);
     
-    // Ensure all tensors are disposed to prevent memory leaks
+    // Dispose of tensors to prevent memory leaks
     currentStateTensor.dispose();
     currentPredictedActionsTensor.dispose();
     targetActionsTensor.dispose();
-    newPredictedActions.dispose();
+    newPredictedActionsTensor.dispose();
 
     self.postMessage({ type: 'newAdaptiveRates', payload: { adaptiveRates: currentAdaptiveRates } });
     self.postMessage({ type: 'status', payload: { message: `RL Model: Episode complete. Reward: ${reward.toFixed(2)}` } });
@@ -271,9 +283,8 @@ self.onmessage = async (event) => {
             
             // Determine the number of output units based on tunable parameters
             const numTunableParams = rlConfig.tunableAdaptiveRates.length + rlConfig.tunableFailureMultipliers.length;
-            // Input shape: number of features in stateVector. Check getRlState.
-            // Current state vector size: 11 (fixed metrics + base adaptive rates) + number of tunableFailureMultipliers
-            const inputShape = 11 + rlConfig.tunableFailureMultipliers.length;
+            // Calculate input shape based on getRlState's vector size
+            const inputShape = 13 + rlConfig.tunableFailureMultipliers.length; // 13 from fixed metrics + base adaptive rates
             rlPolicyModel = createRlPolicyModel(inputShape, numTunableParams); 
             self.postMessage({ type: 'status', payload: { message: 'RL Model: Ready for learning.' } });
             break;
@@ -287,7 +298,16 @@ self.onmessage = async (event) => {
             }
             break;
         case 'updateConfig': // To update RL config or initial rates dynamically
-            if (payload.config) rlConfig = payload.config;
+            if (payload.config) {
+                rlConfig = payload.config;
+                // Re-initialize model if input/output shapes might change due to config update
+                const numTunableParams = rlConfig.tunableAdaptiveRates.length + rlConfig.tunableFailureMultipliers.length;
+                const inputShape = 13 + rlConfig.tunableFailureMultipliers.length;
+                if (!rlPolicyModel || rlPolicyModel.input.shape[1] !== inputShape || rlPolicyModel.output.shape[1] !== numTunableParams) {
+                    if (rlPolicyModel) rlPolicyModel.dispose();
+                    rlPolicyModel = createRlPolicyModel(inputShape, numTunableParams);
+                }
+            }
             if (payload.currentAdaptiveRates) currentAdaptiveRates = payload.currentAdaptiveRates;
             self.postMessage({ type: 'status', payload: { message: 'RL Model: Configuration updated.' } });
             break;
