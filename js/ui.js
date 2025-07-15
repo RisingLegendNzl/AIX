@@ -7,6 +7,7 @@ import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
 import { aiWorker } from './workers.js';
+import * as analysis from './analysis.js'; // Ensure analysis is imported correctly for its functions
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
@@ -282,12 +283,11 @@ export function renderHistory() {
             let resultText = '';
             // Determine result text for display purposes (HIT/MISS/WAIT/AVOID)
             if (item.status !== 'pending') {
-                if (details.finalScore > 0) { // Was an actionable "Play" signal
-                    resultText = recommendedHit ? ' - HIT' : ' - MISS';
-                } else if (details.signal === 'Avoid Play') { // Explicit avoid signal
+                if (details.signal === 'Avoid Play') { // Explicit avoid signal
                     resultText = ' - AVOID';
-                }
-                else { // Was a "Wait for Signal" or "Low Confidence"
+                } else if (details.finalScore > 0) { // Was an actionable "Play" signal
+                    resultText = recommendedHit ? ' - HIT' : ' - MISS';
+                } else { // Was a "Wait for Signal" or "Low Confidence"
                     resultText = ' - WAIT';
                 }
             }
@@ -499,7 +499,7 @@ function handleNewCalculation() {
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
     // NEW: Calculate rolling performance for table change warnings
-    const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); // Use direct call from here.
+    const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); // Use direct call from here.
     
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
@@ -520,7 +520,7 @@ function handleNewCalculation() {
 
     // --- Get AI Prediction ---
     ui.updateAiStatus('AI Model: Getting prediction...');
-    getAiPrediction(state.history).then(aiPredictionData => { // Use .then() to handle async prediction
+    analysis.getAiPrediction(state.history).then(aiPredictionData => { // Use .then() to handle async prediction
         ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
         const recommendation = getRecommendation({
@@ -546,7 +546,12 @@ function handleNewCalculation() {
         const lastPendingItem = state.history.find(item => item.id === newHistoryItem.id); // Find by ID to ensure correct item
         if (lastPendingItem) {
             lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
-            lastPendingItem.recommendationDetails = { ...recommendation.details, signal: recommendation.signal, reason: recommendation.reason }; // Store signal and reason for history display
+            // Store signal and reason from recommendation for history display's badge logic
+            lastPendingItem.recommendationDetails = { 
+                ...recommendation.details, 
+                signal: recommendation.signal, 
+                reason: recommendation.reason // Store reason from recommendation for debugging/display
+            }; 
         }
         
         let fullResultHtml = `
@@ -671,7 +676,7 @@ function handleSubmitResult() {
     // The previous runAllAnalyses was called directly here, but it also has AI prediction logic.
     // To ensure the sequence is correct (update history item -> re-run ALL analyses/predictions for the *current* state of inputs),
     // we need to call it again.
-    runAllAnalyses(winningNumber); // Pass winning number so it doesn't try to get a new one from input.
+    analysis.runAllAnalyses(winningNumber); // Pass winning number so it doesn't try to get a new one from input.
     renderHistory(); // Re-render history with updated item and win/loss counter
 
     dom.winningNumberInput.value = ''; // Clear the input field
@@ -726,7 +731,7 @@ function handleHistoryAction(event) {
     
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
     
-    runAllAnalyses();
+    analysis.runAllAnalyses(); // Use analysis.runAllAnalyses after history change
     renderHistory();
     drawRouletteWheel();
     
@@ -749,7 +754,7 @@ function handleClearHistory() {
     state.setIsAiReady(false);
     updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
     
-    runAllAnalyses();
+    analysis.runAllAnalyses(); // Use analysis.runAllAnalyses after history clear
     renderHistory();
     
     dom.historicalAnalysisMessage.textContent = 'History cleared.';
@@ -817,7 +822,7 @@ function handlePresetSelection(presetName) {
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
     updateActivePredictionTypes();
-    handleStrategyChange();
+    analysis.handleStrategyChange(); // Use analysis.handleStrategyChange after preset
     hidePatternAlert(); // Hide warnings on preset change
 }
 
@@ -859,7 +864,7 @@ function createSlider(containerId, label, paramObj, paramName) {
 
         state.saveState(); 
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
-        handleStrategyChange(); 
+        analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
     };
 
     slider.addEventListener('input', (e) => updateValue(e.target.value)); 
@@ -919,7 +924,7 @@ function resetAllParameters() {
     updateAllTogglesUI(); 
     initializeAdvancedSettingsUI(); 
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
-    handleStrategyChange();
+    analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
     hidePatternAlert(); // Hide warnings on reset
 }
 
@@ -960,7 +965,7 @@ function loadParametersFromFile(event) {
             updateAllTogglesUI(); 
             initializeAdvancedSettingsUI(); 
             dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
-            handleStrategyChange();
+            analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
         } catch (error) {
             dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
         }
@@ -1015,7 +1020,7 @@ function attachMainActionListeners() {
     document.getElementById('swapButton').addEventListener('click', handleSwap);
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', () => runAllAnalyses()); // Use arrow func for simplicity
+    dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses()); // Use analysis.runAllAnalyses
     
     // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
@@ -1049,7 +1054,7 @@ function attachToggleListeners() {
                 renderHistory();
             } else {
                 // For most toggles, a strategy change means re-simulating and re-analyzing
-                handleStrategyChange();
+                analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
                 // Redraw roulette wheel if inputs are present and last winning exists
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
@@ -1073,7 +1078,8 @@ function attachAdvancedSettingsListeners() {
     dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
 
     // Historical Analysis
-    dom.analyzeHistoricalDataButton.addEventListener('click', handleHistoricalAnalysis);
+    dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis); // FIXED: Call analysis.handleHistoricalAnalysis
+                                                                                                  // instead of just handleHistoricalAnalysis
 
     // Video Analysis
     if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
@@ -1119,7 +1125,7 @@ export function initializeUI() {
         'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
-        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert', // ADDED: patternAlert to DOM elements
+        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
         // NEW: Add new category toggle IDs here
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
@@ -1228,7 +1234,7 @@ export function initializeUI() {
             
             initializeAdvancedSettingsUI();
             updateOptimizationStatus('Best parameters applied!');
-            handleStrategyChange();
+            analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
             hidePatternAlert(); // Hide warnings when applying params
         }
     });
