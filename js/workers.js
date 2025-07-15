@@ -14,7 +14,7 @@ export let optimizationWorker;
 export function initializeWorkers() {
     // Corrected paths to point inside the /js folder
     aiWorker = new Worker('js/aiWorker.js', { type: 'module' });
-    optimizationWorker = new Worker('js/optimizationWorker.js', { type: 'module' });
+    optimizationWorker = new Worker('js/optimizationWorker.js', { type: 'module' }); // Ensure optimizationWorker is initialized
 
     // --- WORKER MESSAGE HANDLERS ---
     aiWorker.onmessage = (event) => {
