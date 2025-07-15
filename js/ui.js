@@ -494,7 +494,8 @@ function handleNewCalculation() {
         isForWeightUpdate: false, aiPredictionData: aiPredictionData, currentAdaptiveInfluences: state.adaptiveFactorInfluences,
         lastWinningNumber: lastWinningNumber, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
         useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: state.isAiReady,
-        useTrendConfirmationBool: state.useTrendConfirmation, current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict, // PASSING NEW TOGGLES HERE
+        current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: state.history,
         activePredictionTypes: state.activePredictionTypes,
         useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
@@ -982,8 +983,8 @@ function attachToggleListeners() {
 
             if (stateKey === 'usePocketDistance') {
                 renderHistory();
-            } else if (stateKey === 'useAdvancedCalculations' || stateKey === 'useDynamicTerminalNeighbourCount') {
-                updateActivePredictionTypes();
+            } else if (stateKey === 'useAdvancedCalculations' || stateKey === 'useDynamicTerminalNeighbourCount' || stateKey === 'useAdaptivePlay' || stateKey === 'useLessStrict') { // ADDED: New toggles that require full re-simulation
+                updateActivePredictionTypes(); // Ensure this is called if it affects active types
                 handleStrategyChange();
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
