@@ -6,8 +6,8 @@ import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDis
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
-import { aiWorker, optimizationWorker } from './workers.js'; // FIXED: Import optimizationWorker
-import * as analysis from './analysis.js'; // Ensure analysis is imported correctly for its functions
+import { aiWorker, optimizationWorker } from './workers.js'; 
+import * as analysis from './analysis.js'; 
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
@@ -512,7 +512,7 @@ function handleNewCalculation() {
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
     // NEW: Calculate rolling performance for table change warnings
-    const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); // FIXED: Correctly call analysis.calculateRollingPerformance
+    const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
     
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
@@ -549,6 +549,11 @@ function handleNewCalculation() {
             useLessStrictBool: state.useLessStrict,
             useTableChangeWarningsBool: state.useTableChangeWarnings, // Pass table change warning toggle
             rollingPerformance: rollingPerformance, // Pass rolling performance data
+            factorShiftStatus: analysis.analyzeFactorShift(state.history, config.STRATEGY_CONFIG), // Ensure analyzeFactorShift is called from analysis.js
+            useLowestPocketDistanceBool: state.useLowestPocketDistance, // Pass pocket distance toggle
+            // NEW: Pass repeat/neighbor hit status to recommendation for potential special handling or display
+            isCurrentRepeat: analysis.isRepeatNumber(lastWinning, state.history), // Use the exported function
+            isCurrentNeighborHit: analysis.isNeighborHit(lastWinning, state.history), // Use the exported function
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
@@ -682,7 +687,7 @@ function handleSubmitResult() {
     state.setConfirmedWinsLog(newLog);
 
     // Re-label failures across the entire history based on the latest context
-    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // FIXED: Call analysis.labelHistoryFailures
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
 
 
     // --- CRITICAL: AI Prediction is asynchronous. Call runAllAnalyses AFTER current history update ---
@@ -742,7 +747,7 @@ function handleHistoryAction(event) {
     const newLog = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
     state.setConfirmedWinsLog(newLog);
     
-    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // Use analysis.labelHistoryFailures
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
     
     analysis.runAllAnalyses(); // Use analysis.runAllAnalyses after history change
     renderHistory();
@@ -834,7 +839,7 @@ function handlePresetSelection(presetName) {
 
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
-    analysis.updateActivePredictionTypes(); // FIXED: Call analysis.updateActivePredictionTypes
+    analysis.updateActivePredictionTypes(); 
     analysis.handleStrategyChange(); // Use analysis.handleStrategyChange after preset
     hidePatternAlert(); // Hide warnings on preset change
 }
@@ -1039,7 +1044,7 @@ export function toggleParameterSliders(enable) {
 // --- UI INITIALIZATION HELPERS ---
 
 function attachMainActionListeners() {
-    // Connect the new functions to the correct buttons
+    // Connect the new functions to the main UI buttons
     document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
     document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
 
@@ -1047,7 +1052,7 @@ function attachMainActionListeners() {
     document.getElementById('swapButton').addEventListener('click', handleSwap);
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses()); // Use analysis.runAllAnalyses
+    dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses()); 
     
     // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
@@ -1058,6 +1063,121 @@ function attachMainActionListeners() {
     dom.winningNumberInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') handleSubmitResult();
     });
+    // Optimization buttons are handled by attachOptimizationButtonListeners
+}
+
+// NEW: Exported function to attach optimization button listeners
+export function attachOptimizationButtonListeners() {
+    if (dom.startOptimizationButton) {
+        dom.startOptimizationButton.addEventListener('click', () => {
+            if (state.history.length < 20) {
+                updateOptimizationStatus('Error: Need at least 20 history items.');
+                return;
+            }
+            updateOptimizationStatus('Starting optimization...');
+            dom.optimizationResult.classList.add('hidden');
+            toggleParameterSliders(false); 
+            dom.startOptimizationButton.disabled = true;
+            dom.stopOptimizationButton.disabled = false;
+            
+            const togglesForWorker = {
+                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+                useProximityBoost: state.useProximityBoost,
+                useWeightedZone: state.useWeightedZone,
+                useNeighbourFocus: state.useNeighbourFocus,
+                useTrendConfirmation: state.useTrendConfirmation,
+                usePocketDistance: state.usePocketDistance,
+                useLowestPocketDistance: state.useLowestPocketDistance,
+                useAdvancedCalculations: state.useAdvancedCalculations,
+                useDynamicStrategy: state.useDynamicStrategy,
+                useAdaptivePlay: state.useAdaptivePlay,
+                useTableChangeWarnings: state.useTableChangeWarnings,
+                useDueForHit: state.useDueForHit,
+                useLessStrict: state.useLessStrict
+            };
+
+            optimizationWorker.postMessage({ // This is the line that was causing ReferenceError before initialization
+                type: 'start',
+                payload: {
+                    history: state.history,
+                    terminalMapping: config.terminalMapping,
+                    rouletteWheel: config.rouletteWheel,
+                    GA_CONFIG: config.GA_CONFIG,
+                    toggles: togglesForWorker, 
+                    optimizeCategories: {
+                        coreStrategy: dom.optimizeCoreStrategyToggle.checked,
+                        adaptiveRates: dom.optimizeAdaptiveRatesToggle.checked
+                    }
+                }
+            });
+        });
+    }
+
+    if (dom.stopOptimizationButton) {
+        dom.stopOptimizationButton.addEventListener('click', () => {
+            optimizationWorker.postMessage({ type: 'stop' });
+        });
+    }
+
+    // Also need to ensure applyBestParamsButton is correctly attached here or elsewhere
+    if (dom.applyBestParamsButton) {
+        dom.applyBestParamsButton.addEventListener('click', () => {
+            if (state.bestFoundParams) {
+                const params = state.bestFoundParams.bestIndividual;
+                const toggles = state.bestFoundParams.togglesUsed;
+
+                Object.assign(config.STRATEGY_CONFIG, {
+                    learningRate_success: params.learningRate_success, decayFactor: params.decayFactor,
+                    learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
+                    minWeight: params.minWeight, patternMinAttempts: params.patternMinAttempts,
+                    patternSuccessThreshold: params.patternSuccessThreshold, triggerMinAttempts: params.triggerMinAttempts,
+                    triggerSuccessThreshold: params.triggerSuccessThreshold,
+                    hitRateThreshold: params.hitRateThreshold,
+                    hitRateMultiplier: params.hitRateMultiplier,
+                    maxStreakPoints: params.maxStreakPoints,
+                    streakMultiplier: params.streakMultiplier,
+                    proximityMaxDistance: params.proximityMaxDistance,
+                    proximityMultiplier: params.proximityMultiplier,
+                    maxNeighbourPoints: params.maxNeighbourPoints,
+                    neighbourMultiplier: params.neighbourMultiplier,
+                    aiConfidenceMultiplier: params.aiConfidenceMultiplier,
+                    minAiPointsForReason: params.minAiPointsForReason,
+                    ADAPTIVE_STRONG_PLAY_THRESHOLD: params.ADAPTIVE_STRONG_PLAY_THRESHOLD,
+                    ADAPTIVE_PLAY_THRESHOLD: params.ADAPTIVE_PLAY_THRESHOLD,
+                    LESS_STRICT_STRONG_PLAY_THRESHOLD: params.LESS_STRICT_STRONG_PLAY_THRESHOLD,
+                    LESS_STRICT_PLAY_THRESHOLD: params.LESS_STRICT_PLAY_THRESHOLD,
+                    LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: params.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
+                    LESS_STRICT_MIN_STREAK: params.LESS_STRICT_MIN_STREAK,
+                    SIMPLE_PLAY_THRESHOLD: params.SIMPLE_PLAY_THRESHOLD,
+                    MIN_TREND_HISTORY_FOR_CONFIRMATION: params.MIN_TREND_HISTORY_FOR_CONFIRMATION,
+                    WARNING_ROLLING_WINDOW_SIZE: params.WARNING_ROLLING_WINDOW_SIZE,
+                    WARNING_MIN_PLAYS_FOR_EVAL: params.WARNING_MIN_PLAYS_FOR_EVAL,
+                    WARNING_LOSS_STREAK_THRESHOLD: params.WARNING_LOSS_STREAK_THRESHOLD,
+                    WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
+                    DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE,
+                    LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: params.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
+                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
+                });
+                Object.assign(config.ADAPTIVE_LEARNING_RATES, {
+                    SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
+                    MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence,
+                    FORGET_FACTOR: params.FORGET_FACTOR,
+                    CONFIDENCE_WEIGHTING_MULTIPLIER: params.CONFIDENCE_WEIGHTING_MULTIPLIER,
+                    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: params.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
+                });
+
+                if (toggles) {
+                    state.setToggles(toggles);
+                    updateAllTogglesUI();
+                }
+                
+                initializeAdvancedSettingsUI();
+                updateOptimizationStatus('Best parameters applied!');
+                analysis.handleStrategyChange();
+                hidePatternAlert();
+            }
+        });
+    }
 }
 
 function attachToggleListeners() {
@@ -1081,7 +1201,7 @@ function attachToggleListeners() {
                 renderHistory();
             } else {
                 // For most toggles, a strategy change means re-simulating and re-analyzing
-                analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
+                analysis.handleStrategyChange(); 
                 // Redraw roulette wheel if inputs are present and last winning exists
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
@@ -1112,9 +1232,9 @@ function attachAdvancedSettingsListeners() {
     if (dom.analyzeVideoButton) dom.analyzeVideoButton.addEventListener('click', startVideoAnalysis);
     if (dom.clearVideoButton) dom.clearVideoButton.addEventListener('click', clearVideoState);
 
-    // NEW: Category Toggle Listeners
-    dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
-    dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); // Pass true to re-evaluate all
+    // Category Toggle Listeners for sliders are already in initializeAdvancedSettingsUI
+    dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); 
+    dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); 
 }
 
 function attachGuideAndInfoListeners() {
@@ -1129,7 +1249,7 @@ function attachGuideAndInfoListeners() {
     if(dom.historyInfoToggle) {
         dom.historyInfoToggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            dom.historyInfoDropdown.classList.toggle('hidden');
+            dom.historyInfoDropdown.classList.add('hidden');
         });
     }
 }
@@ -1152,9 +1272,7 @@ export function initializeUI() {
         'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
-        // NEW: Add a container for Table Change Warning sliders
         'warningParametersSliders',
-        // NEW: Add new category toggle IDs here
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
@@ -1164,114 +1282,6 @@ export function initializeUI() {
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
     
-    dom.startOptimizationButton.addEventListener('click', () => {
-        if (state.history.length < 20) {
-            updateOptimizationStatus('Error: Need at least 20 history items.');
-            return;
-        }
-        updateOptimizationStatus('Starting optimization...');
-        dom.optimizationResult.classList.add('hidden');
-        toggleParameterSliders(false); // Disable all sliders initially for optimization
-        dom.startOptimizationButton.disabled = true;
-        dom.stopOptimizationButton.disabled = false;
-        
-        const togglesForWorker = {
-            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
-            useProximityBoost: state.useProximityBoost,
-            useWeightedZone: state.useWeightedZone,
-            useNeighbourFocus: state.useNeighbourFocus,
-            useTrendConfirmation: state.useTrendConfirmation,
-            // Include other toggles if they influence the fitness calculation within the worker
-            usePocketDistance: state.usePocketDistance,
-            useLowestPocketDistance: state.useLowestPocketDistance,
-            useAdvancedCalculations: state.useAdvancedCalculations,
-            useDynamicStrategy: state.useDynamicStrategy,
-            useAdaptivePlay: state.useAdaptivePlay,
-            useTableChangeWarnings: state.useTableChangeWarnings,
-            useDueForHit: state.useDueForHit,
-            useLessStrict: state.useLessStrict
-        };
-
-        optimizationWorker.postMessage({
-            type: 'start',
-            payload: {
-                history: state.history,
-                terminalMapping: config.terminalMapping,
-                rouletteWheel: config.rouletteWheel,
-                GA_CONFIG: config.GA_CONFIG,
-                toggles: togglesForWorker, // Pass the current UI toggle states to the worker
-                // NEW: Pass which categories are enabled for optimization
-                optimizeCategories: {
-                    coreStrategy: dom.optimizeCoreStrategyToggle.checked,
-                    adaptiveRates: dom.optimizeAdaptiveRatesToggle.checked
-                }
-            }
-        });
-    });
-
-    dom.stopOptimizationButton.addEventListener('click', () => {
-        optimizationWorker.postMessage({ type: 'stop' });
-    });
-
-    dom.applyBestParamsButton.addEventListener('click', () => {
-        if (state.bestFoundParams) {
-            const params = state.bestFoundParams.bestIndividual; // Correctly reference bestIndividual
-            const toggles = state.bestFoundParams.togglesUsed; // Get the toggles used for this best result
-
-            Object.assign(config.STRATEGY_CONFIG, {
-                learningRate_success: params.learningRate_success, decayFactor: params.decayFactor,
-                learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
-                minWeight: params.minWeight, patternMinAttempts: params.patternMinAttempts,
-                patternSuccessThreshold: params.patternSuccessThreshold, triggerMinAttempts: params.triggerMinAttempts,
-                triggerSuccessThreshold: params.triggerSuccessThreshold,
-                // Apply new config parameters
-                hitRateThreshold: params.hitRateThreshold,
-                hitRateMultiplier: params.hitRateMultiplier,
-                maxStreakPoints: params.maxStreakPoints,
-                streakMultiplier: params.streakMultiplier,
-                proximityMaxDistance: params.proximityMaxDistance,
-                proximityMultiplier: params.proximityMultiplier,
-                maxNeighbourPoints: params.maxNeighbourPoints,
-                neighbourMultiplier: params.neighbourMultiplier,
-                aiConfidenceMultiplier: params.aiConfidenceMultiplier,
-                minAiPointsForReason: params.minAiPointsForReason,
-                ADAPTIVE_STRONG_PLAY_THRESHOLD: params.ADAPTIVE_STRONG_PLAY_THRESHOLD,
-                ADAPTIVE_PLAY_THRESHOLD: params.ADAPTIVE_PLAY_THRESHOLD,
-                LESS_STRICT_STRONG_PLAY_THRESHOLD: params.LESS_STRICT_STRONG_PLAY_THRESHOLD,
-                LESS_STRICT_PLAY_THRESHOLD: params.LESS_STRICT_PLAY_THRESHOLD,
-                LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: params.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
-                LESS_STRICT_MIN_STREAK: params.LESS_STRICT_MIN_STREAK,
-                SIMPLE_PLAY_THRESHOLD: params.SIMPLE_PLAY_THRESHOLD,
-                MIN_TREND_HISTORY_FOR_CONFIRMATION: params.MIN_TREND_HISTORY_FOR_CONFIRMATION,
-                WARNING_ROLLING_WINDOW_SIZE: params.WARNING_ROLLING_WINDOW_SIZE,
-                WARNING_MIN_PLAYS_FOR_EVAL: params.WARNING_MIN_PLAYS_FOR_EVAL,
-                WARNING_LOSS_STREAK_THRESHOLD: params.WARNING_LOSS_STREAK_THRESHOLD,
-                WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
-                DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE
-            });
-            Object.assign(config.ADAPTIVE_LEARNING_RATES, {
-                SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
-                MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence
-            });
-
-            // --- ADDED: Apply the toggles as well ---
-            if (toggles) { // Ensure toggles were sent
-                state.setToggles(toggles);
-                updateAllTogglesUI(); // Update UI to reflect new toggle states
-            }
-            
-            initializeAdvancedSettingsUI();
-            updateOptimizationStatus('Best parameters applied!');
-            analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
-            hidePatternAlert(); // Hide warnings when applying params
-        }
-    });
-
-    document.addEventListener('click', (e) => {
-        if (dom.historyInfoDropdown && !dom.historyInfoDropdown.contains(e.target) && !dom.historyInfoToggle.contains(e.target)) {
-            dom.historyInfoDropdown.classList.add('hidden');
-        }
-    });
-
-
+    // Optimization button listeners will be attached by main.js after workers are initialized
+    // via ui.attachOptimizationButtonListeners();
 }
