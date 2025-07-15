@@ -2,7 +2,7 @@
 
 // --- IMPORTS ---
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
-import * => config from './config.js';
+import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
 import { aiWorker } from './workers.js';
@@ -191,7 +191,6 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
 
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
-    let localConfirmedWinsLog = [];
     let localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
@@ -241,11 +240,14 @@ function runSimulationOnHistory(spinsToProcess) {
         // Apply adaptive influence updates within the simulation
         if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
+            // Calculate influence change magnitude based on finalScore
+            const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+            
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
             if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + config.ADAPTIVE_LEARNING_RATES.SUCCESS);
+                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)); // Add confidence-weighted part
             } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - config.ADAPTIVE_LEARNING_RATES.FAILURE);
+                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)); // Subtract confidence-weighted part
             }
         }
 
