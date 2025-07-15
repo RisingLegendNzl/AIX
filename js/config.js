@@ -41,7 +41,14 @@ export let STRATEGY_CONFIG = {
     SIMPLE_PLAY_THRESHOLD: 20,           // Simple threshold for "Play" vs "Wait"
 
     // NEW: Trend Confirmation Threshold (used in shared-logic.js)
-    MIN_TREND_HISTORY_FOR_CONFIRMATION: 3 // Minimum successful plays needed to even consider trend confirmation
+    MIN_TREND_HISTORY_FOR_CONFIRMATION: 3, // Minimum successful plays needed to even consider trend confirmation
+
+    // NEW: Table Change Warning Parameters (used in analysis.js and shared-logic.js)
+    WARNING_ROLLING_WINDOW_SIZE: 10,      // Number of recent "plays" to consider for rolling performance
+    WARNING_MIN_PLAYS_FOR_EVAL: 5,        // Minimum number of plays within window to trigger evaluation
+    WARNING_LOSS_STREAK_THRESHOLD: 4,     // Consecutive "play" losses to trigger a warning
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: 40, // Rolling win rate % below which a warning is triggered
+    DEFAULT_AVERAGE_WIN_RATE: 45          // Baseline expected win rate if insufficient history for true average
 };
 
 // --- Adaptive Learning Rates for Factor Influences ---
@@ -65,7 +72,7 @@ export const DEFAULT_PARAMETERS = {
         triggerMinAttempts: 5,      
         triggerSuccessThreshold: 63,
 
-        // Defaults for new thresholds
+        // Defaults for new scoring parameters
         hitRateThreshold: 40,
         hitRateMultiplier: 0.5,
         maxStreakPoints: 15,
@@ -84,7 +91,14 @@ export const DEFAULT_PARAMETERS = {
         LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: 60,
         LESS_STRICT_MIN_STREAK: 3,
         SIMPLE_PLAY_THRESHOLD: 20,
-        MIN_TREND_HISTORY_FOR_CONFIRMATION: 3
+        MIN_TREND_HISTORY_FOR_CONFIRMATION: 3,
+
+        // Defaults for new Table Change Warning Parameters
+        WARNING_ROLLING_WINDOW_SIZE: 10,
+        WARNING_MIN_PLAYS_FOR_EVAL: 5,
+        WARNING_LOSS_STREAK_THRESHOLD: 4,
+        WARNING_ROLLING_WIN_RATE_THRESHOLD: 40,
+        DEFAULT_AVERAGE_WIN_RATE: 45
     },
     ADAPTIVE_LEARNING_RATES: {
         SUCCESS: 0.15, 
@@ -100,11 +114,11 @@ export const DEFAULT_PARAMETERS = {
         useLowestPocketDistance: false,
         useAdvancedCalculations: false,
         useDynamicStrategy: false,
-        useAdaptivePlay: false, // Default to OFF for new Adaptive Play logic
-        useTableChangeWarnings: false,
+        useAdaptivePlay: false, 
+        useTableChangeWarnings: false, // Default to OFF
         useDueForHit: false,
         useNeighbourFocus: false,
-        useLessStrict: false, // Default to OFF for new Less Strict logic
+        useLessStrict: false, 
         useDynamicTerminalNeighbourCount: false,
     }
 };
@@ -126,6 +140,9 @@ export const STRATEGY_PRESETS = {
             // Ensure new scoring parameters are set explicitly or inherited if desired
             ADAPTIVE_STRONG_PLAY_THRESHOLD: 60, // Higher threshold for this preset
             ADAPTIVE_PLAY_THRESHOLD: 30,
+            // Adjust warning thresholds for this preset if desired
+            WARNING_LOSS_STREAK_THRESHOLD: 5, // More tolerant of losses for high win rate
+            WARNING_ROLLING_WIN_RATE_THRESHOLD: 35, // More tolerant of lower rolling win rate
         },
         ADAPTIVE_LEARNING_RATES: {
             SUCCESS: 0.15,
@@ -137,25 +154,32 @@ export const STRATEGY_PRESETS = {
             ...DEFAULT_PARAMETERS.TOGGLES,
             useTrendConfirmation: true,
             useWeightedZone: true,
-            useProximityBoost: true, // Changed to true based on common highest win rate strategies
+            useProximityBoost: true, 
             useAdvancedCalculations: true,
             useDynamicStrategy: true,
-            useAdaptivePlay: true, // Enable adaptive play for this preset
+            useAdaptivePlay: true, 
             useNeighbourFocus: true,
             useDynamicTerminalNeighbourCount: true,
-            useLessStrict: false // Default to strict for highest win rate
+            useLessStrict: false,
+            useTableChangeWarnings: true // Enable for this preset
         }
     },
     balancedSafe: {
-        STRATEGY_CONFIG: DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherits new defaults
+        STRATEGY_CONFIG: {
+            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherits new defaults
+            // Maybe tighter warning thresholds for a "safe" preset
+            WARNING_LOSS_STREAK_THRESHOLD: 3,
+            WARNING_ROLLING_WIN_RATE_THRESHOLD: 45,
+        },
         ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
             useTrendConfirmation: true, 
             useWeightedZone: true, 
             useProximityBoost: true,
-            useAdaptivePlay: true, // Enable adaptive play for this preset
-            useLessStrict: false // Keep strict
+            useAdaptivePlay: true, 
+            useLessStrict: false,
+            useTableChangeWarnings: true // Enable for this preset
         }
     },
     aggressiveSignals: {
@@ -164,6 +188,9 @@ export const STRATEGY_PRESETS = {
             // Potentially lower thresholds for more signals in aggressive mode
             ADAPTIVE_STRONG_PLAY_THRESHOLD: 40,
             ADAPTIVE_PLAY_THRESHOLD: 15,
+            // Less strict warnings for aggressive play
+            WARNING_LOSS_STREAK_THRESHOLD: 6,
+            WARNING_ROLLING_WIN_RATE_THRESHOLD: 30,
         },
         ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
         TOGGLES: { 
@@ -171,8 +198,9 @@ export const STRATEGY_PRESETS = {
             useTrendConfirmation: true, 
             useWeightedZone: true, 
             useProximityBoost: true, 
-            useLessStrict: true, // Enable less strict for aggressive
-            useAdaptivePlay: true // Enable adaptive play for this preset
+            useLessStrict: true, 
+            useAdaptivePlay: true,
+            useTableChangeWarnings: true // Enable for this preset
         }
     }
 };
