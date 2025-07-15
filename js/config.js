@@ -13,6 +13,35 @@ export let STRATEGY_CONFIG = {
     patternSuccessThreshold: 68,
     triggerMinAttempts: 5,      
     triggerSuccessThreshold: 63,
+
+    // NEW: Recommendation Scoring Multipliers & Thresholds (used in shared-logic.js)
+    hitRateThreshold: 40,        // Below this hit rate, points start from 0 for hitRatePoints
+    hitRateMultiplier: 0.5,      // Points = (HitRate - threshold) * multiplier
+    maxStreakPoints: 15,         // Max points a streak can contribute
+    streakMultiplier: 5,         // Points = currentStreak * multiplier
+    proximityMaxDistance: 5,     // Max pocket distance for proximity boost to apply
+    proximityMultiplier: 2,      // Points = (MaxDistance - actualDistance) * multiplier
+    maxNeighbourPoints: 10,      // Max points neighbour weighting can contribute
+    neighbourMultiplier: 0.5,    // Points = neighbourWeightedScore * multiplier
+    aiConfidenceMultiplier: 25,  // Points = mlProbability * multiplier
+    minAiPointsForReason: 5,     // Min AI points for 'AI Conf' to appear in reason list
+
+    // NEW: Adaptive Play Signal Thresholds (used in shared-logic.js)
+    // When useAdaptivePlay is ON
+    ADAPTIVE_STRONG_PLAY_THRESHOLD: 50, // Score needed for "Strong Play"
+    ADAPTIVE_PLAY_THRESHOLD: 20,        // Score needed for "Play" (below Strong, above Wait)
+
+    // When useAdaptivePlay is ON and useLessStrict is ON
+    LESS_STRICT_STRONG_PLAY_THRESHOLD: 40, // Lower score for "Strong Play" in less strict mode
+    LESS_STRICT_PLAY_THRESHOLD: 10,        // Lower score for "Play" in less strict mode
+    LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: 60, // Alternative condition for Less Strict Strong Play (e.g. if hitRate > 60% and minStreak)
+    LESS_STRICT_MIN_STREAK: 3,             // Min streak for Less Strict Strong Play (with high hit rate)
+
+    // When useAdaptivePlay is OFF (simple fallback logic)
+    SIMPLE_PLAY_THRESHOLD: 20,           // Simple threshold for "Play" vs "Wait"
+
+    // NEW: Trend Confirmation Threshold (used in shared-logic.js)
+    MIN_TREND_HISTORY_FOR_CONFIRMATION: 3 // Minimum successful plays needed to even consider trend confirmation
 };
 
 // --- Adaptive Learning Rates for Factor Influences ---
@@ -35,6 +64,27 @@ export const DEFAULT_PARAMETERS = {
         patternSuccessThreshold: 68,
         triggerMinAttempts: 5,      
         triggerSuccessThreshold: 63,
+
+        // Defaults for new thresholds
+        hitRateThreshold: 40,
+        hitRateMultiplier: 0.5,
+        maxStreakPoints: 15,
+        streakMultiplier: 5,
+        proximityMaxDistance: 5,
+        proximityMultiplier: 2,
+        maxNeighbourPoints: 10,
+        neighbourMultiplier: 0.5,
+        aiConfidenceMultiplier: 25,
+        minAiPointsForReason: 5,
+
+        ADAPTIVE_STRONG_PLAY_THRESHOLD: 50,
+        ADAPTIVE_PLAY_THRESHOLD: 20,
+        LESS_STRICT_STRONG_PLAY_THRESHOLD: 40,
+        LESS_STRICT_PLAY_THRESHOLD: 10,
+        LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: 60,
+        LESS_STRICT_MIN_STREAK: 3,
+        SIMPLE_PLAY_THRESHOLD: 20,
+        MIN_TREND_HISTORY_FOR_CONFIRMATION: 3
     },
     ADAPTIVE_LEARNING_RATES: {
         SUCCESS: 0.15, 
@@ -43,12 +93,18 @@ export const DEFAULT_PARAMETERS = {
         MAX_INFLUENCE: 2.5,
     },
     TOGGLES: {
+        useTrendConfirmation: false,
+        useWeightedZone: false,
+        useProximityBoost: false,
+        usePocketDistance: false,
+        useLowestPocketDistance: false,
+        useAdvancedCalculations: false,
         useDynamicStrategy: false,
-        useAdaptivePlay: false,
+        useAdaptivePlay: false, // Default to OFF for new Adaptive Play logic
         useTableChangeWarnings: false,
         useDueForHit: false,
         useNeighbourFocus: false,
-        useLessStrict: false,
+        useLessStrict: false, // Default to OFF for new Less Strict logic
         useDynamicTerminalNeighbourCount: false,
     }
 };
@@ -57,6 +113,7 @@ export const DEFAULT_PARAMETERS = {
 export const STRATEGY_PRESETS = {
     highestWinRate: {
         STRATEGY_CONFIG: {
+            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherit all default config params
             learningRate_success: 0.35,
             learningRate_failure: 0.05,
             maxWeight: 6.0,
@@ -66,6 +123,9 @@ export const STRATEGY_PRESETS = {
             patternSuccessThreshold: 68,
             triggerMinAttempts: 5,
             triggerSuccessThreshold: 63,
+            // Ensure new scoring parameters are set explicitly or inherited if desired
+            ADAPTIVE_STRONG_PLAY_THRESHOLD: 60, // Higher threshold for this preset
+            ADAPTIVE_PLAY_THRESHOLD: 30,
         },
         ADAPTIVE_LEARNING_RATES: {
             SUCCESS: 0.15,
@@ -77,23 +137,43 @@ export const STRATEGY_PRESETS = {
             ...DEFAULT_PARAMETERS.TOGGLES,
             useTrendConfirmation: true,
             useWeightedZone: true,
-            useProximityBoost: false,
+            useProximityBoost: true, // Changed to true based on common highest win rate strategies
             useAdvancedCalculations: true,
             useDynamicStrategy: true,
-            useAdaptivePlay: true,
+            useAdaptivePlay: true, // Enable adaptive play for this preset
             useNeighbourFocus: true,
-            useDynamicTerminalNeighbourCount: true
+            useDynamicTerminalNeighbourCount: true,
+            useLessStrict: false // Default to strict for highest win rate
         }
     },
     balancedSafe: {
-        STRATEGY_CONFIG: DEFAULT_PARAMETERS.STRATEGY_CONFIG,
+        STRATEGY_CONFIG: DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherits new defaults
         ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
-        TOGGLES: { ...DEFAULT_PARAMETERS.TOGGLES, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: true }
+        TOGGLES: { 
+            ...DEFAULT_PARAMETERS.TOGGLES, 
+            useTrendConfirmation: true, 
+            useWeightedZone: true, 
+            useProximityBoost: true,
+            useAdaptivePlay: true, // Enable adaptive play for this preset
+            useLessStrict: false // Keep strict
+        }
     },
     aggressiveSignals: {
-        STRATEGY_CONFIG: DEFAULT_PARAMETERS.STRATEGY_CONFIG,
+        STRATEGY_CONFIG: {
+            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherits new defaults
+            // Potentially lower thresholds for more signals in aggressive mode
+            ADAPTIVE_STRONG_PLAY_THRESHOLD: 40,
+            ADAPTIVE_PLAY_THRESHOLD: 15,
+        },
         ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
-        TOGGLES: { ...DEFAULT_PARAMETERS.TOGGLES, useTrendConfirmation: true, useWeightedZone: true, useProximityBoost: true, useLessStrict: true }
+        TOGGLES: { 
+            ...DEFAULT_PARAMETERS.TOGGLES, 
+            useTrendConfirmation: true, 
+            useWeightedZone: true, 
+            useProximityBoost: true, 
+            useLessStrict: true, // Enable less strict for aggressive
+            useAdaptivePlay: true // Enable adaptive play for this preset
+        }
     }
 };
 
