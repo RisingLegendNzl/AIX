@@ -527,7 +527,8 @@ function handleNewCalculation() {
         winningNumber: null,
         pocketDistance: null,
         recommendedGroupId: null,
-        recommendationDetails: null
+        recommendationDetails: null,
+        failureMode: 'pending' // Initialize failureMode
     };
     state.history.push(newHistoryItem);
 
@@ -686,7 +687,7 @@ function handleSubmitResult() {
         .map(item => item.winningNumber);
     state.setConfirmedWinsLog(newLog);
 
-    // Re-label failures across the entire history based on the latest context
+    // NEW: Re-label failures across the entire history based on the latest context
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
 
 
@@ -747,6 +748,7 @@ function handleHistoryAction(event) {
     const newLog = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
     state.setConfirmedWinsLog(newLog);
     
+    // NEW: Re-label failures after a history item is deleted
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
     
     analysis.runAllAnalyses(); // Use analysis.runAllAnalyses after history change
