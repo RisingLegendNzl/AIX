@@ -1,7 +1,7 @@
 // js/analysis.js
 
 // --- IMPORTS ---
-import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
+import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus, calculatePocketDistance } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
@@ -394,8 +394,11 @@ export async function runAllAnalyses(winningNumber = null) {
     if (!isNaN(num1Val) && !isNaN(num2Val)) {
         // --- Get AI Prediction ---
         ui.updateAiStatus('AI Model: Getting prediction...');
-        // Pass recent repeat/neighbor data for AI prediction as well
-        const aiPredictionData = await getAiPrediction(state.history);
+        // NEW: Pass repeat and neighbor hit data to AI prediction
+        const isCurrentRepeat = isRepeatNumber(lastWinning, state.history);
+        const isCurrentNeighborHit = isNeighborHit(lastWinning, state.history);
+
+        const aiPredictionData = await getAiPrediction(state.history); // AI will process repeat/neighbor info internally
         ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
@@ -416,6 +419,9 @@ export async function runAllAnalyses(winningNumber = null) {
             rollingPerformance: rollingPerformance, // PASS ROLLING PERFORMANCE DATA
             factorShiftStatus: factorShiftStatus, // PASS FACTOR SHIFT STATUS
             useLowestPocketDistanceBool: state.useLowestPocketDistance, // Pass pocket distance toggle
+            // NEW: Pass repeat/neighbor hit status to recommendation for potential special handling or display
+            isCurrentRepeat: isCurrentRepeat,
+            isCurrentNeighborHit: isCurrentNeighborHit,
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
