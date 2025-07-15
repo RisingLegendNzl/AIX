@@ -316,14 +316,6 @@
             visibility: visible;
             display: block;
         }
-        .ai-details-section ul {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-        .ai-details-section li {
-            margin-bottom: 4px;
-        }
         .ai-details-toggle {
             display: block;
             width: fit-content;
@@ -490,6 +482,14 @@
                     <pre id="bestParamsResult" class="text-xs bg-white p-2 rounded-md mt-2 overflow-x-auto"></pre>
                     <button id="applyBestParamsButton" class="w-full btn btn-secondary mt-3">Apply These Settings</button>
                 </div>
+            </div>
+
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">RL Adaptive Tuner</h2>
+                <p class="text-sm text-gray-500">
+                    Reinforcement Learning agent dynamically adjusts adaptive rates for optimal performance.
+                </p>
+                <div id="rlModelStatus" class="text-sm text-gray-700 text-center font-medium">RL Model: Initializing...</div>
             </div>
 
             <div class="card p-8">
@@ -659,6 +659,11 @@
                         <input type="checkbox" id="dynamicTerminalNeighbourCountToggle" class="toggle-checkbox">
                         <div class="toggle-switch"><div class="toggle-knob"></div></div>
                     </label>
+                     <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Reinforcement Learning (RL)</span>
+                        <input type="checkbox" id="reinforcementLearningToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
                 </div>
             </div>
 
@@ -713,7 +718,7 @@
                         <button id="resetParametersButton" class="btn btn-secondary">Reset to Defaults</button>
                         <button id="saveParametersButton" class="btn btn-secondary">Save Parameters to File</button>
                         <input type="file" id="loadParametersInput" class="hidden" accept=".json">
-                        <label for="loadParametersInput" id="loadParametersLabel" class="w-full text-center btn btn-secondary cursor-pointer">Load Parameters from File</label>
+                        <label for="loadParametersInput" id="loadParametersInput" class="w-full text-center btn btn-secondary cursor-pointer">Load Parameters from File</label>
                     </div>
 
                     <p id="parameterStatusMessage" class="text-sm text-center text-gray-600 mt-2 h-4"></p>
