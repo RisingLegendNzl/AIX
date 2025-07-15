@@ -182,7 +182,6 @@
                 </div>
 
                 <div id="resultDisplay" class="hidden"></div>
-
                 <div id="patternAlert" class="pattern-alert hidden"></div>
 
                 <div id="winningNumberSection" class="pt-4 border-t border-gray-200 space-y-2">
@@ -215,13 +214,13 @@
                 <div id="rouletteWheelContainer"></div>
                 <div class="mt-4 grid grid-cols-2 gap-2 text-sm" id="rouletteLegend"></div>
             </div>
-            
+
             <div class="card p-8 space-y-4">
-                <h2 class="text-xl font-bold text-gray-700">Global Analysis</h2>
-                <p class="text-sm text-gray-500">Recalculate all analysis panels based on the current strategy settings. This is useful for back-testing strategies on the entire loaded history.</p>
-                <button id="recalculateAnalysisButton" class="w-full btn btn-secondary mt-2">Recalculate All Analyses</button>
+                <h2 class="text-xl font-bold text-gray-700">System Status</h2>
+                <div id="systemStatusDisplay" class="pt-2">
+                    </div>
             </div>
-            
+
             <div class="card p-8 space-y-4">
                 <h2 class="text-xl font-bold text-gray-700">Deep Trend Analysis</h2>
                 <p class="text-sm text-gray-500">Continuous analysis of group performance from a dedicated worker.</p>
@@ -229,7 +228,7 @@
                     <p class="text-center text-gray-500 py-4">Awaiting first trend report...</p>
                 </div>
             </div>
-
+            
             <div class="card p-8 space-y-4">
                 <h2 class="text-xl font-bold text-gray-700">AI Data Input & Training</h2>
                 <p class="text-sm text-gray-500">Paste numbers separated by space, comma, or newline, from newest to oldest.</p>
@@ -263,76 +262,8 @@
                     <button id="applyBestParamsButton" class="w-full btn btn-secondary mt-3">Apply These Settings</button>
                 </div>
             </div>
-
-            <div class="card p-8">
-                <div id="presetStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Strategy Presets</h2>
-                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
-                </div>
-                <div id="presetStrategyGuideContent" class="strategy-guide-content"></div>
-                <div class="pt-4 grid grid-cols-1 md:grid-cols-3 gap-2">
-                    <button id="setHighestWinRatePreset" class="btn btn-secondary text-sm">Highest Win Rate</button>
-                    <button id="setBalancedSafePreset" class="btn btn-secondary text-sm">Balanced & Safe</button>
-                    <button id="setAggressiveSignalsPreset" class="btn btn-secondary text-sm">Aggressive</button>
-                </div>
-            </div>
-
-            <div class="card p-8">
-                <div id="baseStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Base Strategies</h2>
-                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
-                </div>
-                <div id="baseStrategyGuideContent" class="strategy-guide-content"></div>
-                <div class="pt-2 divide-y divide-gray-200">
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Wait for Trend Confirmation</span><input type="checkbox" id="trendConfirmationToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Use Neighbour Score Weighting</span><input type="checkbox" id="weightedZoneToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Use Proximity Boost</span><input type="checkbox" id="proximityBoostToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Show Pocket Distance</span><input type="checkbox" id="pocketDistanceToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Prioritize Lowest Pocket Distance</span><input type="checkbox" id="lowestPocketDistanceToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Enable Advanced Calculations</span><input type="checkbox" id="advancedCalculationsToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                </div>
-            </div>
             
-            <div class="card p-8">
-                <div id="advancedStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Advanced Strategies</h2>
-                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
-                </div>
-                <div id="advancedStrategyGuideContent" class="strategy-guide-content"></div>
-                <div class="pt-2 divide-y divide-gray-200">
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Dynamic Best Strategy</span><input type="checkbox" id="dynamicStrategyToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Adaptive Play Signals</span><input type="checkbox" id="adaptivePlayToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Table Change Warnings</span><input type="checkbox" id="tableChangeWarningsToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Due for a Hit (Contrarian)</span><input type="checkbox" id="dueForHitToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Neighbour Focus</span><input type="checkbox" id="neighbourFocusToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Less Strict Mode</span><input type="checkbox" id="lessStrictModeToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                    <label class="toggle-label"><span class="font-medium text-gray-700">Dynamic Terminal Neighbour Count</span><input type="checkbox" id="dynamicTerminalNeighbourCountToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
-                </div>
-            </div>
-
-            <div class="card p-8">
-                <div id="advancedSettingsHeader" class="flex justify-between items-center cursor-pointer">
-                    <h2 class="text-xl font-bold text-gray-700">Advanced Settings</h2>
-                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">Adjust Parameters</button>
-                </div>
-                <div id="advancedSettingsContent" class="strategy-guide-content space-y-6"></div>
-            </div>
-            
-            <div class="card p-8 space-y-4">
-                <h2 class="text-xl font-bold text-gray-700">Board State Analysis</h2>
-                <div id="boardStateAnalysis" class="space-y-2"></div>
-                <p id="boardStateConclusion" class="text-center font-bold pt-2"></p>
-            </div>
-            <div class="card p-8 space-y-4">
-                <h2 class="text-xl font-bold text-gray-700">Dynamic Strategy Weights</h2>
-                <div id="strategyWeightsDisplay" class="space-y-3"></div>
-            </div>
-            <div class="card p-8 space-y-4">
-                <h2 class="text-xl font-bold text-gray-700">Neighbour Analysis</h2>
-                <p class="text-sm text-gray-500">Analysis of neighboring numbers based on successes.</p>
-                <ul id="analysisList" class="analysis-list space-y-1"></ul>
-            </div>
-        </aside>
+            </aside>
     </div>
 
     <script type="module" src="js/main.js"></script>
