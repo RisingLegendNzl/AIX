@@ -45,31 +45,52 @@ export function getAiPrediction(history) {
     });
 }
 
-
+/**
+ * NEW: Iterates through the history to label each failure with a specific reason.
+ * This provides crucial context for the AI model.
+ * @param {Array} sortedHistory - The history array, sorted chronologically from oldest to newest.
+ */
 export function labelHistoryFailures(sortedHistory) {
     let lastSuccessfulType = null;
+
     sortedHistory.forEach((item) => {
-        if (item.status === 'pending' || item.winningNumber === null) return;
+        // Skip items that are not yet resolved
+        if (item.status === 'pending' || item.winningNumber === null) {
+            item.failureMode = 'pending'; // Or some other placeholder
+            return;
+        }
+
+        // If the recommendation was a success, label it as 'none' and update the last successful type.
         if (item.status === 'success') {
             item.failureMode = 'none';
+            // Only update lastSuccessfulType if the success was from an actual recommended play
             if (item.recommendedGroupId && item.hitTypes.includes(item.recommendedGroupId)) {
                 lastSuccessfulType = item.recommendedGroupId;
             }
             return;
         }
+
+        // If we reach here, the item is a failure. Now we categorize it.
         if (item.recommendedGroupId) {
+            // If the system recommended the same group that was previously successful, it's a 'streakBreak'.
             if (lastSuccessfulType && item.recommendedGroupId === lastSuccessfulType) {
                 item.failureMode = 'streakBreak';
-            } else if (lastSuccessfulType && item.recommendedGroupId !== lastSuccessfulType) {
+            } 
+            // If the system tried to switch to a new group and failed, it's a 'sectionShift'.
+            else if (lastSuccessfulType && item.recommendedGroupId !== lastSuccessfulType) {
                 item.failureMode = 'sectionShift';
-            } else {
+            } 
+            // Otherwise, it's a standard loss with no specific trend context.
+            else {
                 item.failureMode = 'normalLoss';
             }
         } else {
+            // If there was no recommendation, it's also a normal loss in terms of context.
             item.failureMode = 'normalLoss';
         }
     });
 }
+
 
 /**
  * Calculates rolling performance metrics for table change warnings.
@@ -485,6 +506,8 @@ export async function handleHistoricalAnalysis() {
     
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
+    
+    // NEW: Label the failures in the newly simulated history before training the AI
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
