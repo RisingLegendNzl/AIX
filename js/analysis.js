@@ -249,6 +249,52 @@ export function analyzeFactorShift(history, strategyConfig) {
     return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
 }
 
+/**
+ * Detects if the winning number is a repeat of a number in the recent history (within SEQUENCE_LENGTH).
+ * @param {number} winningNumber - The current winning number.
+ * @param {Array} history - The current full history.
+ * @param {number} recentHistoryLength - How many recent spins to check for repeats.
+ * @returns {boolean} True if repeat detected.
+ */
+export function isRepeatNumber(winningNumber, history, recentHistoryLength = config.AI_CONFIG.sequenceLength) {
+    if (history.length === 0) return false;
+    const relevantHistory = history
+        .filter(item => item.winningNumber !== null) // Only confirmed spins
+        .sort((a, b) => b.id - a.id) // Newest first
+        .slice(0, recentHistoryLength); // Get only the recent spins
+
+    return relevantHistory.some(item => item.winningNumber === winningNumber);
+}
+
+/**
+ * Detects if the winning number is a neighbor of a number in the recent history (within SEQUENCE_LENGTH).
+ * @param {number} winningNumber - The current winning number.
+ * @param {Array} history - The current full history.
+ * @param {number} recentHistoryLength - How many recent spins to check for neighbors.
+ * @param {Array} rouletteWheel - The ordered roulette wheel array.
+ * @param {number} neighborDistance - The maximum distance to consider a neighbor (e.g., 1 or 2).
+ * @returns {boolean} True if neighbor hit detected.
+ */
+export function isNeighborHit(winningNumber, history, recentHistoryLength = config.AI_CONFIG.sequenceLength, rouletteWheel = config.rouletteWheel, neighborDistance = 1) {
+    if (history.length === 0) return false;
+    const relevantHistory = history
+        .filter(item => item.winningNumber !== null) // Only confirmed spins
+        .sort((a, b) => b.id - a.id) // Newest first
+        .slice(0, recentHistoryLength); // Get only the recent spins
+
+    for (const item of relevantHistory) {
+        const lastSpin = item.winningNumber;
+        if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
+        
+        // Calculate pocket distance between current winning number and the historical spin
+        const distance = calculatePocketDistance(winningNumber, lastSpin, rouletteWheel);
+        if (distance <= neighborDistance) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
@@ -348,6 +394,7 @@ export async function runAllAnalyses(winningNumber = null) {
     if (!isNaN(num1Val) && !isNaN(num2Val)) {
         // --- Get AI Prediction ---
         ui.updateAiStatus('AI Model: Getting prediction...');
+        // Pass recent repeat/neighbor data for AI prediction as well
         const aiPredictionData = await getAiPrediction(state.history);
         ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
