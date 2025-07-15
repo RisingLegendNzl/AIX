@@ -5,21 +5,26 @@ import * as state from './state.js';
 import * as config from './config.js';
 
 // Import specific UI functions needed, NOT the whole module
-import { updateAiStatus, updateOptimizationStatus, showOptimizationComplete, showOptimizationStopped, toggleParameterSliders } from './ui.js'; // ADDED: toggleParameterSliders
+import { 
+    updateAiStatus, 
+    updateOptimizationStatus, 
+    showOptimizationComplete, 
+    showOptimizationStopped, 
+    toggleParameterSliders,
+    renderTrendAnalysis // NEW: Import the trend analysis renderer
+} from './ui.js';
 import * as dom from './ui.js'; // Import dom elements from ui.js for button references
 
 
 // --- WORKER INITIALIZATION ---
 export let aiWorker;
 export let optimizationWorker;
-// NEW: Define the Trend Worker
 export let trendWorker;
 
 export function initializeWorkers() {
     // Corrected paths to point inside the /js folder
     aiWorker = new Worker('js/aiWorker.js', { type: 'module' });
     optimizationWorker = new Worker('js/optimizationWorker.js', { type: 'module' });
-    // NEW: Initialize the Trend Worker
     trendWorker = new Worker('js/trendWorker.js', { type: 'module' });
 
     // --- WORKER MESSAGE HANDLERS ---
@@ -57,11 +62,11 @@ export function initializeWorkers() {
                     <br>Best W/L Ratio: <strong>${payload.bestFitness}</strong>
                 `;
                 updateOptimizationStatus(progressHtml);
-                state.setBestFoundParams(payload); // Store the entire payload to include bestIndividual and togglesUsed
+                state.setBestFoundParams(payload);
                 break;
             case 'complete':
                 showOptimizationComplete(payload);
-                state.setBestFoundParams(payload); // Store the entire payload here as well
+                state.setBestFoundParams(payload);
                 break;
             case 'stopped':
                 showOptimizationStopped();
@@ -74,7 +79,6 @@ export function initializeWorkers() {
         }
     };
     
-    // NEW: Add a message handler for the Trend Worker
     trendWorker.onmessage = (event) => {
         const { type, payload } = event.data;
         if (config.DEBUG_MODE) console.log(`Main: Received from Trend Worker: ${type}`);
@@ -83,6 +87,8 @@ export function initializeWorkers() {
             case 'trendReport':
                 // Update the central state with the new analysis
                 state.setTrendWorkerAnalysis(payload);
+                // NEW: Render the new UI component with the analysis payload
+                renderTrendAnalysis(payload);
                 if (config.DEBUG_MODE) {
                     console.log('Trend Analysis Report Updated:', payload);
                 }
