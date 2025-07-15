@@ -206,7 +206,8 @@ export function getRecommendation(context) {
         currentAdaptiveInfluences, lastWinningNumber,
         useProximityBoostBool, useWeightedZoneBool, useNeighbourFocusBool,
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
-        useTableChangeWarningsBool, rollingPerformance, useLowestPocketDistanceBool, // ADDED: useLowestPocketDistanceBool
+        useTableChangeWarningsBool, rollingPerformance, factorShiftStatus, // ADDED: factorShiftStatus
+        useLowestPocketDistanceBool, 
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
@@ -450,6 +451,12 @@ export function getRecommendation(context) {
             warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
         }
 
+        // NEW: Check for Primary Factor Shift
+        if (!tableChangeDetected && factorShiftStatus && factorShiftStatus.factorShiftDetected) {
+            tableChangeDetected = true;
+            warningReason = `Factor Shift: ${factorShiftStatus.reason}`;
+        }
+
         if (tableChangeDetected) {
             signal = 'Avoid Play';
             signalColor = "text-red-700";
@@ -457,7 +464,7 @@ export function getRecommendation(context) {
             // For 'Avoid Play', bestCandidate should be null as no recommendation to bet is given
             // The HTML generation needs to use 'details' from the original bestCandidate, but return null for bestCandidate itself.
             let tempDetails = { ...bestCandidate.details, signal: signal, reason: reason }; // Clone and add signal/reason for history
-            let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
+            let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore?.toFixed(2) || 'N/A'}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
             
             return { html: finalHtmlForAvoid, bestCandidate: null, details: tempDetails, signal: signal, reason: reason };
         }
@@ -584,6 +591,11 @@ export function getRecommendation(context) {
             if (!tableChangeDetected && rollingPerformance.rollingWinRate < effectiveStrategyConfig.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
                 tableChangeDetected = true;
                 warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
+            }
+            // NEW: Check for Primary Factor Shift
+            if (!tableChangeDetected && factorShiftStatus && factorShiftStatus.factorShiftDetected) {
+                tableChangeDetected = true;
+                warningReason = `Factor Shift: ${factorShiftStatus.reason}`;
             }
 
             if (tableChangeDetected) {
