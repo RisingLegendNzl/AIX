@@ -158,11 +158,17 @@ export function updateWinLossCounter() {
     let losses = 0;
 
     state.history.forEach(item => {
-        if (item.recommendedGroupId) {
+        // Only count wins/losses if a recommendation was explicitly made
+        // and a winning number was entered for that round.
+        if (item.recommendedGroupId && item.winningNumber !== null) {
+            // Check if the recommended group hit
             if (item.hitTypes && item.hitTypes.includes(item.recommendedGroupId)) {
                 wins++;
-            } else if (item.winningNumber !== null) {
-                losses++;
+            } else {
+                // Only count as a loss if an explicit "Play" signal was given (finalScore > 0)
+                if (item.recommendationDetails && item.recommendationDetails.finalScore > 0) {
+                     losses++;
+                }
             }
         }
     });
