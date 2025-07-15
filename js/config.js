@@ -290,17 +290,18 @@ export const clonablePredictionTypes = allPredictionTypes.map(type => ({
 
 // --- Genetic Algorithm Configuration ---
 export const GA_CONFIG = {
-    populationSize: 50, // RESTORED to original value
+    populationSize: 50,
     mutationRate: 0.15,
     crossoverRate: 0.7,
-    eliteCount: 4,      // RESTORED to original value
-    maxGenerations: 100 // RESTORED to original value
+    eliteCount: 4,
+    maxGenerations: 100
 };
 
 // --- AI Model Configuration ---
 export const AI_CONFIG = {
     sequenceLength: 5,
     trainingMinHistory: 10,
+    // NEW: Define the failure modes for the AI to learn
     failureModes: ['none', 'normalLoss', 'streakBreak', 'sectionShift'],
     ensemble_config: [
         {
