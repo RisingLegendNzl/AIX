@@ -682,7 +682,7 @@ function handleSubmitResult() {
     state.setConfirmedWinsLog(newLog);
 
     // Re-label failures across the entire history based on the latest context
-    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // FIXED: Call analysis.labelHistoryFailures
 
 
     // --- CRITICAL: AI Prediction is asynchronous. Call runAllAnalyses AFTER current history update ---
@@ -742,7 +742,7 @@ function handleHistoryAction(event) {
     const newLog = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
     state.setConfirmedWinsLog(newLog);
     
-    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // Use analysis.labelHistoryFailures
     
     analysis.runAllAnalyses(); // Use analysis.runAllAnalyses after history change
     renderHistory();
@@ -1024,7 +1024,7 @@ export function toggleParameterSliders(enable) {
                 categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
             }
             // NEW: Handle warning parameters category
-            else if (parameterDefinitions[paramName].category === 'warningParameters') { // FIXED: Corrected category check
+            else if (parameterDefinitions[paramName].category === 'warningParameters') { 
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked; // Link to core strategy optimization
             }
             
@@ -1121,7 +1121,7 @@ function attachGuideAndInfoListeners() {
     // Guide toggles
     document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
     document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
-    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
+    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
     document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
 
 
