@@ -1,7 +1,7 @@
 // js/analysis.js
 
 // --- IMPORTS ---
-import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
+import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus, analyzeFactorShift } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
@@ -121,7 +121,7 @@ function determineSystemMode(context) {
  * @param {Array} history - The full history log.
  * @param {object} strategyConfig - The current strategy configuration.
  * @returns {object} Contains rolling win rate and consecutive losses for plays.
- */
+*/
 export function calculateRollingPerformance(history, strategyConfig) {
     let winsInWindow = 0;
     let lossesInWindow = 0;
