@@ -40,26 +40,11 @@ console.log('TensorFlow.js tf object in aiWorker (from self.tf):', tf);
 
 
 // --- ENSEMBLE CONFIGURATION ---
-const ENSEMBLE_CONFIG = [
-    {
-        name: 'Specialist',
-        path: 'roulette-ml-model-specialist',
-        lstmUnits: 16, // Smaller, faster model
-        epochs: 40,
-        batchSize: 32,
-    },
-    {
-        name: 'Generalist',
-        path: 'roulette-ml-model-generalist',
-        lstmUnits: 64, // Larger, more complex model
-        epochs: 60,
-        batchSize: 16,
-    }
-];
-
-const SEQUENCE_LENGTH = 5;
-const TRAINING_MIN_HISTORY = 10;
-const failureModes = ['none', 'normalLoss', 'streakBreak', 'sectionShift'];
+const ENSEMBLE_CONFIG = config.AI_CONFIG.ensemble_config;
+const SEQUENCE_LENGTH = config.AI_CONFIG.sequenceLength;
+const TRAINING_MIN_HISTORY = config.AI_CONFIG.trainingMinHistory;
+// NEW: Get failure modes from the config
+const failureModes = config.AI_CONFIG.failureModes;
 
 let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
 let terminalMapping = {};
@@ -180,7 +165,7 @@ const scaleFeature = (value, index, scaler) => {
 
 // Function to prepare data, now includes consecutive hit/miss features
 function prepareDataForLSTM(historyData, historicalStreakData) {
-    const validHistory = historyData.filter(item => item.status === 'success' && item.winningNumber !== null);
+    const validHistory = historyData.filter(item => item.status === 'success' || (item.status === 'fail' && item.winningNumber !== null));
     if (validHistory.length < SEQUENCE_LENGTH + 1) {
         self.postMessage({ type: 'status', message: `AI Model: Need at least ${TRAINING_MIN_HISTORY} confirmed spins to train.` });
         return { xs: null, ys: null, scaler: null, featureCount: 0 };
@@ -224,6 +209,7 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
 
     let rawFeatures = [];
     let rawGroupLabels = [];
+    // NEW: Add array for failure mode labels
     let rawFailureLabels = [];
     let rawStreakLengthLabels = [];
 
@@ -239,6 +225,8 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         rawFeatures.push(xs_row);
 
         rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
+        
+        // NEW: Create the one-hot encoded label for the failure mode
         rawFailureLabels.push(failureModes.map(mode => (targetItem.failureMode === mode ? 1 : 0)));
 
         const streakLengthLabel = config.allPredictionTypes.map(type => {
@@ -277,6 +265,7 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     const xs = scaledFeatures.length > 0 ? tf.tensor3d(scaledFeatures) : null;
     const ys = {
         group_output: rawGroupLabels.length > 0 ? tf.tensor2d(rawGroupLabels) : null,
+        // NEW: Add failure labels tensor
         failure_output: rawFailureLabels.length > 0 ? tf.tensor2d(rawFailureLabels) : null,
         streak_output: rawStreakLengthLabels.length > 0 ? tf.tensor2d(rawStreakLengthLabels) : null
     };
@@ -284,7 +273,7 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     return { xs, ys, scaler: newScaler, featureCount };
 }
 
-// Function to create model, now with a third output for streaks
+// NEW: Function to create model now includes a third output for failure modes
 function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputUnits, streakOutputUnits, lstmUnits) {
     const input = tf.input({ shape: inputShape });
     const lstmLayer = tf.layers.lstm({
@@ -297,6 +286,7 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
     const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
 
     const groupOutput = tf.layers.dense({ units: groupOutputUnits, activation: 'sigmoid', name: 'group_output' }).apply(dropoutLayer);
+    // NEW: Add the failure mode output layer with softmax for multi-class classification
     const failureOutput = tf.layers.dense({ units: failureOutputUnits, activation: 'softmax', name: 'failure_output' }).apply(dropoutLayer);
     const streakOutput = tf.layers.dense({ units: streakOutputUnits, activation: 'relu', name: 'streak_output' }).apply(dropoutLayer);
 
@@ -306,6 +296,7 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
         optimizer: tf.train.adam(),
         loss: {
             'group_output': 'binaryCrossentropy',
+            // NEW: Use categoricalCrossentropy for the softmax failure output
             'failure_output': 'categoricalCrossentropy',
             'streak_output': 'meanSquaredError'
         },
@@ -336,6 +327,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
     ensemble.forEach(member => member.scaler = scaler);
 
     const groupLabelCount = config.allPredictionTypes.length;
+    // NEW: Get the count for failure mode labels
     const failureLabelCount = failureModes.length;
     const streakLabelCount = config.allPredictionTypes.length;
 
@@ -344,6 +336,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
             self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name}...` });
             if (member.model) member.model.dispose();
 
+            // NEW: Create the model with the failure output units
             member.model = createMultiOutputLSTMModel([SEQUENCE_LENGTH, featureCount], groupLabelCount, failureLabelCount, streakLabelCount, member.lstmUnits);
 
             await member.model.fit(xs, ys, {
@@ -365,6 +358,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
 
     xs.dispose();
     if (ys.group_output) ys.group_output.dispose();
+    // NEW: Dispose the failure tensor
     if (ys.failure_output) ys.failure_output.dispose();
     if (ys.streak_output) ys.streak_output.dispose();
     isTraining = false;
@@ -378,7 +372,7 @@ async function predictWithEnsemble(historyData) {
     const activeModels = ensemble.filter(m => m.model && m.scaler);
     if (activeModels.length === 0) return null;
 
-    const validHistory = historyData.filter(item => item.status === 'success' && item.winningNumber !== null);
+    const validHistory = historyData.filter(item => item.status === 'success' || (item.status === 'fail' && item.winningNumber !== null));
     if (validHistory.length < SEQUENCE_LENGTH) return null;
 
     const lastSequence = validHistory.slice(-SEQUENCE_LENGTH);
@@ -421,7 +415,6 @@ async function predictWithEnsemble(historyData) {
     try {
         const inputFeatures = lastSequence.map((item, idx) => {
             // For prediction, the context slice should be up to the current item being processed in the sequence relative to the *full* validHistory.
-            // If lastSequence is `validHistory.slice(-SEQUENCE_LENGTH)`, then the context for item at `idx` in `lastSequence` is `validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1)`
             const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
             return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler)); // Pass scaler here
         });
@@ -432,11 +425,13 @@ async function predictWithEnsemble(historyData) {
 
         // Average the predictions
         const averagedGroupProbs = new Float32Array(config.allPredictionTypes.length).fill(0);
+        // NEW: Add array for failure probabilities
         const averagedFailureProbs = new Float32Array(failureModes.length).fill(0);
         const averagedStreakPreds = new Float32Array(config.allPredictionTypes.length).fill(0);
 
         for (const prediction of allPredictions) {
             const groupProbs = await prediction[0].data();
+            // NEW: Get failure probabilities from the second output
             const failureProbs = await prediction[1].data();
             const streakPreds = await prediction[2].data();
 
@@ -453,6 +448,7 @@ async function predictWithEnsemble(historyData) {
         averagedFailureProbs.forEach((p, i) => averagedFailureProbs[i] /= allPredictions.length);
         averagedStreakPreds.forEach((p, i) => averagedStreakPreds[i] /= allPredictions.length);
 
+        // NEW: Include failure probabilities in the final result
         const finalResult = { groups: {}, failures: {}, streakPredictions: {} };
         config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
