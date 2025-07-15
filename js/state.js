@@ -8,6 +8,8 @@ export let isAiReady = false;
 export let bestFoundParams = null;
 export let currentVideoURL = null;
 export let activePredictionTypes = [];
+// NEW: State to hold the analysis from the Trend Worker
+export let trendWorkerAnalysis = null; 
 
 export let strategyStates = {
     weightedZone: { weight: 1.0, name: 'Neighbour Weighting' },
@@ -47,6 +49,8 @@ export function setIsAiReady(value) { isAiReady = value; }
 export function setBestFoundParams(params) { bestFoundParams = params; }
 export function setCurrentVideoURL(url) { currentVideoURL = url; }
 export function setActivePredictionTypes(types) { activePredictionTypes = types; }
+// NEW: Setter for the Trend Worker analysis
+export function setTrendWorkerAnalysis(analysis) { trendWorkerAnalysis = analysis; }
 export function setStrategyStates(states) { strategyStates = states; }
 export function setPatternMemory(memory) { patternMemory = memory; }
 export function setAdaptiveFactorInfluences(influences) { adaptiveFactorInfluences = influences; }
