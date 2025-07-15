@@ -5,7 +5,7 @@ import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSha
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
-import { aiWorker } from './workers.js';
+import { aiWorker, trendWorker } from './workers.js';
 import { calculatePocketDistance } from './shared-logic.js'; // Ensure calculatePocketDistance is imported for local helpers
 
 
@@ -200,12 +200,6 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
                 consecutiveMisses[type.id] = 0;
             }
         });
-        // If no types were evaluated in this item at all, it's like a break in the chain for all relevant types.
-        // This outer break is likely not needed if inner loop handles it for each type.
-        // Removing for now for more precise per-type tracking.
-        // if (!allTypesEvaluatedForThisItem) {
-        //     break;
-        // }
     }
 
     return { consecutiveHits, consecutiveMisses };
@@ -248,27 +242,19 @@ export function analyzeFactorShift(history, strategyConfig) {
             dominantFactorPercentage = percentage;
             dominantFactor = factor;
         }
-        // A simple way to measure diversity: sum of squares of proportions. Lower is more diverse.
         diversityScore += Math.pow(factorCounts[factor] / totalFactorsConsidered, 2);
     });
 
-    // Check for lack of dominance (factors are too spread out)
     if (dominantFactorPercentage < strategyConfig.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT) {
         factorShiftDetected = true;
         reason = `No single dominant primary factor (${dominantFactorPercentage.toFixed(1)}%) in recent successful plays.`;
     }
 
-    // Check for high diversity (if diversity score is below a threshold, meaning many different factors are hitting)
-    // The diversity threshold is usually 1 - (1/N) where N is number of unique factors, but can be a set value.
-    // Let's use 1 - WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD for simplicity, if diversityScore is *less* than that, it's diverse.
     if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) {
         factorShiftDetected = true;
         reason = `High diversity of primary factors in recent successful plays.`;
     }
     
-    // You could also add logic to compare the *current* dominant factor to the *historical* dominant factor,
-    // but that would require storing and comparing historical factor dominance. For now, this focuses on recent diversity/lack of dominance.
-
     return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
 }
 
@@ -309,7 +295,6 @@ export function isNeighborHit(winningNumber, history, recentHistoryLength = conf
         const lastSpin = item.winningNumber;
         if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
         
-        // Calculate pocket distance between current winning number and the historical spin
         const distance = calculatePocketDistance(winningNumber, lastSpin, rouletteWheel);
         if (distance <= neighborDistance) {
             return true;
@@ -336,7 +321,6 @@ function runSimulationOnHistory(spinsToProcess) {
         const num2 = spinsToProcess[i - 1];
         const winningNumber = spinsToProcess[i];
         
-        // --- Apply forget factor to adaptive influences before current spin's recommendation ---
         for (const factorName in localAdaptiveFactorInfluences) {
             localAdaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
         }
@@ -352,8 +336,8 @@ function runSimulationOnHistory(spinsToProcess) {
             useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
-            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, // Use the current config for simulation
-            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory, // Use current adaptive rates config
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory, 
             activePredictionTypes: state.activePredictionTypes,
             useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
             terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
@@ -368,17 +352,15 @@ function runSimulationOnHistory(spinsToProcess) {
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
-        // Apply adaptive influence updates within the simulation
         if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
-            // Calculate influence change magnitude based on finalScore
             const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
             
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
             if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)); // Add confidence-weighted part
+                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude));
             } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)); // Subtract confidence-weighted part
+                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude));
             }
         }
 
@@ -391,20 +373,15 @@ function runSimulationOnHistory(spinsToProcess) {
 }
 
 export async function runAllAnalyses(winningNumber = null) {
-    // --- Apply forget factor to current adaptive influences BEFORE calculating new recommendation ---
     for (const factorName in state.adaptiveFactorInfluences) {
         state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
     }
-    state.saveState(); // Save state after applying forget factor
+    state.saveState();
 
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    
-    // Calculate rolling performance for table change warnings
     const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
-
-    // NEW: Calculate factor shift status
     const factorShiftStatus = analyzeFactorShift(state.history, config.STRATEGY_CONFIG);
 
     ui.renderAnalysisList(neighbourScores);
@@ -415,33 +392,30 @@ export async function runAllAnalyses(winningNumber = null) {
     const num2Val = parseInt(document.getElementById('number2').value, 10);
 
     if (!isNaN(num1Val) && !isNaN(num2Val)) {
-        // --- Get AI Prediction ---
         ui.updateAiStatus('AI Model: Getting prediction...');
-        // NEW: Pass repeat/neighbor data for AI prediction as well
         const aiPredictionData = await getAiPrediction(state.history); 
         ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
         
-        // --- Pass prediction data to the recommendation engine ---
         const recommendation = getRecommendation({
             trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
             isForWeightUpdate: false, 
-            aiPredictionData, // <-- Pass the awaited data here
+            aiPredictionData, 
             currentAdaptiveInfluences: state.adaptiveFactorInfluences,
             lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, 
-            isAiReadyBool: state.isAiReady, // <-- Pass the readiness state
+            isAiReadyBool: state.isAiReady,
             useTrendConfirmationBool: state.useTrendConfirmation,
-            useAdaptivePlayBool: state.useAdaptivePlay, // Pass adaptive play toggle
-            useLessStrictBool: state.useLessStrict,     // Pass less strict toggle
-            useTableChangeWarningsBool: state.useTableChangeWarnings, // PASS TABLE CHANGE WARNING TOGGLE
-            rollingPerformance: rollingPerformance, // PASS ROLLING PERFORMANCE DATA
-            factorShiftStatus: factorShiftStatus, // PASS FACTOR SHIFT STATUS
-            useLowestPocketDistanceBool: state.useLowestPocketDistance, // Pass pocket distance toggle
-            // NEW: Pass repeat/neighbor hit status to recommendation for potential special handling or display
-            isCurrentRepeat: isRepeatNumber(lastWinning, state.history), // Use the exported function
-            isCurrentNeighborHit: isNeighborHit(lastWinning, state.history), // Use the exported function
+            useAdaptivePlayBool: state.useAdaptivePlay,
+            useLessStrictBool: state.useLessStrict,
+            useTableChangeWarningsBool: state.useTableChangeWarnings,
+            rollingPerformance: rollingPerformance,
+            factorShiftStatus: factorShiftStatus,
+            useLowestPocketDistanceBool: state.useLowestPocketDistance,
+            trendWorkerAnalysis: state.trendWorkerAnalysis, // NEW: Pass trend worker analysis
+            isCurrentRepeat: isRepeatNumber(lastWinning, state.history),
+            isCurrentNeighborHit: isNeighborHit(lastWinning, state.history),
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
@@ -452,8 +426,8 @@ export async function runAllAnalyses(winningNumber = null) {
         if (lastPendingItem) {
             lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
             lastPendingItem.recommendationDetails = recommendation.details;
-            lastPendingItem.recommendationDetails.signal = recommendation.signal; // Ensure signal is stored
-            lastPendingItem.recommendationDetails.reason = recommendation.reason; // Ensure reason is stored
+            lastPendingItem.recommendationDetails.signal = recommendation.signal;
+            lastPendingItem.recommendationDetails.reason = recommendation.reason;
 
             if (winningNumber !== null) {
                 evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -467,6 +441,19 @@ export async function runAllAnalyses(winningNumber = null) {
                 }
             }
         }
+    }
+}
+
+// NEW: Function to trigger the trend analysis worker
+export function triggerTrendAnalysis() {
+    if (trendWorker && state.history.length > 0) {
+        if (config.DEBUG_MODE) console.log('Triggering Trend Analysis Worker...');
+        trendWorker.postMessage({
+            type: 'analyze',
+            payload: {
+                history: state.history
+            }
+        });
     }
 }
 
@@ -506,14 +493,15 @@ export async function handleHistoricalAnalysis() {
     
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
-    
-    // NEW: Label the failures in the newly simulated history before training the AI
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
     await runAllAnalyses();
     ui.renderHistory();
     ui.drawRouletteWheel();
+    
+    // NEW: Trigger the trend worker after loading historical data
+    triggerTrendAnalysis();
     
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
     if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
@@ -547,6 +535,9 @@ export async function handleStrategyChange() {
     
     await runAllAnalyses();
     ui.renderHistory();
+    
+    // NEW: Trigger trend analysis when strategy changes
+    triggerTrendAnalysis();
 
     const num1Val = parseInt(document.getElementById('number1').value, 10);
     const num2Val = parseInt(document.getElementById('number2').value, 10);
@@ -554,7 +545,6 @@ export async function handleStrategyChange() {
     ui.drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
 }
 
-// FIX: Renamed to be more specific. This is for retraining on load.
 export function trainAiOnLoad() {
     if (!aiWorker || !state.isAiReady) {
         return;
@@ -562,14 +552,12 @@ export function trainAiOnLoad() {
 
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
 
-    // FIXED: Corrected the 'else' syntax error by restructuring the if/else logic
     if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
         state.setIsAiReady(false);
         ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
         return;
     }
 
-    // If we reach here, history is sufficient, so proceed with training
     ui.updateAiStatus('AI Model: Re-training with loaded history...');
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); 
     aiWorker.postMessage({ 
@@ -583,7 +571,6 @@ export function trainAiOnLoad() {
     });
 }
 
-// FIX: New function to properly initialize the AI worker on startup.
 export function initializeAi() {
     if (!aiWorker) return;
     const savedScaler = localStorage.getItem('roulette-ml-scaler');
