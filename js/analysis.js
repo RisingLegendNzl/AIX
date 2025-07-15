@@ -2,7 +2,7 @@
 
 // --- IMPORTS ---
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
-import * as config from './config.js';
+import * => config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
 import { aiWorker } from './workers.js';
@@ -128,62 +128,61 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
     const consecutiveHits = {};
     const consecutiveMisses = {};
 
-    // Initialize all types to 0
     allPredictionTypes.forEach(type => {
         consecutiveHits[type.id] = 0;
         consecutiveMisses[type.id] = 0;
     });
 
-    const relevantHistory = [...history]
-        .filter(item => item.status !== 'pending' && item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => a.id - b.id); // Sort oldest to newest to calculate streaks correctly
+    if (history.length === 0) return { consecutiveHits, consecutiveMisses };
 
-    // We process from oldest to newest to correctly build up streaks
-    // But then we return the *current* consecutive count for the *latest* state.
-    // A more efficient way for just the *latest* would be to go reverse from newest.
-    // For AI training, we need values for *each* point in history, so this forward pass is more correct.
+    // Iterate backwards from the most recent item in the subset
+    for (let i = history.length - 1; i >= 0; i--) {
+        const item = history[i];
+        if (item.status === 'pending' || item.winningNumber === null) {
+            // If the item is pending or missing winningNumber, it breaks the streak for all types
+            // that were active up to this point, effectively resetting counts.
+            // For robust AI features, we might need a more nuanced approach for pending.
+            // For now, let's assume only fully evaluated history items contribute to consecutive counts.
+            break; 
+        }
 
-    const tempConsecutiveHits = {};
-    const tempConsecutiveMisses = {};
-    allPredictionTypes.forEach(type => {
-        tempConsecutiveHits[type.id] = 0;
-        tempConsecutiveMisses[type.id] = 0;
-    });
-
-
-    // To get the values *for each point in history* which is what prepareDataForLSTM needs,
-    // we would augment each history item with its consecutive counts *up to that point*.
-    // For now, let's return the counts for the *latest* state, and we'll adjust prepareDataForLSTM later
-    // to derive this contextually for each sequence.
-
-    if (relevantHistory.length > 0) {
-        const latestRelevantItem = relevantHistory[relevantHistory.length - 1];
-
+        let allTypesEvaluatedForThisItem = false;
         allPredictionTypes.forEach(type => {
-            let hits = 0;
-            let misses = 0;
-            // Iterate backwards from the latest relevant item to find the streak
-            for (let i = relevantHistory.length - 1; i >= 0; i--) {
-                const item = relevantHistory[i];
-                if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
-                    if (item.typeSuccessStatus[type.id]) { // Was a hit for this type
-                        hits++;
-                        // If we were counting misses, reset and stop for misses
-                        if (misses > 0) break;
-                    } else { // Was a miss for this type
-                        misses++;
-                        // If we were counting hits, reset and stop for hits
-                        if (hits > 0) break;
+            if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
+                allTypesEvaluatedForThisItem = true; // At least one type was evaluated
+                // Only count if not already started, or if continuing same streak
+                if ((consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) || 
+                    (item.typeSuccessStatus[type.id] && consecutiveHits[type.id] > 0) ||
+                    (!item.typeSuccessStatus[type.id] && consecutiveMisses[type.id] > 0)) {
+                    
+                    if (item.typeSuccessStatus[type.id]) { // Hit
+                        consecutiveHits[type.id]++; 
+                        consecutiveMisses[type.id] = 0; // Reset miss streak
+                    } else { // Miss
+                        consecutiveMisses[type.id]++; 
+                        consecutiveHits[type.id] = 0; // Reset hit streak
                     }
                 } else {
-                    // If type success status isn't available for this type in this item,
-                    // it means this type wasn't active or calculated. Break the streak.
-                    break;
+                    // This means the streak for this specific type was broken by an opposite result earlier in the historySliceForThisItem
+                    // So we effectively stop counting for this type beyond this point for this specific snapshot.
+                    // This logic ensures we're only capturing the *current* consecutive streak.
+                    consecutiveHits[type.id] = 0; // Reset if streak broke earlier
+                    consecutiveMisses[type.id] = 0; // Reset if streak broke earlier
                 }
+            } else {
+                // If type success status isn't available for this type in this item,
+                // it means this type wasn't active or calculated. Break the streak.
+                // Reset for this specific type
+                consecutiveHits[type.id] = 0;
+                consecutiveMisses[type.id] = 0;
             }
-            consecutiveHits[type.id] = hits > 0 ? hits : 0;
-            consecutiveMisses[type.id] = misses > 0 ? misses : 0;
         });
+        // If no types were evaluated in this item at all, it's like a break in the chain for all relevant types.
+        // This outer break is likely not needed if inner loop handles it for each type.
+        // Removing for now for more precise per-type tracking.
+        // if (!allTypesEvaluatedForThisItem) {
+        //     break;
+        // }
     }
 
     return { consecutiveHits, consecutiveMisses };
@@ -193,7 +192,7 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
-    const localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
+    let localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     };
@@ -207,6 +206,11 @@ function runSimulationOnHistory(spinsToProcess) {
         const num2 = spinsToProcess[i - 1];
         const winningNumber = spinsToProcess[i];
         
+        // --- Apply forget factor to adaptive influences before current spin's recommendation ---
+        for (const factorName in localAdaptiveFactorInfluences) {
+            localAdaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+        }
+
         const trendStats = calculateTrendStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
         const boardStats = getBoardStateStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
         const neighbourScores = runSharedNeighbourAnalysis(localHistory, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -254,7 +258,11 @@ function runSimulationOnHistory(spinsToProcess) {
 }
 
 export async function runAllAnalyses(winningNumber = null) {
-    state.saveState();
+    // --- Apply forget factor to current adaptive influences BEFORE calculating new recommendation ---
+    for (const factorName in state.adaptiveFactorInfluences) {
+        state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+    }
+    state.saveState(); // Save state after applying forget factor
 
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -292,6 +300,7 @@ export async function runAllAnalyses(winningNumber = null) {
             useLessStrictBool: state.useLessStrict,     // Pass less strict toggle
             useTableChangeWarningsBool: state.useTableChangeWarnings, // PASS TABLE CHANGE WARNING TOGGLE
             rollingPerformance: rollingPerformance, // PASS ROLLING PERFORMANCE DATA
+            useLowestPocketDistanceBool: state.useLowestPocketDistance, // Pass pocket distance toggle
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
