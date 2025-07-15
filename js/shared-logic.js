@@ -260,6 +260,8 @@ export function getRecommendation(context) {
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
         useTableChangeWarningsBool, rollingPerformance, factorShiftStatus,
         useLowestPocketDistanceBool, 
+        // NEW: Pass in the analysis from the Trend Worker
+        trendWorkerAnalysis,
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
@@ -347,6 +349,14 @@ export function getRecommendation(context) {
             details.mlBoostApplied = rawAiPoints > 0;
             if (rawAiPoints > current_STRATEGY_CONFIG.minAiPointsForReason) details.reason.push(`AI Conf`);
         }
+        
+        // NEW: 6. Trend Worker Boost
+        if (trendWorkerAnalysis && trendWorkerAnalysis.dominantGroup === type.id) {
+            const trendBoostPoints = current_STRATEGY_CONFIG.TREND_WORKER_BOOST * (trendWorkerAnalysis.confidence === 'high' ? 1.5 : 1.0);
+            rawScore += trendBoostPoints;
+            details.individualScores['Statistical Trends'] = trendBoostPoints;
+            if (trendBoostPoints > 0) details.reason.push(`Deep Trend`);
+        }
 
         // --- APPLY ADAPTIVE INFLUENCES ---
         let finalCalculatedScore = 0;
@@ -373,7 +383,7 @@ export function getRecommendation(context) {
         }
 
         details.finalScore = finalCalculatedScore;
-        details.baseScore = rawHitRatePoints + rawStreakPoints; // Re-calculate baseScore with actual points
+        details.baseScore = rawScore;
         details.primaryDrivingFactor = mostInfluentialFactor;
         details.adaptiveInfluenceUsed = currentAdaptiveInfluences[mostInfluentialFactor] || 1.0;
 
