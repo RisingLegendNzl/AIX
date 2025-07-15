@@ -47,7 +47,7 @@ const parameterSpace = {
     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: { min: 1.0, max: 5.0, step: 0.1 },
     HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: { min: 0.1, max: 1.0, step: 0.1 },
     // NEW: Adaptive Influence Forget Factor
-    FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001 }
+    FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001 } // Added FORGET_FACTOR to parameterSpace
 };
 let historyData = [];
 let sharedData = {};
