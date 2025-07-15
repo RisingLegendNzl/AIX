@@ -47,7 +47,10 @@ const parameterSpace = {
     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: { min: 1.0, max: 5.0, step: 0.1 },
     HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: { min: 0.1, max: 1.0, step: 0.1 },
     // NEW: Adaptive Influence Forget Factor
-    FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001 } // Added FORGET_FACTOR to parameterSpace
+    FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001 },
+    // NEW: Confidence weighting for adaptive influence updates
+    CONFIDENCE_WEIGHTING_MULTIPLIER: { min: 0.001, max: 0.1, step: 0.001 },
+    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { min: 0, max: 50, step: 1 }
 };
 let historyData = [];
 let sharedData = {};
@@ -181,7 +184,9 @@ function calculateFitness(individual) {
         FAILURE: individual.adaptiveFailureRate,
         MIN_INFLUENCE: individual.minAdaptiveInfluence,
         MAX_INFLUENCE: individual.maxAdaptiveInfluence,
-        FORGET_FACTOR: individual.FORGET_FACTOR // NEW: Forget factor for simulation
+        FORGET_FACTOR: individual.FORGET_FACTOR, // NEW: Forget factor for simulation
+        CONFIDENCE_WEIGHTING_MULTIPLIER: individual.CONFIDENCE_WEIGHTING_MULTIPLIER, // NEW: Confidence weighting multiplier
+        CONFIDENCE_WEIGHTING_MIN_THRESHOLD: individual.CONFIDENCE_WEIGHTING_MIN_THRESHOLD // NEW: Confidence weighting min threshold
     };
     let wins = 0;
     let losses = 0;
@@ -306,13 +311,16 @@ function calculateFitness(individual) {
         // Apply adaptive influence updates based on the *simulated* outcome and recommendation
         if (simItem.recommendedGroupId && simItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = simItem.recommendationDetails.primaryDrivingFactor;
+            // Calculate influence change magnitude based on finalScore
+            const influenceChangeMagnitude = Math.max(0, simItem.recommendationDetails.finalScore - SIM_ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * SIM_ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+            
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
             // Only update influences if it was an actionable signal (not 'Wait' or 'Avoid')
             if (simItem.recommendationDetails.finalScore > 0 && simItem.recommendationDetails.signal !== 'Avoid Play') {
                 if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
-                    localAdaptiveFactorInfluences[primaryFactor] = Math.min(SIM_ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + SIM_ADAPTIVE_LEARNING_RATES.SUCCESS);
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.min(SIM_ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (SIM_ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)); // Add confidence-weighted part
                 } else {
-                    localAdaptiveFactorInfluences[primaryFactor] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - SIM_ADAPTIVE_LEARNING_RATES.FAILURE);
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (SIM_ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)); // Subtract confidence-weighted part
                 }
             }
         }
