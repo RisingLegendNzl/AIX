@@ -263,7 +263,42 @@
                 </div>
             </div>
             
-            </aside>
+            <div class="card p-8">
+                <div id="advancedStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
+                    <h2 class="text-xl font-bold text-gray-700">Advanced Strategies</h2>
+                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
+                </div>
+                <div id="advancedStrategyGuideContent" class="strategy-guide-content"></div>
+                <div class="pt-2 divide-y divide-gray-200">
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Dynamic Best Strategy</span><input type="checkbox" id="dynamicStrategyToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Adaptive Play Signals</span><input type="checkbox" id="adaptivePlayToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Table Change Warnings</span><input type="checkbox" id="tableChangeWarningsToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Due for a Hit (Contrarian)</span><input type="checkbox" id="dueForHitToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Neighbour Focus</span><input type="checkbox" id="neighbourFocusToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Less Strict Mode</span><input type="checkbox" id="lessStrictModeToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                    <label class="toggle-label"><span class="font-medium text-gray-700">Dynamic Terminal Neighbour Count</span><input type="checkbox" id="dynamicTerminalNeighbourCountToggle" class="toggle-checkbox"><div class="toggle-switch"><div class="toggle-knob"></div></div></label>
+                </div>
+            </div>
+
+            <div class="card p-8">
+                <div id="advancedSettingsHeader" class="flex justify-between items-center cursor-pointer">
+                    <h2 class="text-xl font-bold text-gray-700">Advanced Settings</h2>
+                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">Adjust Parameters</button>
+                </div>
+                <div id="advancedSettingsContent" class="strategy-guide-content space-y-6"></div>
+            </div>
+            
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Board State Analysis</h2>
+                <div id="boardStateAnalysis" class="space-y-2"></div>
+                <p id="boardStateConclusion" class="text-center font-bold pt-2"></p>
+            </div>
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Neighbour Analysis</h2>
+                <p class="text-sm text-gray-500">Analysis of neighboring numbers based on successes.</p>
+                <ul id="analysisList" class="analysis-list space-y-1"></ul>
+            </div>
+        </aside>
     </div>
 
     <script type="module" src="js/main.js"></script>
