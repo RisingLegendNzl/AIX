@@ -69,6 +69,7 @@ export function labelHistoryFailures(sortedHistory) {
     });
 }
 
+// NOTE: This function is still present for historical simulation but not directly used by new single spin processing
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
@@ -107,7 +108,7 @@ function runSimulationOnHistory(spinsToProcess) {
             id: Date.now() + i, num1, num2, difference: Math.abs(num2 - num1), status: 'pending', 
             hitTypes: [], typeSuccessStatus: {}, winningNumber, recommendedGroupId: recommendation.bestCandidate?.type.id || null,
             recommendationDetails: recommendation.bestCandidate?.details || null,
-            signalType: recommendation.signalType // NEW: Store the explicit signal type
+            signalType: recommendation.signalType 
         };
 
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -181,7 +182,7 @@ export async function runAllAnalyses(winningNumber = null) {
         if (lastPendingItem) {
             lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
             lastPendingItem.recommendationDetails = recommendation.details;
-            lastPendingItem.signalType = recommendation.signalType; // NEW: Update signalType for pending item
+            lastPendingItem.signalType = recommendation.signalType; 
 
             if (winningNumber !== null) {
                 evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -199,7 +200,7 @@ export async function runAllAnalyses(winningNumber = null) {
 }
 
 // NEW: Unified function to process a single spin
-async function processSingleSpin(num1, num2, winningNumber = null) {
+export async function processSingleSpin(num1, num2, winningNumber = null) {
     if (isNaN(num1) || isNaN(num2)) {
         console.warn("Invalid numbers provided for spin processing.");
         return;
@@ -223,7 +224,7 @@ async function processSingleSpin(num1, num2, winningNumber = null) {
     });
 
     const newHistoryItem = {
-        id: Date.now() + Math.random(), // Give unique ID
+        id: Date.now() + Math.random(), 
         num1: num1,
         num2: num2,
         difference: Math.abs(num2 - num1),
@@ -275,8 +276,6 @@ async function processSingleSpin(num1, num2, winningNumber = null) {
 
 // MODIFIED: handleNewCalculation now calls unified processSingleSpin
 export function handleNewCalculation() {
-    // Removed state.useLiveData check as the card is not implemented
-    
     const num1Val = parseInt(document.getElementById('number1').value, 10);
     const num2Val = parseInt(document.getElementById('number2').value, 10);
 
@@ -285,13 +284,11 @@ export function handleNewCalculation() {
         document.getElementById('resultDisplay').classList.remove('hidden');
         return;
     }
-    processSingleSpin(num1Val, num2Val); // No winningNumber initially for manual calc
+    processSingleSpin(num1Val, num2Val); 
 }
 
 // MODIFIED: handleSubmitResult now updates existing item and triggers re-analysis
 export function handleSubmitResult() {
-    // Removed state.useLiveData check as the card is not implemented
-
     const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending');
     if (!lastPendingItem) {
         alert("Please perform a calculation first before submitting a winning number.");
@@ -306,11 +303,9 @@ export function handleSubmitResult() {
         return;
     }
 
-    // Update the last pending item directly with the winning number and re-evaluate
     lastPendingItem.winningNumber = winningNumber;
     evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
     
-    // Add to confirmedWinsLog and trigger re-analysis/re-render
     state.confirmedWinsLog.push(winningNumber); 
     runAllAnalyses(winningNumber); 
     ui.renderHistory();
@@ -341,11 +336,10 @@ export async function handleHistoricalAnalysis() {
     }
 
     const historicalSpinsChronological = numbers.slice().reverse();
-    // Simulate each spin individually to build up history correctly, including recommendations and adaptive influences
-    state.setHistory([]); // Clear history before re-simulating
-    state.setConfirmedWinsLog([]); // Clear confirmed log
-    state.setPatternMemory({}); // Clear pattern memory
-    state.setAdaptiveFactorInfluences({ // Reset adaptive influences
+    state.setHistory([]); 
+    state.setConfirmedWinsLog([]); 
+    state.setPatternMemory({}); 
+    state.setAdaptiveFactorInfluences({ 
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     });
@@ -354,13 +348,13 @@ export async function handleHistoricalAnalysis() {
         const num1 = historicalSpinsChronological[i - 2];
         const num2 = historicalSpinsChronological[i - 1];
         const winningNumber = historicalSpinsChronological[i];
-        await processSingleSpin(num1, num2, winningNumber); // Process each as a non-live spin
+        await processSingleSpin(num1, num2, winningNumber); 
     }
     
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
-    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); // Label failures after history is built
-    ui.renderHistory(); // Final render after full simulation
-    ui.drawRouletteWheel(); // Update wheel after full simulation
+    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
+    ui.renderHistory(); 
+    ui.drawRouletteWheel(); 
     
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
     if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
@@ -386,18 +380,15 @@ export async function handleHistoricalAnalysis() {
 export async function handleStrategyChange() {
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
-    // To properly re-evaluate, we need to re-simulate the entire confirmed history
-    // with the new strategy settings applied.
-    state.setHistory([]); // Clear current history
-    state.setConfirmedWinsLog([]); // Clear confirmed log
-    state.setPatternMemory({}); // Reset pattern memory
-    state.setAdaptiveFactorInfluences({ // Reset adaptive influences
+    state.setHistory([]); 
+    state.setConfirmedWinsLog([]); 
+    state.setPatternMemory({}); 
+    state.setAdaptiveFactorInfluences({ 
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     });
 
     if (currentWinningNumbers.length >= 3) {
-        // Re-process each spin with the new strategy
         for (let i = 2; i < currentWinningNumbers.length; i++) {
             const num1 = currentWinningNumbers[i - 2];
             const num2 = currentWinningNumbers[i - 1];
@@ -406,19 +397,16 @@ export async function handleStrategyChange() {
         }
     }
     
-    // After re-simulation, update analysis and UI
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     await runAllAnalyses();
     ui.renderHistory();
 
-    // Redraw wheel based on current inputs/last spin
     const num1Val = parseInt(document.getElementById('number1').value, 10);
     const num2Val = parseInt(document.getElementById('number2').value, 10);
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
     ui.drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
 }
 
-// FIX: Renamed to be more specific. This is for retraining on load.
 export function trainAiOnLoad() {
     if (!aiWorker || !state.isAiReady) return;
 
@@ -442,7 +430,6 @@ export function trainAiOnLoad() {
     });
 }
 
-// FIX: New function to properly initialize the AI worker on startup.
 export function initializeAi() {
     if (!aiWorker) return;
     const savedScaler = localStorage.getItem('roulette-ml-scaler');
