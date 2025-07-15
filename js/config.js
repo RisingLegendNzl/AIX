@@ -49,6 +49,11 @@ export let STRATEGY_CONFIG = {
     WARNING_LOSS_STREAK_THRESHOLD: 4,     // Consecutive "play" losses to trigger a warning
     WARNING_ROLLING_WIN_RATE_THRESHOLD: 40, // Rolling win rate % below which a warning is triggered
     DEFAULT_AVERAGE_WIN_RATE: 45,          // Baseline expected win rate if insufficient history for true average
+    // NEW: Parameters for Primary Factor Shift Detection
+    WARNING_FACTOR_SHIFT_WINDOW_SIZE: 5, // Number of recent successful plays to check for factor shifts
+    WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.8, // If primary factors are too diverse (e.g., >80% are different), warn
+    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 50, // Min percentage of one factor needed for it to be 'dominant'
+
 
     // NEW: Pocket Distance Prioritization Multipliers (for useLowestPocketDistance)
     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5, // Multiplier to boost score if distance is 0 or 1
@@ -108,6 +113,9 @@ export const DEFAULT_PARAMETERS = {
         WARNING_LOSS_STREAK_THRESHOLD: 4,
         WARNING_ROLLING_WIN_RATE_THRESHOLD: 40,
         DEFAULT_AVERAGE_WIN_RATE: 45,
+        WARNING_FACTOR_SHIFT_WINDOW_SIZE: 5,
+        WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.8,
+        WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 50,
 
         // Defaults for new Pocket Distance Prioritization
         LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5,
@@ -118,7 +126,7 @@ export const DEFAULT_PARAMETERS = {
         FAILURE: 0.1,  
         MIN_INFLUENCE: 0.2, 
         MAX_INFLUENCE: 2.5,
-        FORGET_FACTOR: 0.995, // Default forgetfulness factor
+        FORGET_FACTOR: 0.995,
         CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02,
         CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5
     },
@@ -159,6 +167,9 @@ export const STRATEGY_PRESETS = {
             // Adjust warning thresholds for this preset if desired
             WARNING_LOSS_STREAK_THRESHOLD: 5, // More tolerant of losses for high win rate
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 35, // More tolerant of lower rolling win rate
+            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 7, // Longer window for factor shift
+            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.7, // Slightly less strict diversity
+            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 40, // Lower dominance for warning
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 2.0, // More aggressive boost
         },
@@ -191,6 +202,9 @@ export const STRATEGY_PRESETS = {
             // Maybe tighter warning thresholds for a "safe" preset
             WARNING_LOSS_STREAK_THRESHOLD: 3,
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 45,
+            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 5,
+            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.9, // Very strict diversity check
+            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 60, // Higher dominance needed
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.2, // Moderate boost
         },
@@ -219,6 +233,9 @@ export const STRATEGY_PRESETS = {
             // Less strict warnings for aggressive play
             WARNING_LOSS_STREAK_THRESHOLD: 6,
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 30,
+            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 10, // Longer window for factor shift
+            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.5, // Very loose diversity
+            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 30, // Very low dominance needed
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.8, // Aggressive boost
             HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2
