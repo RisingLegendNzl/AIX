@@ -18,7 +18,31 @@ const parameterSpace = {
     adaptiveSuccessRate: { min: 0.01, max: 0.5, step: 0.01 },
     adaptiveFailureRate: { min: 0.01, max: 0.5, step: 0.01 },
     minAdaptiveInfluence: { min: 0.0, max: 1.0, step: 0.01 },
-    maxAdaptiveInfluence: { min: 1.0, max: 5.0, step: 0.1 }
+    maxAdaptiveInfluence: { min: 1.0, max: 5.0, step: 0.1 },
+    // NEW: Add new strategy config parameters to the parameter space
+    hitRateThreshold: { min: 0, max: 100, step: 1 },
+    hitRateMultiplier: { min: 0.1, max: 5.0, step: 0.1 },
+    maxStreakPoints: { min: 1, max: 50, step: 1 },
+    streakMultiplier: { min: 0.1, max: 10.0, step: 0.1 },
+    proximityMaxDistance: { min: 1, max: 10, step: 1 },
+    proximityMultiplier: { min: 0.1, max: 5.0, step: 0.1 },
+    maxNeighbourPoints: { min: 1, max: 50, step: 1 },
+    neighbourMultiplier: { min: 0.1, max: 5.0, step: 0.1 },
+    aiConfidenceMultiplier: { min: 1, max: 100, step: 1 },
+    minAiPointsForReason: { min: 0, max: 20, step: 1 },
+    ADAPTIVE_STRONG_PLAY_THRESHOLD: { min: 0, max: 100, step: 1 },
+    ADAPTIVE_PLAY_THRESHOLD: { min: 0, max: 100, step: 1 },
+    LESS_STRICT_STRONG_PLAY_THRESHOLD: { min: 0, max: 100, step: 1 },
+    LESS_STRICT_PLAY_THRESHOLD: { min: 0, max: 100, step: 1 },
+    LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: { min: 0, max: 100, step: 1 },
+    LESS_STRICT_MIN_STREAK: { min: 1, max: 10, step: 1 },
+    SIMPLE_PLAY_THRESHOLD: { min: 0, max: 100, step: 1 },
+    MIN_TREND_HISTORY_FOR_CONFIRMATION: { min: 1, max: 10, step: 1 },
+    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1 },
+    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1 },
+    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1 },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1 },
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1 }
 };
 let historyData = [];
 let sharedData = {};
@@ -119,7 +143,7 @@ function calculateFitness(individual) {
         patternSuccessThreshold: individual.patternSuccessThreshold,
         triggerMinAttempts: individual.triggerMinAttempts,
         triggerSuccessThreshold: individual.triggerSuccessThreshold,
-        // Include new scoring parameters for the optimizer's simulation
+        // NEW: Include all new scoring and warning parameters
         hitRateThreshold: individual.hitRateThreshold,
         hitRateMultiplier: individual.hitRateMultiplier,
         maxStreakPoints: individual.maxStreakPoints,
@@ -130,7 +154,6 @@ function calculateFitness(individual) {
         neighbourMultiplier: individual.neighbourMultiplier,
         aiConfidenceMultiplier: individual.aiConfidenceMultiplier,
         minAiPointsForReason: individual.minAiPointsForReason,
-
         ADAPTIVE_STRONG_PLAY_THRESHOLD: individual.ADAPTIVE_STRONG_PLAY_THRESHOLD,
         ADAPTIVE_PLAY_THRESHOLD: individual.ADAPTIVE_PLAY_THRESHOLD,
         LESS_STRICT_STRONG_PLAY_THRESHOLD: individual.LESS_STRICT_STRONG_PLAY_THRESHOLD,
@@ -138,7 +161,12 @@ function calculateFitness(individual) {
         LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: individual.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
         LESS_STRICT_MIN_STREAK: individual.LESS_STRICT_MIN_STREAK,
         SIMPLE_PLAY_THRESHOLD: individual.SIMPLE_PLAY_THRESHOLD,
-        MIN_TREND_HISTORY_FOR_CONFIRMATION: individual.MIN_TREND_HISTORY_FOR_CONFIRMATION
+        MIN_TREND_HISTORY_FOR_CONFIRMATION: individual.MIN_TREND_HISTORY_FOR_CONFIRMATION,
+        WARNING_ROLLING_WINDOW_SIZE: individual.WARNING_ROLLING_WINDOW_SIZE,
+        WARNING_MIN_PLAYS_FOR_EVAL: individual.WARNING_MIN_PLAYS_FOR_EVAL,
+        WARNING_LOSS_STREAK_THRESHOLD: individual.WARNING_LOSS_STREAK_THRESHOLD,
+        WARNING_ROLLING_WIN_RATE_THRESHOLD: individual.WARNING_ROLLING_WIN_RATE_THRESHOLD,
+        DEFAULT_AVERAGE_WIN_RATE: individual.DEFAULT_AVERAGE_WIN_RATE
     };
     const SIM_ADAPTIVE_LEARNING_RATES = {
         SUCCESS: individual.adaptiveSuccessRate,
@@ -155,23 +183,70 @@ function calculateFitness(individual) {
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     };
     const sortedHistory = [...historyData].sort((a, b) => a.id - b.id);
-    for (const rawItem of sortedHistory) {
+    
+    // Track rolling performance during simulation for table change warnings
+    let simRollingPerformance = {
+        rollingWinRate: 0,
+        consecutiveLosses: 0,
+        totalPlaysInWindow: 0
+    };
+
+    for (let i = 2; i < sortedHistory.length; i++) { // Start from index 2 to have num1 and num2 available
+        const rawItem = sortedHistory[i]; // The current spin result we are evaluating against
         if (!isRunning) return 0;
         if (rawItem.winningNumber === null) continue; // Skip if no winning number is available for evaluation
 
+        const num1 = sortedHistory[i - 2].winningNumber; // Get n-2 winning number
+        const num2 = sortedHistory[i - 1].winningNumber; // Get n-1 winning number
+
+        // If either num1 or num2 from history is null (e.g. from an unsubmitted calculation), skip this iteration
+        if (num1 === null || num2 === null) continue; 
+
+        // Update rolling performance based on the *previous* simulated item's outcome,
+        // but only if that previous item was an actual 'Play' recommendation.
+        // This makes sure the rolling performance is current *before* calculating recommendation for the current spin.
+        if (simulatedHistory.length > 0) {
+            const prevSimItem = simulatedHistory[simulatedHistory.length - 1];
+            if (prevSimItem.recommendationDetails && prevSimItem.recommendationDetails.finalScore > 0) { // Was an actual 'Play' signal
+                simRollingPerformance.totalPlaysInWindow++;
+                if (prevSimItem.hitTypes.includes(prevSimItem.recommendedGroupId)) {
+                    simRollingPerformance.consecutiveLosses = 0;
+                } else {
+                    simRollingPerformance.consecutiveLosses++;
+                }
+                // Recalculate rollingWinRate for the window
+                let winsInWindowCalc = 0;
+                let playsInWindowCalc = 0;
+                const windowStart = Math.max(0, simulatedHistory.length - SIM_STRATEGY_CONFIG.WARNING_ROLLING_WINDOW_SIZE);
+                for (let j = simulatedHistory.length - 1; j >= windowStart; j--) {
+                     const historyItemInWindow = simulatedHistory[j];
+                     if (historyItemInWindow.recommendationDetails && historyItemInWindow.recommendationDetails.finalScore > 0) {
+                        playsInWindowCalc++;
+                        if (historyItemInWindow.hitTypes.includes(historyItemInWindow.recommendedGroupId)) {
+                            winsInWindowCalc++;
+                        }
+                    }
+                }
+                simRollingPerformance.rollingWinRate = playsInWindowCalc > 0 ? (winsInWindowCalc / playsInWindowCalc) * 100 : 0;
+            }
+        }
+
+
         const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
-        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
+        const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.toggles.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         
         const recommendation = shared.getRecommendation({
-            trendStats, boardStats, neighbourScores, inputNum1: rawItem.num1, inputNum2: rawItem.num2,
+            trendStats, boardStats, neighbourScores, inputNum1: num1, inputNum2: num2,
             isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: localAdaptiveFactorInfluences,
             lastWinningNumber: tempConfirmedWinsLog.length > 0 ? tempConfirmedWinsLog[tempConfirmedWinsLog.length - 1] : null,
             useProximityBoostBool: sharedData.toggles.useProximityBoost, useWeightedZoneBool: sharedData.toggles.useWeightedZone,
             useNeighbourFocusBool: sharedData.toggles.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: sharedData.toggles.useTrendConfirmation, 
-            useAdaptivePlayBool: sharedData.toggles.useAdaptivePlay, // PASSING NEW TOGGLE
-            useLessStrictBool: sharedData.toggles.useLessStrict,   // PASSING NEW TOGGLE
+            useAdaptivePlayBool: sharedData.toggles.useAdaptivePlay, 
+            useLessStrictBool: sharedData.toggles.useLessStrict,
+            useTableChangeWarningsBool: sharedData.toggles.useTableChangeWarnings, // Pass toggle to recommendation
+            rollingPerformance: simRollingPerformance, // Pass current rolling performance to recommendation
             current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: simulatedHistory,
             useDynamicTerminalNeighbourCount: sharedData.toggles.useDynamicTerminalNeighbourCount,
@@ -179,9 +254,21 @@ function calculateFitness(individual) {
             terminalMapping: sharedData.terminalMapping, rouletteWheel: sharedData.rouletteWheel
         });
         
-        const simItem = { ...rawItem }; // Create a mutable copy
-        simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
-        simItem.recommendationDetails = recommendation.bestCandidate?.details || null; 
+        // Create a copy of the raw item but with prediction and recommendation details
+        const simItem = { 
+            id: rawItem.id, // Keep original ID for sorting consistency
+            num1: rawItem.num1,
+            num2: rawItem.num2,
+            difference: rawItem.difference,
+            winningNumber: rawItem.winningNumber, // This is the actual winning number for simulation
+            status: 'pending', // Will be re-evaluated below
+            hitTypes: [],
+            typeSuccessStatus: {},
+            pocketDistance: null,
+            recommendedGroupPocketDistance: null,
+            recommendedGroupId: recommendation.bestCandidate?.type.id || null,
+            recommendationDetails: recommendation.details || null // Store the full recommendation details
+        }; 
         
         // Evaluate the simulation item against its actual winning number
         shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.toggles.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
@@ -190,27 +277,33 @@ function calculateFitness(individual) {
         // Only count wins/losses if:
         // 1. A recommendation was explicitly made (simItem.recommendedGroupId exists)
         // 2. The recommendation had a positive final score (simItem.recommendationDetails.finalScore > 0),
-        //    indicating it was an explicit "Play" signal, not "Wait for Signal" or "Low Confidence".
-        if (simItem.recommendedGroupId && simItem.recommendationDetails && simItem.recommendationDetails.finalScore > 0) {
+        //    indicating it was an explicit "Play" signal, not "Wait for Signal" or "Avoid Play".
+        //    AND it was not an "Avoid Play" signal explicitly from table change warnings.
+        if (simItem.recommendedGroupId && simItem.recommendationDetails && simItem.recommendationDetails.finalScore > 0 && simItem.recommendationDetails.signal !== 'Avoid Play') {
             if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
                 wins++;
             } else {
                 losses++;
             }
         }
+        // Special case: if signal was 'Avoid Play', it's neither a win nor a loss for the W/L ratio,
+        // but it still contributes to the rolling performance tracking logic.
 
         // Apply adaptive influence updates based on the *simulated* outcome and recommendation
         if (simItem.recommendedGroupId && simItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = simItem.recommendationDetails.primaryDrivingFactor;
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
-            if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(SIM_ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + SIM_ADAPTIVE_LEARNING_RATES.SUCCESS);
-            } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - SIM_ADAPTIVE_LEARNING_RATES.FAILURE);
+            // Only update influences if it was an actionable signal (not 'Wait' or 'Avoid')
+            if (simItem.recommendationDetails.finalScore > 0 && simItem.recommendationDetails.signal !== 'Avoid Play') {
+                if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.min(SIM_ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + SIM_ADAPTIVE_LEARNING_RATES.SUCCESS);
+                } else {
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - SIM_ADAPTIVE_LEARNING_RATES.FAILURE);
+                }
             }
         }
         simulatedHistory.push(simItem);
-        if (simItem.winningNumber !== null) tempConfirmedWinsLog.push(simItem.winningNumber);
+        if (rawItem.winningNumber !== null) tempConfirmedWinsLog.push(rawItem.winningNumber); // Use rawItem's winningNumber for confirmed log
     }
     
     // Calculate fitness as Win/Loss ratio (handle division by zero)
