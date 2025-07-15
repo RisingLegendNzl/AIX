@@ -61,6 +61,8 @@ export let ADAPTIVE_LEARNING_RATES = {
     FAILURE: 0.1,  
     MIN_INFLUENCE: 0.2, 
     MAX_INFLUENCE: 2.5,
+    // NEW: Forgetfulness factor for adaptive influences
+    FORGET_FACTOR: 0.995 // Multiplier applied to influences each spin (e.g., 0.995 means 0.5% decay per spin)
 };
 
 // --- DEFAULT PARAMETERS ---
@@ -113,13 +115,14 @@ export const DEFAULT_PARAMETERS = {
         FAILURE: 0.1,  
         MIN_INFLUENCE: 0.2, 
         MAX_INFLUENCE: 2.5,
+        FORGET_FACTOR: 0.995 // Default forgetfulness factor
     },
     TOGGLES: {
         useTrendConfirmation: false,
         useWeightedZone: false,
         useProximityBoost: false,
         usePocketDistance: false,
-        useLowestPocketDistance: false, // Default to OFF
+        useLowestPocketDistance: false, 
         useAdvancedCalculations: false,
         useDynamicStrategy: false,
         useAdaptivePlay: false, 
@@ -159,6 +162,7 @@ export const STRATEGY_PRESETS = {
             FAILURE: 0.1,
             MIN_INFLUENCE: 0.2,
             MAX_INFLUENCE: 2.5,
+            FORGET_FACTOR: 0.99 // Slightly faster forgetting for potentially higher win rate
         },
         TOGGLES: {
             ...DEFAULT_PARAMETERS.TOGGLES,
@@ -172,7 +176,7 @@ export const STRATEGY_PRESETS = {
             useDynamicTerminalNeighbourCount: true,
             useLessStrict: false,
             useTableChangeWarnings: true, 
-            useLowestPocketDistance: true // Enable for this preset
+            useLowestPocketDistance: true 
         }
     },
     balancedSafe: {
@@ -184,7 +188,10 @@ export const STRATEGY_PRESETS = {
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.2, // Moderate boost
         },
-        ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+        ADAPTIVE_LEARNING_RATES: {
+            ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+            FORGET_FACTOR: 0.998 // Slower forgetting for stability
+        },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
             useTrendConfirmation: true, 
@@ -193,7 +200,7 @@ export const STRATEGY_PRESETS = {
             useAdaptivePlay: true, 
             useLessStrict: false,
             useTableChangeWarnings: true, 
-            useLowestPocketDistance: true // Enable for this preset
+            useLowestPocketDistance: true 
         }
     },
     aggressiveSignals: {
@@ -207,9 +214,12 @@ export const STRATEGY_PRESETS = {
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 30,
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.8, // Aggressive boost
-            HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2 // More aggressive suppression
+            HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2
         },
-        ADAPTIVE_LEARNING_RATES: DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+        ADAPTIVE_LEARNING_RATES: {
+            ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+            FORGET_FACTOR: 0.98 // Very aggressive forgetting
+        },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
             useTrendConfirmation: true, 
@@ -218,7 +228,7 @@ export const STRATEGY_PRESETS = {
             useLessStrict: true, 
             useAdaptivePlay: true,
             useTableChangeWarnings: true, 
-            useLowestPocketDistance: true // Enable for this preset
+            useLowestPocketDistance: true 
         }
     }
 };
