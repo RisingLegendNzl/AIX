@@ -93,7 +93,65 @@ function getNumberProperties(num) {
     };
 }
 
-// Function to prepare data, now includes streak length labels
+/**
+ * Calculates the consecutive hits/misses for each prediction type up to a given history item.
+ * This is a helper function for prepareDataForLSTM and predictWithEnsemble.
+ * @param {Array} historySubset - A slice of history ending at the current point.
+ * @param {Array} allPredictionTypes - All prediction type definitions.
+ * @returns {object} An object with current consecutive hits and misses for each prediction type ID.
+ */
+function getConsecutivePerformanceForAI(historySubset, allPredictionTypes) {
+    const consecutiveHits = {};
+    const consecutiveMisses = {};
+
+    allPredictionTypes.forEach(type => {
+        consecutiveHits[type.id] = 0;
+        consecutiveMisses[type.id] = 0;
+    });
+
+    if (historySubset.length === 0) return { consecutiveHits, consecutiveMisses };
+
+    // Iterate backwards from the most recent item in the subset
+    for (let i = historySubset.length - 1; i >= 0; i--) {
+        const item = historySubset[i];
+        if (item.status === 'pending' || item.winningNumber === null) {
+            // If the item is pending or missing winningNumber, it breaks the streak for all types
+            // that were active up to this point, effectively resetting counts.
+            // For robust AI features, we might need a more nuanced approach for pending.
+            // For now, let's assume only fully evaluated history items contribute to consecutive counts.
+            break; 
+        }
+
+        let allTypesEvaluatedForThisItem = false;
+        allPredictionTypes.forEach(type => {
+            if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
+                allTypesEvaluatedForThisItem = true; // At least one type was evaluated
+                if (consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) { // Only count if not already started
+                    if (item.typeSuccessStatus[type.id]) { // Hit
+                        consecutiveHits[type.id] = (consecutiveHits[type.id] === 0) ? 1 : consecutiveHits[type.id] + 1; // Start or continue hit streak
+                        consecutiveMisses[type.id] = 0; // Reset miss streak
+                    } else { // Miss
+                        consecutiveMisses[type.id] = (consecutiveMisses[type.id] === 0) ? 1 : consecutiveMisses[type.id] + 1; // Start or continue miss streak
+                        consecutiveHits[type.id] = 0; // Reset hit streak
+                    }
+                }
+            }
+        });
+        // If no types were evaluated in this item, it's like a break in the chain for all.
+        if (!allTypesEvaluatedForThisItem) {
+            allPredictionTypes.forEach(type => {
+                consecutiveHits[type.id] = 0;
+                consecutiveMisses[type.id] = 0;
+            });
+            break;
+        }
+    }
+
+    return { consecutiveHits, consecutiveMisses };
+}
+
+
+// Function to prepare data, now includes consecutive hit/miss features
 function prepareDataForLSTM(historyData, historicalStreakData) {
     const validHistory = historyData.filter(item => item.status === 'success' && item.winningNumber !== null);
     if (validHistory.length < SEQUENCE_LENGTH + 1) {
@@ -101,66 +159,95 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         return { xs: null, ys: null, scaler: null, featureCount: 0 };
     }
 
-    const getFeatures = (item) => {
+    const getFeatures = (item, currentHistorySliceForContext) => {
         const props = getNumberProperties(item.winningNumber);
+        
+        // Calculate consecutive performance up to this item
+        const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(currentHistorySliceForContext, config.allPredictionTypes);
+
+        // Normalize consecutive counts (e.g., max 10 for misses/hits, or use a sigmoid for very long streaks)
+        // MaxStreak can be a configurable value in config.js if needed.
+        const maxStreakToNormalize = 10; 
+
         return [
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
             ...Object.values(props),
-            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
+            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
+            // NEW: Add consecutive hit/miss features for each prediction type
+            ...config.allPredictionTypes.flatMap(type => [
+                Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),   // Normalized consecutive hits
+                Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1) // Normalized consecutive misses
+            ])
         ];
-    };
-
-    const featuresForScaling = validHistory.map(item => getFeatures(item));
-    const newScaler = {
-        min: Array(featuresForScaling[0].length).fill(Infinity),
-        max: Array(featuresForScaling[0].length).fill(-Infinity)
-    };
-    featuresForScaling.forEach(row => {
-        row.forEach((val, i) => {
-            newScaler.min[i] = Math.min(newScaler.min[i], val);
-            newScaler.max[i] = Math.max(newScaler.max[i], val);
-        });
-    });
-
-    const scaleFeature = (value, index) => {
-        const featureMin = newScaler.min[index];
-        const featureMax = newScaler.max[index];
-        if (featureMax === featureMin) return 0;
-        return (value - featureMin) / (featureMax - featureMin);
     };
 
     let rawFeatures = [];
     let rawGroupLabels = [];
     let rawFailureLabels = [];
-    let rawStreakLengthLabels = []; // New labels for streak length
+    let rawStreakLengthLabels = [];
 
     for (let i = 0; i < validHistory.length - SEQUENCE_LENGTH; i++) {
         const sequence = validHistory.slice(i, i + SEQUENCE_LENGTH);
         const targetItem = validHistory[i + SEQUENCE_LENGTH];
 
-        const xs_row = sequence.map(item => getFeatures(item).map((val, idx) => scaleFeature(val, idx)));
+        // For each item in the sequence, get its features, passing the history slice *up to that item*
+        const xs_row = sequence.map((item, idx) => {
+            const historySliceForThisItem = validHistory.slice(0, i + idx + 1);
+            return getFeatures(item, historySliceForThisItem);
+        });
         rawFeatures.push(xs_row);
 
         rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
         rawFailureLabels.push(failureModes.map(mode => (targetItem.failureMode === mode ? 1 : 0)));
 
-        // Create the label for streak lengths
         const streakLengthLabel = config.allPredictionTypes.map(type => {
             const streaks = historicalStreakData[type.id] || [];
-            // Predict the average streak length for this type based on historical data
             return streaks.length > 0 ? streaks.reduce((a, b) => a + b, 0) / streaks.length : 0;
         });
         rawStreakLengthLabels.push(streakLengthLabel);
     }
 
     const featureCount = rawFeatures.length > 0 ? rawFeatures[0][0].length : 0;
-    const xs = rawFeatures.length > 0 ? tf.tensor3d(rawFeatures) : null;
+
+    // Apply scaling to the entire feature set after generating all features
+    const featuresForScaling = rawFeatures.flat(2); // Flatten all features to 1D array for min/max
+    const newScaler = {
+        min: Array(featureCount).fill(Infinity),
+        max: Array(featureCount).fill(-Infinity)
+    };
+    
+    // Recalculate min/max for scaling across all features
+    for (let i = 0; i < rawFeatures.length; i++) {
+        for (let j = 0; j < rawFeatures[i].length; j++) {
+            for (let k = 0; k < rawFeatures[i][j].length; k++) {
+                const val = rawFeatures[i][j][k];
+                newScaler.min[k] = Math.min(newScaler.min[k], val);
+                newScaler.max[k] = Math.max(newScaler.max[k], val);
+            }
+        }
+    }
+
+    const scaleFeature = (value, index) => {
+        const featureMin = newScaler.min[index];
+        const featureMax = newScaler.max[index];
+        if (featureMax === featureMin) return 0; // Avoid division by zero if feature is constant
+        return (value - featureMin) / (featureMax - featureMin);
+    };
+
+    // Apply scaling to rawFeatures
+    const scaledFeatures = rawFeatures.map(sequence => 
+        sequence.map(itemFeatures => 
+            itemFeatures.map((val, idx) => scaleFeature(val, idx))
+        )
+    );
+
+    const xs = scaledFeatures.length > 0 ? tf.tensor3d(scaledFeatures) : null;
     const ys = {
         group_output: rawGroupLabels.length > 0 ? tf.tensor2d(rawGroupLabels) : null,
         failure_output: rawFailureLabels.length > 0 ? tf.tensor2d(rawFailureLabels) : null,
-        streak_output: rawStreakLengthLabels.length > 0 ? tf.tensor2d(rawStreakLengthLabels) : null // Add new labels to ys
+        streak_output: rawStreakLengthLabels.length > 0 ? tf.tensor2d(rawStreakLengthLabels) : null
     };
 
     return { xs, ys, scaler: newScaler, featureCount };
@@ -173,16 +260,13 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
         units: lstmUnits,
         returnSequences: false,
         activation: 'relu',
-        kernelInitializer: 'glorotUniform', // Explicitly set kernel initializer
-        recurrentInitializer: 'glorotUniform' // APPLIED FIX: Explicitly set recurrent kernel initializer
+        kernelInitializer: 'glorotUniform',
+        recurrentInitializer: 'glorotUniform'
     }).apply(input);
     const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
 
-    // Original outputs
     const groupOutput = tf.layers.dense({ units: groupOutputUnits, activation: 'sigmoid', name: 'group_output' }).apply(dropoutLayer);
     const failureOutput = tf.layers.dense({ units: failureOutputUnits, activation: 'softmax', name: 'failure_output' }).apply(dropoutLayer);
-
-    // New output for streak length prediction (regression)
     const streakOutput = tf.layers.dense({ units: streakOutputUnits, activation: 'relu', name: 'streak_output' }).apply(dropoutLayer);
 
     const model = tf.model({ inputs: input, outputs: [groupOutput, failureOutput, streakOutput] });
@@ -192,7 +276,7 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
         loss: {
             'group_output': 'binaryCrossentropy',
             'failure_output': 'categoricalCrossentropy',
-            'streak_output': 'meanSquaredError' // MSE for regression
+            'streak_output': 'meanSquaredError'
         },
         metrics: ['accuracy']
     });
@@ -201,7 +285,6 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
 
 // Main training function (updated for new data)
 async function trainEnsemble(historyData, historicalStreakData) {
-    // Ensure TF.js is initialized before training
     await tfInitializedPromise;
 
     if (isTraining) {
@@ -257,9 +340,8 @@ async function trainEnsemble(historyData, historicalStreakData) {
     self.postMessage({ type: 'status', message: 'AI Ensemble: Ready!' });
 }
 
-// Prediction function (updated for third output)
+// Prediction function (updated for new features)
 async function predictWithEnsemble(historyData) {
-    // Ensure TF.js is initialized before predicting
     await tfInitializedPromise;
 
     const activeModels = ensemble.filter(m => m.model && m.scaler);
@@ -272,28 +354,37 @@ async function predictWithEnsemble(historyData) {
 
     const scaler = activeModels[0].scaler;
 
-    const getFeatures = (item) => {
+    // Helper to get features including consecutive performance
+    const getFeaturesForPrediction = (item, historySliceForContext) => {
         const props = getNumberProperties(item.winningNumber);
-         return [
+        const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(historySliceForContext, config.allPredictionTypes);
+
+        const maxStreakToNormalize = 10; // Must match training normalization
+
+        return [
             item.num1 / 36, item.num2 / 36, item.difference / 36,
             item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
             item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
             ...Object.values(props),
-            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0)
+            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
+            // Add consecutive hit/miss features for each prediction type
+            ...config.allPredictionTypes.flatMap(type => [
+                Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),
+                Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1)
+            ])
         ];
     };
 
-    const scaleFeature = (value, index) => {
-        if (!scaler) return value;
-        const featureMin = scaler.min[index];
-        const featureMax = scaler.max[index];
-        if (featureMax === featureMin) return 0;
-        return (value - featureMin) / (featureMax - featureMin);
-    };
 
     let inputTensor = null;
     try {
-        const inputFeatures = lastSequence.map(item => getFeatures(item).map((val, idx) => scaleFeature(val, idx)));
+        const inputFeatures = lastSequence.map((item, idx) => {
+            // For prediction, the context slice should be up to the current item being processed in the sequence relative to the *full* validHistory.
+            // If lastSequence is `validHistory.slice(-SEQUENCE_LENGTH)`, then the context for item at `idx` in `lastSequence` is `validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1)`
+            const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
+            return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx));
+        });
+        
         inputTensor = tf.tensor3d([inputFeatures]);
 
         const allPredictions = await Promise.all(activeModels.map(m => m.model.predict(inputTensor)));
@@ -306,7 +397,7 @@ async function predictWithEnsemble(historyData) {
         for (const prediction of allPredictions) {
             const groupProbs = await prediction[0].data();
             const failureProbs = await prediction[1].data();
-            const streakPreds = await prediction[2].data(); // Get third output
+            const streakPreds = await prediction[2].data();
 
             groupProbs.forEach((p, i) => averagedGroupProbs[i] += p);
             failureProbs.forEach((p, i) => averagedFailureProbs[i] += p);
@@ -314,7 +405,7 @@ async function predictWithEnsemble(historyData) {
 
             prediction[0].dispose();
             prediction[1].dispose();
-            prediction[2].dispose(); // Dispose third output tensor
+            prediction[2].dispose();
         }
 
         averagedGroupProbs.forEach((p, i) => averagedGroupProbs[i] /= allPredictions.length);
@@ -339,12 +430,10 @@ async function predictWithEnsemble(historyData) {
 
 // Storage functions (unchanged)
 async function loadModelsFromStorage() {
-    // Ensure TF.js is initialized before loading models
     await tfInitializedPromise;
 
     const loadPromises = ensemble.map(async (member) => {
         try {
-            // The path for loadLayersModel must match the path used in `save`.
             member.model = await tf.loadLayersModel(`indexeddb://${member.path}`);
             console.log(`TF.js Model ${member.name} loaded from IndexedDB.`);
             return true;
@@ -357,7 +446,6 @@ async function loadModelsFromStorage() {
 }
 
 async function clearModelsFromStorage() {
-    // Ensure TF.js is initialized before clearing models
     await tfInitializedPromise;
 
     const clearPromises = ensemble.map(async (member) => {
@@ -366,7 +454,6 @@ async function clearModelsFromStorage() {
                 member.model.dispose();
                 member.model = null;
             }
-            // Updated path to reflect saving model.json in a sub-folder
             await tf.io.removeModel(`indexeddb://${member.path}`);
         } catch (error) {
             // Error is expected if model doesn't exist
@@ -382,13 +469,12 @@ async function clearModelsFromStorage() {
 self.onmessage = async (event) => {
     const { type, payload } = event.data;
 
-    // Ensure TF.js initialization completes before processing messages that rely on it
     try {
         await tfInitializedPromise;
     } catch (tfInitError) {
         console.error("AI Worker: TensorFlow.js was not initialized, cannot process message.", tfInitError);
         self.postMessage({ type: 'error', message: 'AI Model: Initialization failed. Cannot process request.' });
-        return; // Stop processing if TF.js init failed
+        return;
     }
 
     switch (type) {
@@ -418,7 +504,6 @@ self.onmessage = async (event) => {
             self.postMessage({ type: 'status', message: 'AI Ensemble: Cleared.' });
             break;
         case 'update_config':
-            // Only update clonable parts if needed. Actual functions are in shared-logic.
             terminalMapping = payload.terminalMapping;
             rouletteWheel = payload.rouletteWheel;
             break;
