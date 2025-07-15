@@ -178,7 +178,7 @@
 
                 <div class="grid grid-cols-2 gap-4">
                     <button id="clearInputsButton" class="w-full btn btn-secondary">Clear Inputs</button>
-                    <button id="calculateButton" class="w-full btn btn-primary">Calculate</button>
+                    <button id="submitCalculationButton" class="w-full btn btn-primary">Calculate</button> 
                 </div>
 
                 <div id="resultDisplay" class="hidden"></div>
@@ -285,7 +285,13 @@
                     <h2 class="text-xl font-bold text-gray-700">Advanced Settings</h2>
                     <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">Adjust Parameters</button>
                 </div>
-                <div id="advancedSettingsContent" class="strategy-guide-content space-y-6"></div>
+                <div id="advancedSettingsContent" class="strategy-guide-content space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <button id="setHighestWinRatePreset" class="w-full btn btn-secondary text-sm">Highest Win Rate</button>
+                        <button id="setBalancedSafePreset" class="w-full btn btn-secondary text-sm">Balanced Safe</button>
+                        <button id="setAggressiveSignalsPreset" class="w-full btn btn-secondary text-sm">Aggressive Signals</button>
+                    </div>
+                </div>
             </div>
             
             <div class="card p-8 space-y-4">
