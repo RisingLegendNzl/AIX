@@ -1,7 +1,6 @@
 // js/ui.js
 
 // --- IMPORTS ---
-// Added getBoardStateStats and calculatePocketDistance
 import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
@@ -13,7 +12,6 @@ import * as analysis from './analysis.js';
 const dom = {};
 
 // --- PARAMETER DEFINITIONS for UI (matches optimizationWorker's parameterSpace) ---
-// Centralize min/max/step for all numerical parameters for slider generation
 const parameterDefinitions = {
     // Core Strategy Parameters
     learningRate_success: { min: 0.01, max: 1.0, step: 0.01, category: 'coreStrategy' },
@@ -26,17 +24,16 @@ const parameterDefinitions = {
     triggerMinAttempts: { min: 1, max: 20, step: 1, category: 'coreStrategy' },
     triggerSuccessThreshold: { min: 50, max: 100, step: 1, category: 'coreStrategy' },
     // Adaptive Influence Rates
-    SUCCESS: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' }, // Corresponds to adaptiveSuccessRate in GA
-    FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },  // Corresponds to adaptiveFailureRate in GA
+    SUCCESS: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },
+    FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },
     MIN_INFLUENCE: { min: 0.0, max: 1.0, step: 0.01, category: 'adaptiveRates' },
     MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' },
-
-    // NEW: Table Change Warning Parameters for Sliders (Match config.js)
-    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' }, // Example range
-    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' }, // Example range
-    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' }, // Example range
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' }, // Example range
-    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' } // Example range
+    // Table Change Warning Parameters
+    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' },
+    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' },
+    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' },
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' }
 };
 
 // Map parameter names to their respective config objects and display labels
@@ -550,9 +547,8 @@ function handleSubmitResult() {
     );
 
     if (!lastPendingForSubmission) {
-        const hasAnyCalculations = state.history.length > 0;
-        if (hasAnyCalculations) {
-            console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
+        if (state.history.length > 0) {
+            console.log("No pending calculation awaiting a winning number.");
             hidePatternAlert();
             return;
         } else {
@@ -585,7 +581,6 @@ function handleSubmitResult() {
     analysis.runAllAnalyses(winningNumber);
     renderHistory();
     
-    // NEW: Trigger the trend worker after a result is submitted and history is updated
     analysis.triggerTrendAnalysis();
 
     dom.winningNumberInput.value = '';
@@ -597,8 +592,6 @@ function handleSubmitResult() {
         setTimeout(() => {
             document.getElementById('calculateButton').click();
         }, 50);
-    } else {
-        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
     }
     hidePatternAlert();
 }
@@ -641,7 +634,6 @@ function handleHistoryAction(event) {
     renderHistory();
     drawRouletteWheel();
 
-    // NEW: Trigger trend analysis when history is modified
     analysis.triggerTrendAnalysis();
     
     if (state.history.filter(item => item.status === 'success').length < config.AI_CONFIG.trainingMinHistory) {
@@ -666,7 +658,6 @@ function handleClearHistory() {
     analysis.runAllAnalyses();
     renderHistory();
     
-    // NEW: Trigger trend analysis after clearing history (it will receive an empty array)
     analysis.triggerTrendAnalysis();
 
     dom.historicalAnalysisMessage.textContent = 'History cleared.';
@@ -676,6 +667,452 @@ function handleClearHistory() {
     hidePatternAlert();
 }
 
-// ... the rest of the ui.js file remains unchanged ...
-// (The full content of the file is quite large, so I'm only showing the changed part. The rest is identical to your provided file)
-// ...
+function handleVideoUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (state.currentVideoURL) {
+        URL.revokeObjectURL(state.currentVideoURL);
+    }
+    state.setCurrentVideoURL(URL.createObjectURL(file));
+
+    dom.videoPlayer.src = state.currentVideoURL;
+    dom.videoPlayer.classList.remove('hidden');
+    dom.videoUploadContainer.classList.add('hidden');
+    dom.videoControlsContainer.classList.remove('hidden');
+    dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
+    hidePatternAlert();
+}
+
+function startVideoAnalysis() {
+    dom.analyzeVideoButton.disabled = true;
+    dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
+    console.log("Video analysis initiated.");
+    setTimeout(() => {
+        dom.analyzeVideoButton.disabled = false;
+        dom.videoStatus.textContent = 'Analysis complete (simulation).';
+    }, 2000);
+    hidePatternAlert();
+}
+
+function clearVideoState() {
+    if (state.currentVideoURL) {
+        URL.revokeObjectURL(state.currentVideoURL);
+        state.setCurrentVideoURL(null);
+    }
+    dom.videoPlayer.src = '';
+    dom.videoUpload.value = ''; 
+
+    dom.videoPlayer.classList.add('hidden');
+    dom.frameCanvas.classList.add('hidden');
+    dom.videoControlsContainer.classList.add('hidden');
+    dom.videoUploadContainer.classList.remove('hidden');
+    dom.videoStatus.textContent = '';
+    hidePatternAlert();
+}
+
+function handlePresetSelection(presetName) {
+    const preset = config.STRATEGY_PRESETS[presetName];
+    if (!preset) {
+        console.error(`Preset "${presetName}" not found.`);
+        return;
+    }
+
+    Object.assign(config.STRATEGY_CONFIG, preset.STRATEGY_CONFIG);
+    Object.assign(config.ADAPTIVE_LEARNING_RATES, preset.ADAPTIVE_LEARNING_RATES);
+    state.setToggles(preset.TOGGLES);
+
+    updateAllTogglesUI();
+    initializeAdvancedSettingsUI();
+    analysis.updateActivePredictionTypes(); 
+    analysis.handleStrategyChange();
+    hidePatternAlert();
+}
+
+function createSlider(containerId, label, paramObj, paramName) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+        console.warn(`Slider container ${containerId} not found.`);
+        return;
+    }
+    const id = `${paramName}Slider`;
+    const paramDef = parameterDefinitions[paramName];
+    if (!paramDef) {
+        console.error(`Parameter definition for ${paramName} not found.`);
+        return;
+    }
+    const { min, max, step } = paramDef;
+
+    const sliderGroup = document.createElement('div');
+    sliderGroup.className = 'slider-group';
+    sliderGroup.innerHTML = `
+        <label for="${id}">${label}</label>
+        <input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${paramObj[paramName]}">
+        <input type="number" id="${id}Input" min="${min}" max="${max}" step="${step}" value="${paramObj[paramName]}" class="form-input text-sm">
+    `;
+    container.appendChild(sliderGroup);
+
+    const slider = document.getElementById(id);
+    const numberInput = document.getElementById(`${id}Input`);
+
+    const updateValue = (newValue) => {
+        let val = parseFloat(newValue);
+        if (isNaN(val)) val = paramObj[paramName];
+        val = Math.max(min, Math.min(max, val));
+
+        slider.value = val;
+        numberInput.value = val;
+        paramObj[paramName] = val;
+
+        state.saveState(); 
+        dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
+        analysis.handleStrategyChange();
+    };
+
+    slider.addEventListener('input', (e) => updateValue(e.target.value)); 
+    numberInput.addEventListener('change', (e) => updateValue(e.target.value)); 
+}
+
+export function initializeAdvancedSettingsUI() {
+    dom.strategyLearningRatesSliders.innerHTML = '';
+    dom.patternThresholdsSliders.innerHTML = '';
+    dom.adaptiveInfluenceSliders.innerHTML = '';
+    if (dom.warningParametersSliders) dom.warningParametersSliders.innerHTML = '';
+
+    const strategyLearningRatesContainer = document.getElementById('strategyLearningRatesSliders');
+    const patternThresholdsContainer = document.getElementById('patternThresholdsSliders');
+    const adaptiveInfluenceContainer = document.getElementById('adaptiveInfluenceSliders');
+    const warningParametersContainer = document.getElementById('warningParametersSliders');
+
+    strategyLearningRatesContainer.innerHTML = '<h3>Strategy Learning Rates</h3>';
+    patternThresholdsContainer.innerHTML = '<h3>Pattern & Trigger Thresholds</h3>';
+    adaptiveInfluenceContainer.innerHTML = '<h3>Adaptive Influence Learning</h3>';
+    if (warningParametersContainer) warningParametersContainer.innerHTML = '<h3>Table Change Warning Parameters</h3>';
+
+    for (const paramName in parameterMap) {
+        const { obj, label, container } = parameterMap[paramName];
+        createSlider(container, label, obj, paramName);
+    }
+}
+
+
+function resetAllParameters() {
+    Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
+    Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
+    state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
+    updateAllTogglesUI(); 
+    initializeAdvancedSettingsUI(); 
+    dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
+    analysis.handleStrategyChange();
+    hidePatternAlert();
+}
+
+function saveParametersToFile() {
+    const parametersToSave = {
+        STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+        TOGGLES: {
+            useTrendConfirmation: state.useTrendConfirmation, useWeightedZone: state.useWeightedZone, 
+            useProximityBoost: state.useProximityBoost, usePocketDistance: state.usePocketDistance, 
+            useLowestPocketDistance: state.useLowestPocketDistance, useAdvancedCalculations: state.useAdvancedCalculations, 
+            useDynamicStrategy: state.useDynamicStrategy, useAdaptivePlay: state.useAdaptivePlay, 
+            useTableChangeWarnings: state.useTableChangeWarnings, useDueForHit: state.useDueForHit, 
+            useNeighbourFocus: state.useNeighbourFocus, useLessStrict: state.useLessStrict, 
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount
+        }
+    };
+    const dataStr = JSON.stringify(parametersToSave, null, 2); 
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'roulette_parameters.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    dom.parameterStatusMessage.textContent = 'Parameters saved.';
+}
+
+function loadParametersFromFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const loaded = JSON.parse(e.target.result);
+            if (loaded.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, loaded.STRATEGY_CONFIG);
+            if (loaded.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, loaded.ADAPTIVE_LEARNING_RATES);
+            if (loaded.TOGGLES) state.setToggles(loaded.TOGGLES);
+            updateAllTogglesUI(); 
+            initializeAdvancedSettingsUI(); 
+            dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
+            analysis.handleStrategyChange();
+        } catch (error) {
+            dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+    hidePatternAlert();
+}
+
+export function toggleParameterSliders(enable) {
+    if (!dom.advancedSettingsContent) return;
+
+    dom.setHighestWinRatePreset.disabled = !enable;
+    dom.setBalancedSafePreset.disabled = !enable;
+    dom.setAggressiveSignalsPreset.disabled = !enable;
+    dom.resetParametersButton.disabled = !enable;
+    dom.saveParametersButton.disabled = !enable;
+    dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
+    dom.loadParametersInput.disabled = !enable;
+
+    for (const paramName in parameterMap) {
+        const sliderElement = document.getElementById(`${paramName}Slider`);
+        const numberInput = document.getElementById(`${paramName}SliderInput`);
+
+        if (sliderElement && numberInput) {
+            let categoryToggleChecked = true;
+
+            if (parameterDefinitions[paramName].category === 'coreStrategy') {
+                categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
+            } else if (parameterDefinitions[paramName].category === 'adaptiveRates') {
+                categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
+            } else if (parameterDefinitions[paramName].category === 'warningParameters') { 
+                categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
+            }
+            
+            const shouldBeEnabled = enable && categoryToggleChecked;
+            sliderElement.disabled = !shouldBeEnabled;
+            numberInput.disabled = !shouldBeEnabled;
+        }
+    }
+}
+
+// --- UI INITIALIZATION HELPERS ---
+
+function attachMainActionListeners() {
+    document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
+    document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
+
+    document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
+    document.getElementById('swapButton').addEventListener('click', handleSwap);
+    document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
+    dom.historyList.addEventListener('click', handleHistoryAction);
+    dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses()); 
+    
+    [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleNewCalculation();
+    }));
+
+    dom.winningNumberInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleSubmitResult();
+    });
+}
+
+export function attachOptimizationButtonListeners() {
+    if (dom.startOptimizationButton) {
+        dom.startOptimizationButton.addEventListener('click', () => {
+            if (state.history.length < 20) {
+                updateOptimizationStatus('Error: Need at least 20 history items.');
+                return;
+            }
+            updateOptimizationStatus('Starting optimization...');
+            dom.optimizationResult.classList.add('hidden');
+            toggleParameterSliders(false); 
+            dom.startOptimizationButton.disabled = true;
+            dom.stopOptimizationButton.disabled = false;
+            
+            const togglesForWorker = {
+                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+                useProximityBoost: state.useProximityBoost,
+                useWeightedZone: state.useWeightedZone,
+                useNeighbourFocus: state.useNeighbourFocus,
+                useTrendConfirmation: state.useTrendConfirmation,
+                usePocketDistance: state.usePocketDistance,
+                useLowestPocketDistance: state.useLowestPocketDistance,
+                useAdvancedCalculations: state.useAdvancedCalculations,
+                useDynamicStrategy: state.useDynamicStrategy,
+                useAdaptivePlay: state.useAdaptivePlay,
+                useTableChangeWarnings: state.useTableChangeWarnings,
+                useDueForHit: state.useDueForHit,
+                useLessStrict: state.useLessStrict
+            };
+
+            optimizationWorker.postMessage({
+                type: 'start',
+                payload: {
+                    history: state.history,
+                    terminalMapping: config.terminalMapping,
+                    rouletteWheel: config.rouletteWheel,
+                    GA_CONFIG: config.GA_CONFIG,
+                    toggles: togglesForWorker, 
+                    optimizeCategories: {
+                        coreStrategy: dom.optimizeCoreStrategyToggle.checked,
+                        adaptiveRates: dom.optimizeAdaptiveRatesToggle.checked
+                    }
+                }
+            });
+        });
+    }
+
+    if (dom.stopOptimizationButton) {
+        dom.stopOptimizationButton.addEventListener('click', () => {
+            optimizationWorker.postMessage({ type: 'stop' });
+        });
+    }
+
+    if (dom.applyBestParamsButton) {
+        dom.applyBestParamsButton.addEventListener('click', () => {
+            if (state.bestFoundParams) {
+                const params = state.bestFoundParams.bestIndividual;
+                const toggles = state.bestFoundParams.togglesUsed;
+
+                Object.assign(config.STRATEGY_CONFIG, {
+                    learningRate_success: params.learningRate_success, decayFactor: params.decayFactor,
+                    learningRate_failure: params.learningRate_failure, maxWeight: params.maxWeight,
+                    minWeight: params.minWeight, patternMinAttempts: params.patternMinAttempts,
+                    patternSuccessThreshold: params.patternSuccessThreshold, triggerMinAttempts: params.triggerMinAttempts,
+                    triggerSuccessThreshold: params.triggerSuccessThreshold,
+                    hitRateThreshold: params.hitRateThreshold,
+                    hitRateMultiplier: params.hitRateMultiplier,
+                    maxStreakPoints: params.maxStreakPoints,
+                    streakMultiplier: params.streakMultiplier,
+                    proximityMaxDistance: params.proximityMaxDistance,
+                    proximityMultiplier: params.proximityMultiplier,
+                    maxNeighbourPoints: params.maxNeighbourPoints,
+                    neighbourMultiplier: params.neighbourMultiplier,
+                    aiConfidenceMultiplier: params.aiConfidenceMultiplier,
+                    minAiPointsForReason: params.minAiPointsForReason,
+                    ADAPTIVE_STRONG_PLAY_THRESHOLD: params.ADAPTIVE_STRONG_PLAY_THRESHOLD,
+                    ADAPTIVE_PLAY_THRESHOLD: params.ADAPTIVE_PLAY_THRESHOLD,
+                    LESS_STRICT_STRONG_PLAY_THRESHOLD: params.LESS_STRICT_STRONG_PLAY_THRESHOLD,
+                    LESS_STRICT_PLAY_THRESHOLD: params.LESS_STRICT_PLAY_THRESHOLD,
+                    LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: params.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
+                    LESS_STRICT_MIN_STREAK: params.LESS_STRICT_MIN_STREAK,
+                    SIMPLE_PLAY_THRESHOLD: params.SIMPLE_PLAY_THRESHOLD,
+                    MIN_TREND_HISTORY_FOR_CONFIRMATION: params.MIN_TREND_HISTORY_FOR_CONFIRMATION,
+                    WARNING_ROLLING_WINDOW_SIZE: params.WARNING_ROLLING_WINDOW_SIZE,
+                    WARNING_MIN_PLAYS_FOR_EVAL: params.WARNING_MIN_PLAYS_FOR_EVAL,
+                    WARNING_LOSS_STREAK_THRESHOLD: params.WARNING_LOSS_STREAK_THRESHOLD,
+                    WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
+                    DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE,
+                    LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: params.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
+                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
+                });
+                Object.assign(config.ADAPTIVE_LEARNING_RATES, {
+                    SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
+                    MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence,
+                    FORGET_FACTOR: params.FORGET_FACTOR,
+                    CONFIDENCE_WEIGHTING_MULTIPLIER: params.CONFIDENCE_WEIGHTING_MULTIPLIER,
+                    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: params.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
+                });
+
+                if (toggles) {
+                    state.setToggles(toggles);
+                    updateAllTogglesUI();
+                }
+                
+                initializeAdvancedSettingsUI();
+                updateOptimizationStatus('Best parameters applied!');
+                analysis.handleStrategyChange();
+                hidePatternAlert();
+            }
+        });
+    }
+}
+
+function attachToggleListeners() {
+    const toggles = {
+        trendConfirmationToggle: 'useTrendConfirmation', weightedZoneToggle: 'useWeightedZone',
+        proximityBoostToggle: 'useProximityBoost', pocketDistanceToggle: 'usePocketDistance',
+        lowestPocketDistanceToggle: 'useLowestPocketDistance', advancedCalculationsToggle: 'useAdvancedCalculations',
+        dynamicStrategyToggle: 'useDynamicStrategy', adaptivePlayToggle: 'useAdaptivePlay',
+        tableChangeWarningsToggle: 'useTableChangeWarnings', dueForHitToggle: 'useDueForHit',
+        neighbourFocusToggle: 'useNeighbourFocus', lessStrictModeToggle: 'useLessStrict',
+        dynamicTerminalNeighbourCountToggle: 'useDynamicTerminalNeighbourCount'
+    };
+
+    for (const [toggleId, stateKey] of Object.entries(toggles)) {
+        dom[toggleId].addEventListener('change', () => {
+            const newToggleStates = { ...state };
+            newToggleStates[stateKey] = dom[toggleId].checked;
+            state.setToggles(newToggleStates);
+
+            if (stateKey === 'usePocketDistance') {
+                renderHistory();
+            } else {
+                analysis.handleStrategyChange(); 
+                const num1Val = parseInt(dom.number1.value, 10);
+                const num2Val = parseInt(document.getElementById('number2').value, 10);
+                const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
+                drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
+            }
+            hidePatternAlert();
+        });
+    }
+}
+
+function attachAdvancedSettingsListeners() {
+    dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
+    dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
+    dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
+
+    dom.resetParametersButton.addEventListener('click', resetAllParameters);
+    dom.saveParametersButton.addEventListener('click', saveParametersToFile);
+    dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
+
+    dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis); 
+
+    if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
+    if (dom.analyzeVideoButton) dom.analyzeVideoButton.addEventListener('click', startVideoAnalysis);
+    if (dom.clearVideoButton) dom.clearVideoButton.addEventListener('click', clearVideoState);
+
+    dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true)); 
+    dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true)); 
+}
+
+function attachGuideAndInfoListeners() {
+    document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
+    document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
+    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
+    document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+
+    if(dom.historyInfoToggle) {
+        dom.historyInfoToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dom.historyInfoDropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', () => {
+             if (dom.historyInfoDropdown) dom.historyInfoDropdown.classList.add('hidden');
+        });
+    }
+}
+
+// --- INITIALIZATION ---
+export function initializeUI() {
+    const elementIds = [
+        'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
+        'boardStateConclusion', 'historicalNumbersInput', 'imageUpload', 'imageUploadLabel',
+        'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 'aiModelStatus', 'recalculateAnalysisButton',
+        'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
+        'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
+        'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
+        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
+        'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
+        'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
+        'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
+        'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 'optimizationStatus',
+        'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 'applyBestParamsButton',
+        'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
+        'advancedSettingsContent', 'strategyLearningRatesSliders', 'patternThresholdsSliders',
+        'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
+        'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
+        'warningParametersSliders',
+        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
+    ];
+    elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
+    
+    attachMainActionListeners();
+    attachToggleListeners();
+    attachAdvancedSettingsListeners();
+    attachGuideAndInfoListeners();
+}
