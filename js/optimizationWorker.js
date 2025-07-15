@@ -42,7 +42,12 @@ const parameterSpace = {
     WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1 },
     WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1 },
     WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1 },
-    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1 }
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1 },
+    // NEW: Pocket Distance Prioritization Multipliers
+    LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: { min: 1.0, max: 5.0, step: 0.1 },
+    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: { min: 0.1, max: 1.0, step: 0.1 },
+    // NEW: Adaptive Influence Forget Factor
+    FORGET_FACTOR: { min: 0.9, max: 0.999, step: 0.001 }
 };
 let historyData = [];
 let sharedData = {};
@@ -166,13 +171,17 @@ function calculateFitness(individual) {
         WARNING_MIN_PLAYS_FOR_EVAL: individual.WARNING_MIN_PLAYS_FOR_EVAL,
         WARNING_LOSS_STREAK_THRESHOLD: individual.WARNING_LOSS_STREAK_THRESHOLD,
         WARNING_ROLLING_WIN_RATE_THRESHOLD: individual.WARNING_ROLLING_WIN_RATE_THRESHOLD,
-        DEFAULT_AVERAGE_WIN_RATE: individual.DEFAULT_AVERAGE_WIN_RATE
+        DEFAULT_AVERAGE_WIN_RATE: individual.DEFAULT_AVERAGE_WIN_RATE,
+        // NEW: Pocket Distance Prioritization Multipliers
+        LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: individual.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
+        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: individual.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
     };
     const SIM_ADAPTIVE_LEARNING_RATES = {
         SUCCESS: individual.adaptiveSuccessRate,
         FAILURE: individual.adaptiveFailureRate,
         MIN_INFLUENCE: individual.minAdaptiveInfluence,
         MAX_INFLUENCE: individual.maxAdaptiveInfluence,
+        FORGET_FACTOR: individual.FORGET_FACTOR // NEW: Forget factor for simulation
     };
     let wins = 0;
     let losses = 0;
@@ -207,7 +216,7 @@ function calculateFitness(individual) {
         // This makes sure the rolling performance is current *before* calculating recommendation for the current spin.
         if (simulatedHistory.length > 0) {
             const prevSimItem = simulatedHistory[simulatedHistory.length - 1];
-            if (prevSimItem.recommendationDetails && prevSimItem.recommendationDetails.finalScore > 0) { // Was an actual 'Play' signal
+            if (prevSimItem.recommendationDetails && prevSimItem.recommendationDetails.finalScore > 0 && prevSimItem.recommendationDetails.signal !== 'Avoid Play') { // Was an actual 'Play' signal
                 simRollingPerformance.totalPlaysInWindow++;
                 if (prevSimItem.hitTypes.includes(prevSimItem.recommendedGroupId)) {
                     simRollingPerformance.consecutiveLosses = 0;
@@ -220,7 +229,7 @@ function calculateFitness(individual) {
                 const windowStart = Math.max(0, simulatedHistory.length - SIM_STRATEGY_CONFIG.WARNING_ROLLING_WINDOW_SIZE);
                 for (let j = simulatedHistory.length - 1; j >= windowStart; j--) {
                      const historyItemInWindow = simulatedHistory[j];
-                     if (historyItemInWindow.recommendationDetails && historyItemInWindow.recommendationDetails.finalScore > 0) {
+                     if (historyItemInWindow.recommendationDetails && historyItemInWindow.recommendationDetails.finalScore > 0 && historyItemInWindow.recommendationDetails.signal !== 'Avoid Play') {
                         playsInWindowCalc++;
                         if (historyItemInWindow.hitTypes.includes(historyItemInWindow.recommendedGroupId)) {
                             winsInWindowCalc++;
@@ -231,6 +240,10 @@ function calculateFitness(individual) {
             }
         }
 
+        // --- Apply forget factor to adaptive influences BEFORE calculating recommendation for current spin ---
+        for (const factorName in localAdaptiveFactorInfluences) {
+            localAdaptiveFactorInfluences[factorName] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * SIM_ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+        }
 
         const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
@@ -247,6 +260,7 @@ function calculateFitness(individual) {
             useLessStrictBool: sharedData.toggles.useLessStrict,
             useTableChangeWarningsBool: sharedData.toggles.useTableChangeWarnings, // Pass toggle to recommendation
             rollingPerformance: simRollingPerformance, // Pass current rolling performance to recommendation
+            useLowestPocketDistanceBool: sharedData.toggles.useLowestPocketDistance, // Pass toggle
             current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: simulatedHistory,
             useDynamicTerminalNeighbourCount: sharedData.toggles.useDynamicTerminalNeighbourCount,
