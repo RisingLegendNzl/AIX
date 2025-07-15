@@ -25,6 +25,10 @@ export let adaptiveFactorInfluences = {
     'Statistical Trends': 1.0
 };
 
+// NEW: This will store the adaptive learning rates set by the RL agent.
+// If null, the app uses config.ADAPTIVE_LEARNING_RATES defaults.
+export let adaptiveLearningRatesOverride = null;
+
 // --- Global Toggle States ---
 export let useTrendConfirmation = config.DEFAULT_PARAMETERS.TOGGLES.useTrendConfirmation;
 export let useWeightedZone = config.DEFAULT_PARAMETERS.TOGGLES.useWeightedZone;
@@ -39,6 +43,7 @@ export let useDueForHit = config.DEFAULT_PARAMETERS.TOGGLES.useDueForHit;
 export let useNeighbourFocus = config.DEFAULT_PARAMETERS.TOGGLES.useNeighbourFocus;
 export let useLessStrict = config.DEFAULT_PARAMETERS.TOGGLES.useLessStrict;
 export let useDynamicTerminalNeighbourCount = config.DEFAULT_PARAMETERS.TOGGLES.useDynamicTerminalNeighbourCount;
+export let useReinforcementLearning = config.RL_CONFIG.enabled; // NEW: Toggle for RL
 
 // --- State Modifying Functions ---
 export function setHistory(newHistory) { history = newHistory; }
@@ -50,6 +55,25 @@ export function setActivePredictionTypes(types) { activePredictionTypes = types;
 export function setStrategyStates(states) { strategyStates = states; }
 export function setPatternMemory(memory) { patternMemory = memory; }
 export function setAdaptiveFactorInfluences(influences) { adaptiveFactorInfluences = influences; }
+
+// NEW: Function to set the RL-overridden adaptive learning rates
+export function setAdaptiveLearningRatesOverride(rates) {
+    adaptiveLearningRatesOverride = rates;
+    config.ADAPTIVE_LEARNING_RATES = { // Temporarily apply these to config for immediate use
+        ...config.ADAPTIVE_LEARNING_RATES,
+        ...rates,
+        FAILURE_MULTIPLIERS: { // Ensure multipliers are also applied
+            ...config.ADAPTIVE_LEARNING_RATES.FAILURE_MULTIPLIERS,
+            ...rates.FAILURE_MULTIPLIERS
+        }
+    };
+    saveState(); // Save state after override is set
+}
+
+// NEW: Function to get the currently effective adaptive learning rates (either default or RL-overridden)
+export function getEffectiveAdaptiveLearningRates() {
+    return adaptiveLearningRatesOverride || config.ADAPTIVE_LEARNING_RATES;
+}
 
 export function setToggles(toggles) {
     useTrendConfirmation = toggles.useTrendConfirmation;
@@ -65,6 +89,11 @@ export function setToggles(toggles) {
     useNeighbourFocus = toggles.useNeighbourFocus;
     useLessStrict = toggles.useLessStrict;
     useDynamicTerminalNeighbourCount = toggles.useDynamicTerminalNeighbourCount;
+    // NEW: Update RL toggle state and also the config.RL_CONFIG.enabled
+    if (toggles.hasOwnProperty('useReinforcementLearning')) {
+        useReinforcementLearning = toggles.useReinforcementLearning;
+        config.RL_CONFIG.enabled = toggles.useReinforcementLearning; // Sync with config
+    }
 }
 
 export function saveState() {
@@ -77,9 +106,11 @@ export function saveState() {
         TOGGLES: {
             useTrendConfirmation, useWeightedZone, useProximityBoost, usePocketDistance, useLowestPocketDistance,
             useAdvancedCalculations, useDynamicStrategy, useAdaptivePlay, useTableChangeWarnings,
-            useDueForHit, useNeighbourFocus, useLessStrict, useDynamicTerminalNeighbourCount
+            useDueForHit, useNeighbourFocus, useLessStrict, useDynamicTerminalNeighbourCount,
+            useReinforcementLearning // NEW: Save RL toggle state
         },
         STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, // Save the base config for future loads
+        ADAPTIVE_LEARNING_RATES_OVERRIDE: adaptiveLearningRatesOverride // NEW: Save RL override
     }));
 }
