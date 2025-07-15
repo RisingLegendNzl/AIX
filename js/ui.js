@@ -1,7 +1,6 @@
 // js/ui.js
 
 // --- IMPORTS ---
-// Added getBoardStateStats and calculatePocketDistance
 import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
@@ -34,6 +33,12 @@ const parameterDefinitions = {
     CONFIDENCE_WEIGHTING_MULTIPLIER: { min: 0.001, max: 0.1, step: 0.001, category: 'adaptiveRates' }, // NEW: For RL tunable
     CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { min: 0, max: 50, step: 1, category: 'adaptiveRates' }, // NEW: For RL tunable
 
+    // NEW: Define FAILURE_MULTIPLIERS properties directly for slider creation
+    'FAILURE_MULTIPLIERS.normalLoss': { min: 0.1, max: 5.0, step: 0.1, category: 'adaptiveRates' },
+    'FAILURE_MULTIPLIERS.streakBreak': { min: 0.1, max: 5.0, step: 0.1, category: 'adaptiveRates' },
+    'FAILURE_MULTIPLIERS.sectionShift': { min: 0.1, max: 5.0, step: 0.1, category: 'adaptiveRates' },
+    'FAILURE_MULTIPLIERS.nearMiss': { min: 0.1, max: 5.0, step: 0.1, category: 'adaptiveRates' },
+
     // NEW: Table Change Warning Parameters for Sliders (Match config.js)
     WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' }, // Example range
     WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' }, // Example range
@@ -62,6 +67,12 @@ const parameterMap = {
     FORGET_FACTOR: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Forget Factor', container: 'adaptiveInfluenceSliders' }, // NEW
     CONFIDENCE_WEIGHTING_MULTIPLIER: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Conf. Weight Multiplier', container: 'adaptiveInfluenceSliders' }, // NEW
     CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Conf. Weight Min Threshold', container: 'adaptiveInfluenceSliders' }, // NEW
+
+    // NEW: Mapping for FAILURE_MULTIPLIERS
+    'FAILURE_MULTIPLIERS.normalLoss': { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Fail Mult: Normal Loss', container: 'adaptiveInfluenceSliders' },
+    'FAILURE_MULTIPLIERS.streakBreak': { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Fail Mult: Streak Break', container: 'adaptiveInfluenceSliders' },
+    'FAILURE_MULTIPLIERS.sectionShift': { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Fail Mult: Section Shift', container: 'adaptiveInfluenceSliders' },
+    'FAILURE_MULTIPLIERS.nearMiss': { obj: config.ADAPTIVE_LEARNING_RATES, label: 'Fail Mult: Near Miss', container: 'adaptiveInfluenceSliders' },
 
     // Table Change Warning Parameters
     WARNING_ROLLING_WINDOW_SIZE: { obj: config.STRATEGY_CONFIG, label: 'Warn Window Size', container: 'warningParametersSliders' },
@@ -373,7 +384,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -530,9 +541,9 @@ function handleNewCalculation() {
     // Use effective adaptive rates (could be RL-tuned)
     const effectiveAdaptiveRates = state.getEffectiveAdaptiveLearningRates();
 
-    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
-    const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const trendStats = analysis.calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const boardStats = analysis.getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const neighbourScores = analysis.runNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
     // NEW: Calculate rolling performance for table change warnings
     const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
@@ -915,7 +926,7 @@ function createSlider(containerId, label, paramObj, paramName) {
         return;
     }
     const id = `${paramName}Slider`;
-    const paramDef = parameterDefinitions[paramName];
+    const paramDef = parameterDefinitions[paramName]; // Look up directly by paramName, which now includes dotted notation
     if (!paramDef) {
         console.error(`Parameter definition for ${paramName} not found.`);
         return;
@@ -925,18 +936,18 @@ function createSlider(containerId, label, paramObj, paramName) {
     // Determine the current value from the actual config object, considering RL override for adaptive rates
     let currentValue;
     if (paramObj === config.ADAPTIVE_LEARNING_RATES) {
-        currentValue = state.getEffectiveAdaptiveLearningRates()[paramName] || paramObj[paramName];
+        // Handle nested FAILURE_MULTIPLIERS
+        if (paramName.includes('.')) {
+            const [objKey, nestedKey] = paramName.split('.');
+            currentValue = state.getEffectiveAdaptiveLearningRates()[objKey]?.[nestedKey] || paramObj[objKey]?.[nestedKey];
+        } else {
+            currentValue = state.getEffectiveAdaptiveLearningRates()[paramName] || paramObj[paramName];
+        }
     } else {
         currentValue = paramObj[paramName];
     }
-
-    // Handle nested FAILURE_MULTIPLIERS for UI
-    if (paramName.includes('.')) { // Simple check for "dot notation" for nested properties
-        const [objKey, nestedKey] = paramName.split('.');
-        if (objKey === 'FAILURE_MULTIPLIERS' && paramObj[objKey]) {
-            currentValue = paramObj[objKey][nestedKey];
-        }
-    }
+    // Ensure current value is a number for the slider
+    currentValue = parseFloat(currentValue);
 
 
     const sliderGroup = document.createElement('div');
@@ -1033,9 +1044,10 @@ export function initializeAdvancedSettingsUI() {
     createSlider('adaptiveInfluenceSliders', 'Conf. Weight Min Threshold', config.ADAPTIVE_LEARNING_RATES, 'CONFIDENCE_WEIGHTING_MIN_THRESHOLD'); // NEW
     
     // Create sliders for Failure Multipliers (NEW)
-    for (const key of config.RL_CONFIG.tunableFailureMultipliers) {
-        createSlider('adaptiveInfluenceSliders', `Fail Mult: ${key}`, config.ADAPTIVE_LEARNING_RATES, `FAILURE_MULTIPLIERS.${key}`);
-    }
+    createSlider('adaptiveInfluenceSliders', `Fail Mult: Normal Loss`, config.ADAPTIVE_LEARNING_RATES, `FAILURE_MULTIPLIERS.normalLoss`);
+    createSlider('adaptiveInfluenceSliders', `Fail Mult: Streak Break`, config.ADAPTIVE_LEARNING_RATES, `FAILURE_MULTIPLIERS.streakBreak`);
+    createSlider('adaptiveInfluenceSliders', `Fail Mult: Section Shift`, config.ADAPTIVE_LEARNING_RATES, `FAILURE_MULTIPLIERS.sectionShift`);
+    createSlider('adaptiveInfluenceSliders', `Fail Mult: Near Miss`, config.ADAPTIVE_LEARNING_RATES, `FAILURE_MULTIPLIERS.nearMiss`);
 
 
     // NEW: Add sliders for Table Change Warning Parameters
@@ -1131,13 +1143,15 @@ export function toggleParameterSliders(enable) {
     if (!dom.advancedSettingsContent) return;
 
     // Toggle main action buttons
-    dom.setHighestWinRatePreset.disabled = !enable;
-    dom.setBalancedSafePreset.disabled = !enable;
-    dom.setAggressiveSignalsPreset.disabled = !enable;
-    dom.resetParametersButton.disabled = !enable;
-    dom.saveParametersButton.disabled = !enable;
-    dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
-    dom.loadParametersInput.disabled = !enable;
+    // Check if the elements exist before trying to access classList
+    if (dom.setHighestWinRatePreset) dom.setHighestWinRatePreset.disabled = !enable;
+    if (dom.setBalancedSafePreset) dom.setBalancedSafePreset.disabled = !enable;
+    if (dom.setAggressiveSignalsPreset) dom.setAggressiveSignalsPreset.disabled = !enable;
+    if (dom.resetParametersButton) dom.resetParametersButton.disabled = !enable;
+    if (dom.saveParametersButton) dom.saveParametersButton.disabled = !enable;
+    if (dom.loadParametersLabel) dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
+    if (dom.loadParametersInput) dom.loadParametersInput.disabled = !enable;
+
 
     // Toggle individual parameter sliders based on their categories' optimization toggles
     // or if RL is enabled for adaptive rates.
@@ -1148,9 +1162,10 @@ export function toggleParameterSliders(enable) {
         if (sliderElement && numberInput) {
             let categoryToggleChecked = true; // Assume enabled by default
 
-            if (parameterDefinitions[paramName].category === 'coreStrategy') {
+            // Ensure these DOM elements exist before checking their 'checked' property
+            if (parameterDefinitions[paramName].category === 'coreStrategy' && dom.optimizeCoreStrategyToggle) {
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
-            } else if (parameterDefinitions[paramName].category === 'adaptiveRates') {
+            } else if (parameterDefinitions[paramName].category === 'adaptiveRates' && dom.optimizeAdaptiveRatesToggle) {
                 // Adaptive Rates are disabled if RL is enabled AND the RL override is active.
                 // Otherwise, they are enabled by the 'optimizeAdaptiveRatesToggle'
                 categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked && !(state.useReinforcementLearning && state.adaptiveLearningRatesOverride !== null);
@@ -1158,7 +1173,7 @@ export function toggleParameterSliders(enable) {
                 // the sliders are still interactable for manual tweaking if needed.
             }
             // NEW: Handle warning parameters category
-            else if (parameterDefinitions[paramName].category === 'warningParameters') { 
+            else if (parameterDefinitions[paramName].category === 'warningParameters' && dom.optimizeCoreStrategyToggle) { 
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked; // Link to core strategy optimization
             }
             
