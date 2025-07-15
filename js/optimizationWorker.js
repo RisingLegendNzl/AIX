@@ -137,10 +137,12 @@ function calculateFitness(individual) {
     const sortedHistory = [...historyData].sort((a, b) => a.id - b.id);
     for (const rawItem of sortedHistory) {
         if (!isRunning) return 0;
-        if (rawItem.winningNumber === null) continue;
+        if (rawItem.winningNumber === null) continue; // Skip if no winning number is available for evaluation
+
         const trendStats = shared.calculateTrendStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const boardStats = shared.getBoardStateStats(simulatedHistory, SIM_STRATEGY_CONFIG, config.allPredictionTypes, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
         const neighbourScores = shared.runNeighbourAnalysis(simulatedHistory, SIM_STRATEGY_CONFIG, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, sharedData.rouletteWheel);
+        
         const recommendation = shared.getRecommendation({
             trendStats, boardStats, neighbourScores, inputNum1: rawItem.num1, inputNum2: rawItem.num2,
             isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: localAdaptiveFactorInfluences,
@@ -153,27 +155,30 @@ function calculateFitness(individual) {
             activePredictionTypes: config.allPredictionTypes, allPredictionTypes: config.allPredictionTypes,
             terminalMapping: sharedData.terminalMapping, rouletteWheel: sharedData.rouletteWheel
         });
-        const simItem = { ...rawItem };
+        
+        const simItem = { ...rawItem }; // Create a mutable copy
         simItem.recommendedGroupId = recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null;
         simItem.recommendationDetails = recommendation.bestCandidate?.details || null; 
+        
+        // Evaluate the simulation item against its actual winning number
         shared.evaluateCalculationStatus(simItem, rawItem.winningNumber, sharedData.useDynamicTerminalNeighbourCount, config.allPredictionTypes, sharedData.terminalMapping, config.rouletteWheel);
         
-        // --- MODIFIED LOSS COUNTING LOGIC FOR OPTIMIZATION ---
-        // Only count wins/losses if a recommendation was explicitly made (recommendedGroupId is not null)
-        // AND the recommendation score was above 0 (indicating an actual "Play" signal).
-        if (simItem.recommendedGroupId) {
+        // --- UPDATED WIN/LOSS COUNTING LOGIC FOR OPTIMIZATION ---
+        // Only count wins/losses if:
+        // 1. A recommendation was explicitly made (simItem.recommendedGroupId exists)
+        // 2. The recommendation had a positive final score (simItem.recommendationDetails.finalScore > 0),
+        //    indicating it was an explicit "Play" signal, not "Wait for Signal" or "Low Confidence".
+        if (simItem.recommendedGroupId && simItem.recommendationDetails && simItem.recommendationDetails.finalScore > 0) {
             if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
                 wins++;
-            } else if (simItem.recommendationDetails && simItem.recommendationDetails.finalScore > 0) {
-                // Only count as a loss if an explicit "Play" signal was given (score > 0)
+            } else {
                 losses++;
             }
-            // If simItem.recommendationDetails.finalScore is 0 or less, it was a 'Wait for Signal' or 'No Recommendation',
-            // so we do not count it as a loss.
         }
 
-        if (simItem.recommendedGroupId && recommendation.bestCandidate?.details?.primaryDrivingFactor) {
-            const primaryFactor = recommendation.bestCandidate.details.primaryDrivingFactor;
+        // Apply adaptive influence updates based on the *simulated* outcome and recommendation
+        if (simItem.recommendedGroupId && simItem.recommendationDetails?.primaryDrivingFactor) {
+            const primaryFactor = simItem.recommendationDetails.primaryDrivingFactor;
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
             if (simItem.hitTypes.includes(simItem.recommendedGroupId)) {
                 localAdaptiveFactorInfluences[primaryFactor] = Math.min(SIM_ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + SIM_ADAPTIVE_LEARNING_RATES.SUCCESS);
@@ -185,7 +190,10 @@ function calculateFitness(individual) {
         if (simItem.winningNumber !== null) tempConfirmedWinsLog.push(simItem.winningNumber);
     }
     
-    if (losses === 0) return wins > 0 ? wins * 10 : 0;
+    // Calculate fitness as Win/Loss ratio (handle division by zero)
+    if (losses === 0) {
+        return wins > 0 ? wins * 10 : 0; // If no losses, give high fitness based on wins
+    }
     return wins / losses;
 }
 
