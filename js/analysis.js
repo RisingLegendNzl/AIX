@@ -75,7 +75,7 @@ export function labelHistoryFailures(sortedHistory) {
  * @param {object} strategyConfig - The current strategy configuration.
  * @returns {object} Contains rolling win rate and consecutive losses for plays.
  */
-function calculateRollingPerformance(history, strategyConfig) {
+export function calculateRollingPerformance(history, strategyConfig) { // FIXED: Exported this function
     let winsInWindow = 0;
     let lossesInWindow = 0;
     let playsInWindow = 0;
@@ -190,7 +190,7 @@ export async function runAllAnalyses(winningNumber = null) {
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
     // NEW: Calculate rolling performance for table change warnings
-    const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG);
+    const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
 
     ui.renderAnalysisList(neighbourScores);
     ui.renderStrategyWeights();
@@ -231,6 +231,8 @@ export async function runAllAnalyses(winningNumber = null) {
         if (lastPendingItem) {
             lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
             lastPendingItem.recommendationDetails = recommendation.details;
+            lastPendingItem.recommendationDetails.signal = recommendation.signal; // Ensure signal is stored
+            lastPendingItem.recommendationDetails.reason = recommendation.reason; // Ensure reason is stored
 
             if (winningNumber !== null) {
                 evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
