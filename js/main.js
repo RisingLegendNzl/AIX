@@ -20,11 +20,13 @@ function loadState() {
 
     const appState = JSON.parse(savedState);
     
+    // Ensure failureMode is initialized for older history items
     const newHistory = (appState.history || []).map(item => ({
         ...item,
         recommendedGroupId: item.recommendedGroupId || null,
         recommendedGroupPocketDistance: item.recommendedGroupPocketDistance ?? null,
-        recommendationDetails: item.recommendationDetails || null
+        recommendationDetails: item.recommendationDetails || null,
+        failureMode: item.failureMode || 'normalLoss' // Default for old items
     }));
     state.setHistory(newHistory);
     state.setConfirmedWinsLog(appState.confirmedWinsLog || []);
@@ -34,7 +36,7 @@ function loadState() {
     }
     if (appState.strategyStates) state.setStrategyStates(appState.strategyStates);
     if (appState.patternMemory) state.setPatternMemory(appState.patternMemory);
-    if (appState.adaptiveFactorInfluences) Object.assign(state.adaptiveFactorInfluences, appState.adaptiveFactorInfluences); // Ensure this is merged, not overwritten
+    if (appState.adaptiveFactorInfluences) Object.assign(state.adaptiveFactorInfluences, appState.adaptiveFactorInfluences);
     if (appState.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, appState.STRATEGY_CONFIG);
     if (appState.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, appState.ADAPTIVE_LEARNING_RATES);
 
@@ -59,14 +61,18 @@ loadState();
 initializeWorkers();
 
 // 4. Run the initial analyses and render the UI based on loaded state
+analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 analysis.runAllAnalyses();
 ui.renderHistory();
 
 // 5. Initialize the AI worker correctly, giving it time to load its resources
 analysis.initializeAi();
 
-// NEW: Attach optimization button listeners *after* workers are initialized
-ui.attachOptimizationButtonListeners(); // FIXED: Call the new function here
+// 6. Trigger the Trend Worker to perform an initial analysis on the loaded history
+analysis.triggerTrendAnalysis();
+
+// 7. Attach optimization button listeners *after* workers are initialized
+ui.attachOptimizationButtonListeners();
 
 // Read initial values directly for startup sequence
 const initialNum1 = parseInt(document.getElementById('number1').value, 10);
