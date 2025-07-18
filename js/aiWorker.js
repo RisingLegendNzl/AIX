@@ -326,7 +326,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
     self.postMessage({ type: 'status', message: 'AI Ensemble: Preparing data...' });
 
     const { xs, ys, scaler, featureCount } = prepareDataForLSTM(historyData, historicalStreakData);
-    if (!xs) {
+    if (!xs || !ys.group_output || !ys.failure_output || !ys.streak_output) { // Added checks for ys outputs
         self.postMessage({ type: 'status', message: `AI Model: Not enough valid data to train.` });
         isTraining = false;
         return;
@@ -342,31 +342,45 @@ async function trainEnsemble(historyData, historicalStreakData) {
     for (const member of ensemble) {
         try {
             self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name}...` });
-            if (member.model) member.model.dispose();
 
+            // Dispose of the existing model and explicitly nullify the reference
+            if (member.model) {
+                member.model.dispose();
+                member.model = null; // Ensure the reference is cleared
+                if (config.DEBUG_MODE) console.log(`Disposed old model for ${member.name}.`);
+            }
+            
+            // Create a new model for the current ensemble member
             member.model = createMultiOutputLSTMModel([SEQUENCE_LENGTH, featureCount], groupLabelCount, failureLabelCount, streakLabelCount, member.lstmUnits);
 
-            await member.model.fit(xs, ys, {
-                epochs: member.epochs,
-                batchSize: member.batchSize,
-                callbacks: {
-                    onEpochEnd: (epoch) => {
-                        self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name} (Epoch ${epoch + 1}/${member.epochs})` });
+            // Wrap fit in tf.tidy to ensure intermediate tensors are cleaned up
+            await tf.tidy(async () => {
+                await member.model.fit(xs, ys, {
+                    epochs: member.epochs,
+                    batchSize: member.batchSize,
+                    callbacks: {
+                        onEpochEnd: (epoch) => {
+                            self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name} (Epoch ${epoch + 1}/${member.epochs})` });
+                        }
                     }
-                }
+                });
             });
+
             await member.model.save(`indexeddb://${member.path}`);
             console.log(`TF.js Model ${member.name} saved.`);
         } catch (error) {
             console.error(`Error training model ${member.name}:`, error);
-            self.postMessage({ type: 'status', message: `AI Ensemble: Training for ${member.name} failed.` });
+            self.postMessage({ type: 'status', message: `AI Ensemble: Training for ${member.name} failed. Error: ${error.message}` });
+            // Consider if you want to re-throw or handle differently. For now, just log and continue the loop.
         }
     }
 
+    // Dispose of input and output tensors after all training is complete
     xs.dispose();
     if (ys.group_output) ys.group_output.dispose();
     if (ys.failure_output) ys.failure_output.dispose();
     if (ys.streak_output) ys.streak_output.dispose();
+
     isTraining = false;
     self.postMessage({ type: 'status', message: 'AI Ensemble: Ready!' });
 }
