@@ -357,7 +357,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -516,20 +516,29 @@ function handleNewCalculation() {
     
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
-    const newHistoryItem = {
-        id: Date.now(),
-        num1: num1Val,
-        num2: num2Val,
-        difference: Math.abs(num2Val - num1Val),
-        status: 'pending',
-        hitTypes: [],
-        typeSuccessStatus: {},
-        winningNumber: null,
-        pocketDistance: null,
-        recommendedGroupId: null,
-        recommendationDetails: null
-    };
-    state.history.push(newHistoryItem);
+    // Check if there's a pending item with these same numbers
+    // If so, update it. Otherwise, create a new one.
+    let newHistoryItem = [...state.history].reverse().find(
+        item => item.status === 'pending' && item.num1 === num1Val && item.num2 === num2Val
+    );
+
+    if (!newHistoryItem) {
+        newHistoryItem = {
+            id: Date.now(),
+            num1: num1Val,
+            num2: num2Val,
+            difference: Math.abs(num2Val - num1Val),
+            status: 'pending',
+            hitTypes: [],
+            typeSuccessStatus: {},
+            winningNumber: null,
+            pocketDistance: null,
+            recommendedGroupId: null,
+            recommendationDetails: null
+        };
+        state.history.push(newHistoryItem);
+    }
+
 
     // --- Get AI Prediction ---
     ui.updateAiStatus('AI Model: Getting prediction...');
@@ -561,11 +570,11 @@ function handleNewCalculation() {
         });
 
         // Update the last pending history item with the recommendation details
-        const lastPendingItem = state.history.find(item => item.id === newHistoryItem.id); // Find by ID to ensure correct item
-        if (lastPendingItem) {
-            lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+        const itemToUpdate = state.history.find(item => item.id === newHistoryItem.id); // Find by ID to ensure correct item
+        if (itemToUpdate) {
+            itemToUpdate.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
             // Store signal and reason from recommendation for history display's badge logic
-            lastPendingItem.recommendationDetails = { 
+            itemToUpdate.recommendationDetails = { 
                 ...recommendation.details, 
                 signal: recommendation.signal, 
                 reason: recommendation.reason // Store reason from recommendation for debugging/display
@@ -704,9 +713,9 @@ function handleSubmitResult() {
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
+        // Automatically trigger a new calculation after submitting a result
         setTimeout(() => {
-            // Trigger calculation for the next spin
-            document.getElementById('calculateButton').click();
+            handleNewCalculation(); 
         }, 50);
     } else {
         console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
@@ -759,6 +768,8 @@ function handleHistoryAction(event) {
         aiWorker.postMessage({ type: 'clear_model' });
     }
     hidePatternAlert(); // Hide warnings when history changes
+    // After history modification, trigger a new calculation based on current inputs
+    handleNewCalculation(); 
 }
 
 function handleClearHistory() { 
@@ -780,6 +791,8 @@ function handleClearHistory() {
     
     aiWorker.postMessage({ type: 'clear_model' });
     hidePatternAlert(); // Hide warnings when history clears
+    // After history clear, trigger a new calculation based on current inputs (which might be empty)
+    handleNewCalculation(); 
 }
 
 function handleVideoUpload(event) {
@@ -842,6 +855,8 @@ function handlePresetSelection(presetName) {
     analysis.updateActivePredictionTypes(); 
     analysis.handleStrategyChange(); // Use analysis.handleStrategyChange after preset
     hidePatternAlert(); // Hide warnings on preset change
+    // Automatically trigger a new calculation after applying a preset
+    handleNewCalculation(); 
 }
 
 // MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
@@ -883,6 +898,8 @@ function createSlider(containerId, label, paramObj, paramName) {
         state.saveState(); 
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
         analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
+        // Automatically trigger a new calculation after a parameter change
+        handleNewCalculation(); 
     };
 
     slider.addEventListener('input', (e) => updateValue(e.target.value)); 
@@ -954,6 +971,8 @@ function resetAllParameters() {
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
     analysis.handleStrategyChange(); // Use analysis.handleStrategyChange
     hidePatternAlert(); // Hide warnings on reset
+    // Automatically trigger a new calculation after resetting parameters
+    handleNewCalculation(); 
 }
 
 function saveParametersToFile() {
@@ -1001,6 +1020,8 @@ function loadParametersFromFile(event) {
     reader.readAsText(file);
     event.target.value = '';
     hidePatternAlert(); // Hide warnings on load
+    // Automatically trigger a new calculation after loading parameters
+    handleNewCalculation(); 
 }
 
 export function toggleParameterSliders(enable) {
@@ -1052,7 +1073,10 @@ function attachMainActionListeners() {
     document.getElementById('swapButton').addEventListener('click', handleSwap);
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', () => analysis.runAllAnalyses()); 
+    dom.recalculateAnalysisButton.addEventListener('click', () => {
+        analysis.runAllAnalyses(); // Recalculate all underlying analyses
+        handleNewCalculation(); // Trigger a new calculation to update the main display with current inputs
+    }); 
     
     // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
@@ -1156,7 +1180,10 @@ export function attachOptimizationButtonListeners() {
                     WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
                     DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE,
                     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: params.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
-                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
+                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER,
+                    WARNING_FACTOR_SHIFT_WINDOW_SIZE: params.WARNING_FACTOR_SHIFT_WINDOW_SIZE,
+                    WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: params.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD,
+                    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: params.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT
                 });
                 Object.assign(config.ADAPTIVE_LEARNING_RATES, {
                     SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
@@ -1175,6 +1202,8 @@ export function attachOptimizationButtonListeners() {
                 updateOptimizationStatus('Best parameters applied!');
                 analysis.handleStrategyChange();
                 hidePatternAlert();
+                // Automatically trigger a new calculation after applying best parameters
+                handleNewCalculation(); 
             }
         });
     }
@@ -1209,6 +1238,8 @@ function attachToggleListeners() {
                 drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
             }
             hidePatternAlert(); // Hide warnings on toggle change
+            // Automatically trigger a new calculation after toggling a strategy
+            handleNewCalculation(); 
         });
     }
 }
