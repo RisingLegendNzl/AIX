@@ -61,7 +61,7 @@ const SEQUENCE_LENGTH = 5;
 const TRAINING_MIN_HISTORY = 10;
 const failureModes = ['none', 'normalLoss', 'streakBreak', 'sectionShift'];
 
-let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
+let ensemble = ENSEMB_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
 let terminalMapping = {};
 let rouletteWheel = [];
 let isTraining = false;
@@ -325,10 +325,17 @@ async function trainEnsemble(historyData, historicalStreakData) {
     isTraining = true;
     self.postMessage({ type: 'status', message: 'AI Ensemble: Preparing data...' });
 
+    // Prepare data outside of the main tf.tidy loop for training, but tensors are still managed.
+    // We will dispose them at the end of the trainEnsemble function.
     const { xs, ys, scaler, featureCount } = prepareDataForLSTM(historyData, historicalStreakData);
-    if (!xs || !ys.group_output || !ys.failure_output || !ys.streak_output) { // Added checks for ys outputs
+    if (!xs || !ys.group_output || !ys.failure_output || !ys.streak_output) {
         self.postMessage({ type: 'status', message: `AI Model: Not enough valid data to train.` });
         isTraining = false;
+        // Dispose of any tensors that might have been created before exiting
+        if (xs) xs.dispose();
+        if (ys.group_output) ys.group_output.dispose();
+        if (ys.failure_output) ys.failure_output.dispose();
+        if (ys.streak_output) ys.streak_output.dispose();
         return;
     }
 
@@ -344,6 +351,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
             self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name}...` });
 
             // Dispose of the existing model and explicitly nullify the reference
+            // This happens before creating a new model to ensure old resources are cleared.
             if (member.model) {
                 member.model.dispose();
                 member.model = null; // Ensure the reference is cleared
@@ -353,17 +361,19 @@ async function trainEnsemble(historyData, historicalStreakData) {
             // Create a new model for the current ensemble member
             member.model = createMultiOutputLSTMModel([SEQUENCE_LENGTH, featureCount], groupLabelCount, failureLabelCount, streakLabelCount, member.lstmUnits);
 
-            // Wrap fit in tf.tidy to ensure intermediate tensors are cleaned up
-            await tf.tidy(async () => {
-                await member.model.fit(xs, ys, {
-                    epochs: member.epochs,
-                    batchSize: member.batchSize,
-                    callbacks: {
-                        onEpochEnd: (epoch) => {
-                            self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name} (Epoch ${epoch + 1}/${member.epochs})` });
-                        }
+            // The model.fit() call returns a Promise and should be awaited directly.
+            // Intermediate tensors *created by fit* are typically handled internally by TF.js.
+            // We use tf.tidy() here to wrap the *creation* of tensors for prediction inputs,
+            // but for training, xs and ys are already created and managed.
+            // So, for training, `tf.tidy` is not needed around `model.fit` if `xs` and `ys` are disposed afterward.
+            await member.model.fit(xs, ys, {
+                epochs: member.epochs,
+                batchSize: member.batchSize,
+                callbacks: {
+                    onEpochEnd: (epoch) => {
+                        self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name} (Epoch ${epoch + 1}/${member.epochs})` });
                     }
-                });
+                }
             });
 
             await member.model.save(`indexeddb://${member.path}`);
@@ -371,7 +381,6 @@ async function trainEnsemble(historyData, historicalStreakData) {
         } catch (error) {
             console.error(`Error training model ${member.name}:`, error);
             self.postMessage({ type: 'status', message: `AI Ensemble: Training for ${member.name} failed. Error: ${error.message}` });
-            // Consider if you want to re-throw or handle differently. For now, just log and continue the loop.
         }
     }
 
@@ -433,15 +442,16 @@ async function predictWithEnsemble(historyData) {
 
     let inputTensor = null;
     try {
-        const inputFeatures = lastSequence.map((item, idx) => {
-            // For prediction, the context slice should be up to the current item being processed in the sequence relative to the *full* validHistory.
-            // If lastSequence is `validHistory.slice(-SEQUENCE_LENGTH)`, then the context for item at `idx` in `lastSequence` is `validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1)`
-            const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
-            return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler)); // Pass scaler here
+        // Wrap input tensor creation in tf.tidy for automatic disposal
+        inputTensor = tf.tidy(() => {
+            const inputFeatures = lastSequence.map((item, idx) => {
+                const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
+                return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler));
+            });
+            return tf.tensor3d([inputFeatures]);
         });
         
-        inputTensor = tf.tensor3d([inputFeatures]);
-
+        // Predictions are awaited outside of tidy, as they return Promises.
         const allPredictions = await Promise.all(activeModels.map(m => m.model.predict(inputTensor)));
 
         // Average the predictions
@@ -458,6 +468,7 @@ async function predictWithEnsemble(historyData) {
             failureProbs.forEach((p, i) => averagedFailureProbs[i] += p);
             streakPreds.forEach((p, i) => averagedStreakPreds[i] += p);
 
+            // Dispose of prediction tensors after reading data
             prediction[0].dispose();
             prediction[1].dispose();
             prediction[2].dispose();
@@ -478,7 +489,9 @@ async function predictWithEnsemble(historyData) {
         console.error('Error during ensemble prediction:', error);
         return null;
     } finally {
-        if (inputTensor) inputTensor.dispose();
+        // Ensure inputTensor is disposed if it was successfully created.
+        // If an error occurred before inputTensor was assigned, it might be null.
+        if (inputTensor && !inputTensor.isDisposed) inputTensor.dispose(); 
     }
 }
 
