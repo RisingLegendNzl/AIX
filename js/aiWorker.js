@@ -61,7 +61,8 @@ const SEQUENCE_LENGTH = 5;
 const TRAINING_MIN_HISTORY = 10;
 const failureModes = ['none', 'normalLoss', 'streakBreak', 'sectionShift'];
 
-let ensemble = ENSEMB_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
+// Corrected variable name here to ENSEMBLE_CONFIG
+let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
 let terminalMapping = {};
 let rouletteWheel = [];
 let isTraining = false;
@@ -363,9 +364,7 @@ async function trainEnsemble(historyData, historicalStreakData) {
 
             // The model.fit() call returns a Promise and should be awaited directly.
             // Intermediate tensors *created by fit* are typically handled internally by TF.js.
-            // We use tf.tidy() here to wrap the *creation* of tensors for prediction inputs,
-            // but for training, xs and ys are already created and managed.
-            // So, for training, `tf.tidy` is not needed around `model.fit` if `xs` and `ys` are disposed afterward.
+            // So, tf.tidy() is not needed around `model.fit` itself.
             await member.model.fit(xs, ys, {
                 epochs: member.epochs,
                 batchSize: member.batchSize,
