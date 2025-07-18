@@ -393,60 +393,52 @@ export async function runAllAnalyses(winningNumber = null) {
     const num1Val = parseInt(document.getElementById('number1').value, 10);
     const num2Val = parseInt(document.getElementById('number2').value, 10);
 
-    if (!isNaN(num1Val) && !isNaN(num2Val)) {
-        // --- Get AI Prediction ---
-        ui.updateAiStatus('AI Model: Getting prediction...');
-        // NEW: Pass repeat/neighbor data for AI prediction as well
-        const aiPredictionData = await getAiPrediction(state.history); 
-        ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
+    // This section previously handled updating the last pending item's recommendation details.
+    // With `updateCurrentRecommendationDisplay`, the primary display update is offloaded.
+    // However, we still need to make sure the *history item itself* (especially the most recent pending one)
+    // has its `recommendedGroupId` and `recommendationDetails` accurately filled based on the *latest* analysis.
+    // This is crucial for correct win/loss tracking and adaptive influence updates.
 
+    const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending' && item.winningNumber === null);
+
+    if (lastPendingItem) {
+        // We need to re-run getRecommendation specifically to update this pending item's stored details.
+        // This is separate from `updateCurrentRecommendationDisplay` which focuses on the UI.
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
-        
-        // --- Pass prediction data to the recommendation engine ---
-        const recommendation = getRecommendation({
-            trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
+        const aiPredictionData = await getAiPrediction(state.history); 
+
+        const recommendationForPendingItem = getRecommendation({
+            trendStats, boardStats, neighbourScores, inputNum1: lastPendingItem.num1, inputNum2: lastPendingItem.num2,
             isForWeightUpdate: false, 
-            aiPredictionData, // <-- Pass the awaited data here
+            aiPredictionData, 
             currentAdaptiveInfluences: state.adaptiveFactorInfluences,
             lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, 
-            isAiReadyBool: state.isAiReady, // <-- Pass the readiness state
+            isAiReadyBool: state.isAiReady, 
             useTrendConfirmationBool: state.useTrendConfirmation,
-            useAdaptivePlayBool: state.useAdaptivePlay, // Pass adaptive play toggle
-            useLessStrictBool: state.useLessStrict,     // Pass less strict toggle
-            useTableChangeWarningsBool: state.useTableChangeWarnings, // PASS TABLE CHANGE WARNING TOGGLE
-            rollingPerformance: rollingPerformance, // PASS ROLLING PERFORMANCE DATA
-            factorShiftStatus: factorShiftStatus, // PASS FACTOR SHIFT STATUS
-            useLowestPocketDistanceBool: state.useLowestPocketDistance, // Pass pocket distance toggle
-            // NEW: Pass repeat/neighbor hit status to recommendation for potential special handling or display
-            isCurrentRepeat: isRepeatNumber(lastWinning, state.history), // Use the exported function
-            isCurrentNeighborHit: isNeighborHit(lastWinning, state.history), // Use the exported function
+            useAdaptivePlayBool: state.useAdaptivePlay, 
+            useLessStrictBool: state.useLessStrict,
+            useTableChangeWarningsBool: state.useTableChangeWarnings, 
+            rollingPerformance: rollingPerformance, 
+            factorShiftStatus: factorShiftStatus, 
+            useLowestPocketDistanceBool: state.useLowestPocketDistance, 
+            isCurrentRepeat: isRepeatNumber(lastWinning, state.history), 
+            isCurrentNeighborHit: isNeighborHit(lastWinning, state.history), 
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
             currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
 
-        const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending');
-        if (lastPendingItem) {
-            lastPendingItem.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
-            lastPendingItem.recommendationDetails = recommendation.details;
-            lastPendingItem.recommendationDetails.signal = recommendation.signal; // Ensure signal is stored
-            lastPendingItem.recommendationDetails.reason = recommendation.reason; // Ensure reason is stored
-
-            if (winningNumber !== null) {
-                evaluateCalculationStatus(lastPendingItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-
-                if (lastPendingItem.winningNumber !== null) {
-                    const newLog = state.history
-                        .filter(item => item.winningNumber !== null)
-                        .sort((a, b) => a.id - b.id)
-                        .map(item => item.winningNumber);
-                    state.setConfirmedWinsLog(newLog);
-                }
-            }
-        }
+        lastPendingItem.recommendedGroupId = recommendationForPendingItem.bestCandidate?.type.id || null;
+        lastPendingItem.recommendationDetails = { 
+            ...recommendationForPendingItem.details, 
+            signal: recommendationForPendingItem.signal, 
+            reason: recommendationForPendingItem.reason
+        };
     }
+    // No explicit call to ui.updateCurrentRecommendationDisplay here; that's handled by specific UI events.
+    // This function focuses on recalculating *analysis data* and updating *history item details*.
 }
 
 export function updateActivePredictionTypes() {
@@ -490,7 +482,8 @@ export async function handleHistoricalAnalysis() {
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
     await runAllAnalyses();
     ui.renderHistory();
-    ui.drawRouletteWheel();
+    // After historical analysis, update the display based on current inputs.
+    ui.updateCurrentRecommendationDisplay(); 
     
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
     if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
@@ -525,10 +518,9 @@ export async function handleStrategyChange() {
     await runAllAnalyses();
     ui.renderHistory();
 
-    const num1Val = parseInt(document.getElementById('number1').value, 10);
-    const num2Val = parseInt(document.getElementById('number2').value, 10);
-    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
-    ui.drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
+    // After strategy change and full analysis, update the *current recommendation display*
+    // This is the key change: DO NOT create a new history item here, just refresh the display
+    ui.updateCurrentRecommendationDisplay(); 
 }
 
 // FIX: Renamed to be more specific. This is for retraining on load.
