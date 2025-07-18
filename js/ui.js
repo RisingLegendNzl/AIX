@@ -422,8 +422,10 @@ function hidePatternAlert() {
 /**
  * Calculates and displays the current recommendation based on the current input numbers
  * and the *latest* strategy settings. This function does NOT create new history items.
+ * It's used for live updates when settings change.
+ * @returns {Promise<void>}
  */
-async function updateCurrentRecommendationDisplay() {
+export async function updateCurrentRecommendationDisplay() { // Exported for analysis.js
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
 
@@ -431,24 +433,28 @@ async function updateCurrentRecommendationDisplay() {
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
         dom.resultDisplay.classList.remove('hidden');
         hidePatternAlert();
+        // Even if no numbers, redraw wheel to reflect last winning number and clear highlights
         drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
         return;
     }
 
+    // --- Gather all necessary stats for recommendation ---
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
-    const factorShiftStatus = analysis.analyzeFactorShift(state.history, config.STRATEGY_CONFIG); // Use analysis.analyzeFactorShift
+    const factorShiftStatus = analysis.analyzeFactorShift(state.history, config.STRATEGY_CONFIG);
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
+    // --- Get AI Prediction (if ready) ---
     ui.updateAiStatus('AI Model: Getting prediction...');
     const aiPredictionData = await analysis.getAiPrediction(state.history); 
     ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
+    // --- Get Recommendation ---
     const recommendation = getRecommendation({
         trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
-        isForWeightUpdate: false, 
+        isForWeightUpdate: false, // This is for display, not for weight updates
         aiPredictionData, 
         currentAdaptiveInfluences: state.adaptiveFactorInfluences,
         lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
@@ -469,6 +475,7 @@ async function updateCurrentRecommendationDisplay() {
         allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
     });
     
+    // --- Render Recommendation and Calculation Groups ---
     let fullResultHtml = `
         <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
         <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
@@ -537,47 +544,41 @@ async function updateCurrentRecommendationDisplay() {
     drawRouletteWheel(Math.abs(num2Val - num1Val), lastWinning);
 }
 
+
 /**
  * Handles the "Calculate" button click. Creates a new history item and gets its initial recommendation.
+ * This function should *only* be called when the user explicitly initiates a new calculation.
  */
 function handleNewCalculation() {
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
-        // Just update the display to show the error, but don't add to history or proceed
+        // If inputs are invalid, just display the error without creating a history item.
         updateCurrentRecommendationDisplay(); 
         return;
     }
 
-    // Create a new history item
+    // Create a new history item for this calculation
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
         num2: num2Val,
         difference: Math.abs(num2Val - num1Val),
-        status: 'pending',
+        status: 'pending', // Mark as pending, awaiting a winning number
         hitTypes: [],
         typeSuccessStatus: {},
         winningNumber: null,
         pocketDistance: null,
-        recommendedGroupId: null,
-        recommendationDetails: null // Will be populated after async prediction
+        recommendedGroupId: null, // Will be filled after async recommendation
+        recommendationDetails: null // Will be filled after async recommendation
     };
     state.history.push(newHistoryItem);
 
-    // Now, call updateCurrentRecommendationDisplay to process this new item and update UI
-    // We pass the newHistoryItem to ensure the recommendation logic can update its details.
-    // However, updateCurrentRecommendationDisplay itself should NOT manage history.
-    // Instead, we directly get the recommendation for this new item and then update its details.
-    
-    // To avoid duplicating complex logic, we can get the recommendation here for the new item.
-    // This is a trade-off: keep handleNewCalculation simple and call common recommendation logic.
-    // The details in newHistoryItem.recommendationDetails will be populated after this async call.
-    
-    // Re-evaluate current display based on the newly added pending item
+    // Call updateCurrentRecommendationDisplay to show the recommendation for this NEW pending item
+    // It will fetch prediction data and display the result.
     updateCurrentRecommendationDisplay();
-    renderHistory(); // Re-render history to show the new pending item immediately
+    renderHistory(); // Re-render history to immediately show the newly added pending item
 }
 
 
@@ -590,15 +591,11 @@ function handleSubmitResult() {
     );
 
     if (!lastPendingForSubmission) {
-        const hasAnyCalculations = state.history.length > 0;
-        if (hasAnyCalculations) {
-            console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
-            hidePatternAlert();
-            return;
-        } else {
-            alert("Please perform a calculation first before submitting a winning number.");
-            return;
-        }
+        console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
+        hidePatternAlert();
+        // If there's no pending calculation, just update the display based on current inputs.
+        updateCurrentRecommendationDisplay(); 
+        return;
     }
 
     const winningNumberVal = dom.winningNumberInput.value;
@@ -626,7 +623,7 @@ function handleSubmitResult() {
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
 
     // Run all analyses to update panels (board state, neighbour, weights etc)
-    // The recommendation for the *current* inputs will be handled by updateCurrentRecommendationDisplay
+    // This will *also* implicitly update the recommendation details for the just-resolved item in history
     analysis.runAllAnalyses(winningNumber); 
     renderHistory(); // Re-render history with updated item and win/loss counter
 
@@ -639,11 +636,11 @@ function handleSubmitResult() {
         dom.number2.value = winningNumber;
         // Trigger a new calculation for the *next* spin, creating a new pending entry
         setTimeout(() => {
-            handleNewCalculation(); 
+            handleNewCalculation(); // This will create a NEW pending item for the next spin
         }, 50);
     } else {
         console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
-        // If auto-calculation isn't possible, at least update the current display
+        // If auto-calculation isn't possible, just update the current display
         updateCurrentRecommendationDisplay();
     }
     hidePatternAlert(); 
@@ -662,13 +659,15 @@ function handleClearInputs() {
         dom.resultDisplay.textContent = '';
     }
     hidePatternAlert(); 
+    // After clearing inputs, update the display to show "Please enter two valid numbers."
+    updateCurrentRecommendationDisplay();
 }
 
 function handleSwap() { 
     const v = dom.number1.value; 
     dom.number1.value = dom.number2.value; 
     dom.number2.value = v; 
-    // After swap, re-evaluate and display for current inputs
+    // After swap, re-evaluate and display for current inputs (no new history item)
     updateCurrentRecommendationDisplay(); 
 }
 
@@ -694,7 +693,7 @@ function handleHistoryAction(event) {
         aiWorker.postMessage({ type: 'clear_model' });
     }
     hidePatternAlert(); 
-    // After history modification, re-evaluate and display for current inputs
+    // After history modification, re-evaluate and display for current inputs (no new history item)
     updateCurrentRecommendationDisplay(); 
 }
 
@@ -717,7 +716,7 @@ function handleClearHistory() {
     
     aiWorker.postMessage({ type: 'clear_model' });
     hidePatternAlert(); 
-    // After history clear, re-evaluate and display for current inputs (which might be empty)
+    // After history clear, re-evaluate and display for current inputs (no new history item)
     updateCurrentRecommendationDisplay(); 
 }
 
@@ -779,7 +778,7 @@ function handlePresetSelection(presetName) {
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
     analysis.updateActivePredictionTypes(); 
-    analysis.handleStrategyChange(); // Updates analysis panels
+    analysis.handleStrategyChange(); // This will update all analysis panels
     hidePatternAlert(); 
     // Automatically trigger a display update for current inputs after applying a preset
     updateCurrentRecommendationDisplay(); 
@@ -823,7 +822,7 @@ function createSlider(containerId, label, paramObj, paramName) {
 
         state.saveState(); 
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
-        analysis.handleStrategyChange(); // Updates analysis panels
+        analysis.handleStrategyChange(); // This will update all analysis panels
         // Automatically trigger a display update for current inputs after a parameter change
         updateCurrentRecommendationDisplay(); 
     };
@@ -895,7 +894,7 @@ function resetAllParameters() {
     updateAllTogglesUI(); 
     initializeAdvancedSettingsUI(); 
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
-    analysis.handleStrategyChange(); // Updates analysis panels
+    analysis.handleStrategyChange(); // This will update all analysis panels
     hidePatternAlert(); 
     // Automatically trigger a display update for current inputs after resetting parameters
     updateCurrentRecommendationDisplay(); 
@@ -938,7 +937,7 @@ function loadParametersFromFile(event) {
             updateAllTogglesUI(); 
             initializeAdvancedSettingsUI(); 
             dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
-            analysis.handleStrategyChange(); // Updates analysis panels
+            analysis.handleStrategyChange(); // This will update all analysis panels
         } catch (error) {
             dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
         }
@@ -1126,7 +1125,7 @@ export function attachOptimizationButtonListeners() {
                 
                 initializeAdvancedSettingsUI();
                 updateOptimizationStatus('Best parameters applied!');
-                analysis.handleStrategyChange(); // Updates analysis panels
+                analysis.handleStrategyChange(); // This will update all analysis panels
                 hidePatternAlert();
                 // Automatically trigger a display update for current inputs after applying best parameters
                 updateCurrentRecommendationDisplay(); 
@@ -1156,7 +1155,7 @@ function attachToggleListeners() {
                 renderHistory(); // Only rerender history if this specific toggle is changed
             } else {
                 // For most toggles, a strategy change means re-simulating and re-analyzing
-                analysis.handleStrategyChange(); 
+                analysis.handleStrategyChange(); // This will update all analysis panels
                 // Redraw roulette wheel with current inputs and last winning
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
