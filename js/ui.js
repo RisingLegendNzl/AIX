@@ -473,14 +473,16 @@ async function getRecommendationDataForDisplay(num1Val, num2Val) {
  * @returns {Promise<void>}
  */
 export async function updateMainRecommendationDisplay() {
+    console.log("updateMainRecommendationDisplay: Function started.");
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
+        console.log("updateMainRecommendationDisplay: Invalid inputs detected. Showing placeholder message.");
         // Clear or show "enter numbers" message if inputs are invalid
-        dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers to see a recommendation.</p>`; // Clarified message
+        dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers to see a recommendation.</p>`;
         dom.resultDisplay.classList.remove('hidden');
         hidePatternAlert();
         drawRouletteWheel(null, lastWinning); // Clear highlights if inputs are invalid
@@ -489,6 +491,7 @@ export async function updateMainRecommendationDisplay() {
 
     // Get the recommendation data without affecting history
     const recommendation = await getRecommendationDataForDisplay(num1Val, num2Val);
+    console.log("updateMainRecommendationDisplay: Got recommendation data.");
 
     // --- Render Recommendation and Calculation Groups ---
     let fullResultHtml = `
@@ -562,6 +565,7 @@ export async function updateMainRecommendationDisplay() {
 
     // Always redraw the roulette wheel to reflect current inputs/settings (and last winning number)
     drawRouletteWheel(Math.abs(num2Val - num1Val), lastWinning);
+    console.log("updateMainRecommendationDisplay: UI elements rendered and wheel drawn.");
 }
 
 /**
@@ -574,7 +578,7 @@ function handleNewCalculation() {
     const num2Val = parseInt(dom.number2.value, 10);
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
-        console.log("handleNewCalculation: Invalid inputs. Updating display and returning.");
+        console.log("handleNewCalculation: Invalid inputs detected. Updating display and returning.");
         // If inputs are invalid, just update the display to show the error.
         updateMainRecommendationDisplay();
         return;
@@ -608,7 +612,7 @@ function handleNewCalculation() {
         recommendationDetails: null // Will be filled after async recommendation
     };
     state.history.push(newHistoryItem);
-    console.log(`handleNewCalculation: New history item created with ID: ${newHistoryItem.id}`);
+    console.log(`handleNewCalculation: New history item created with ID: ${newHistoryItem.id}. Total history items: ${state.history.length}`);
 
     // NEW: Store the ID of this newly created pending calculation
     state.setCurrentPendingCalculationId(newHistoryItem.id);
@@ -637,7 +641,7 @@ function handleNewCalculation() {
         renderHistory();
         // Update the main display to show the recommendation for the new pending item.
         updateMainRecommendationDisplay();
-        console.log("handleNewCalculation: UI updated.");
+        console.log("handleNewCalculation: UI updated and function finished.");
     });
 }
 
@@ -662,6 +666,7 @@ function handleSubmitResult() {
 
     if (winningNumber === null || isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
         alert("Please enter a valid winning number (0-36).");
+        console.log("handleSubmitResult: Invalid winning number input. Alert shown.");
         return;
     }
 
@@ -675,18 +680,18 @@ function handleSubmitResult() {
         // is no longer pending or doesn't exist under those conditions.
         // This is the error point from your console log.
         console.error("handleSubmitResult: Could not find pending calculation by stored ID, or its status changed unexpectedly BEFORE submission. Stored ID:", state.currentPendingCalculationId);
-        state.setCurrentPendingCalculationId(null); // Clear the stale ID
+        state.setCurrentPendingCalculationId(null); // Clear the stale ID to prevent future errors with this ID
         updateMainRecommendationDisplay(); // Update UI to reflect no active pending
         return;
     }
-    console.log(`handleSubmitResult: Found pending item by ID: ${lastPendingForSubmission.id}`);
+    console.log(`handleSubmitResult: Found pending item by stored ID: ${lastPendingForSubmission.id}. Resolving this item.`);
 
 
     // Apply winning number to the specific pending item identified
     evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status}`);
+    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status} with winning number ${winningNumber}.`);
 
-    // After resolving, clear the pending calculation ID. This is crucial.
+    // After resolving, clear the pending calculation ID. This is crucial for the next cycle.
     state.setCurrentPendingCalculationId(null);
 
     // Update confirmedWinsLog based on *all* confirmed spins
@@ -702,8 +707,8 @@ function handleSubmitResult() {
 
     // Run all analyses to update panels (board state, neighbour, weights etc)
     // This also updates the `recommendedGroupId` and `recommendationDetails` for any pending items
-    // in history to reflect the latest strategy context *at the time of evaluation*.
-    analysis.runAllAnalyses(winningNumber);
+    // in history (though none should be pending now except the one just resolved).
+    analysis.runAllAnalyses(winningNumber); // Pass winningNumber to analysis.runAllAnalyses if needed for context
     renderHistory(); // Re-render history with updated item and win/loss counter
     console.log("handleSubmitResult: Analysis and history re-rendered.");
 
@@ -717,7 +722,7 @@ function handleSubmitResult() {
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
-        console.log(`handleSubmitResult: Auto-populating for next spin: ${dom.number1.value} and ${dom.number2.value}`);
+        console.log(`handleSubmitResult: Auto-populating for next spin: num1=${dom.number1.value}, num2=${dom.number2.value}`);
         // Trigger a new calculation for the *next* spin, creating a NEW pending entry.
         // This is a NEW calculation, so it calls handleNewCalculation.
         setTimeout(() => {
@@ -725,11 +730,12 @@ function handleSubmitResult() {
             handleNewCalculation();
         }, 50);
     } else {
-        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation. Not auto-calculating next spin.', prevNum2);
+        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation. Not auto-calculating next spin. Value:', prevNum2);
         // If auto-calculation isn't possible (e.g., initial state), just update the current display
         updateMainRecommendationDisplay();
     }
     hidePatternAlert();
+    console.log("handleSubmitResult: Function finished.");
 }
 
 
