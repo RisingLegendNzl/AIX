@@ -290,7 +290,7 @@ export function renderHistory() {
                 ${additionalDetailsHtml}
             </div>
             <div class="flex items-center space-x-2">
-                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                <button class="delete-btn" data-id="${item.id}" aria-label="Delete item"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m-1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
             </div>
             ${aiDetailsHtml}
         `;
@@ -1069,9 +1069,9 @@ export function toggleParameterSliders(enable) {
     console.log(`toggleParameterSliders: ${enable ? 'Enabling' : 'Disabling'} sliders.`);
 
     // Toggle main action buttons
-    dom.setHighestWinRatePreset.disabled = !enable;
-    dom.setBalancedSafePreset.disabled = !enable;
-    dom.setAggressiveSignalsPreset.disabled = !enable;
+    // Removed: dom.setHighestWinRatePreset.disabled = !enable;
+    // Removed: dom.setBalancedSafePreset.disabled = !enable;
+    // Removed: dom.setAggressiveSignalsPreset.disabled = !enable;
     dom.resetParametersButton.disabled = !enable;
     dom.saveParametersButton.disabled = !enable;
     dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
@@ -1299,10 +1299,7 @@ function attachToggleListeners() {
 }
 
 function attachAdvancedSettingsListeners() {
-    // Presets
-    dom.setHighestWinRatePreset.addEventListener('click', () => handlePresetSelection('highestWinRate'));
-    dom.setBalancedSafePreset.addEventListener('click', () => handlePresetSelection('balancedSafe'));
-    dom.setAggressiveSignalsPreset.addEventListener('click', () => handlePresetSelection('aggressiveSignals'));
+    // Presets are removed from here
 
     // Parameter Management
     dom.resetParametersButton.addEventListener('click', resetAllParameters);
@@ -1324,7 +1321,7 @@ function attachAdvancedSettingsListeners() {
 
 function attachGuideAndInfoListeners() {
     // Guide toggles
-    document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
+    // Removed: document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
     document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
     document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
     document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
@@ -1354,8 +1351,8 @@ export function initializeUI() {
         'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
         'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
         'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
-        'videoStatus', 'videoPlayer', 'frameCanvas', 'setHighestWinRatePreset', 'setBalancedSafePreset',
-        'setAggressiveSignalsPreset', 'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
+        'videoStatus', 'videoPlayer', 'frameCanvas',
+        'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
         'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
         'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 'optimizationStatus',
         'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 'applyBestParamsButton',
