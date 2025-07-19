@@ -420,41 +420,29 @@ function hidePatternAlert() {
 }
 
 /**
- * Calculates and displays the current recommendation based on the current input numbers
- * and the *latest* strategy settings. This function does NOT create new history items.
- * It's used for live updates when settings change.
- * @returns {Promise<void>}
+ * Retrieves all necessary data and calculates a recommendation object.
+ * This function is pure in the sense that it doesn't modify global state or UI.
+ * It's used by both `handleNewCalculation` (for initial recommendation of a new history item)
+ * and `updateMainRecommendationDisplay` (for live UI updates based on current settings).
+ * @param {number} num1Val - The first input number.
+ * @param {number} num2Val - The second input number.
+ * @returns {Promise<object>} The recommendation object.
  */
-export async function updateCurrentRecommendationDisplay() { // Exported for analysis.js
-    const num1Val = parseInt(dom.number1.value, 10);
-    const num2Val = parseInt(dom.number2.value, 10);
-
-    if (isNaN(num1Val) || isNaN(num2Val)) {
-        dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
-        dom.resultDisplay.classList.remove('hidden');
-        hidePatternAlert();
-        // Even if no numbers, redraw wheel to reflect last winning number and clear highlights
-        drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
-        return;
-    }
-
-    // --- Gather all necessary stats for recommendation ---
+async function getRecommendationDataForDisplay(num1Val, num2Val) {
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
-    const factorShiftStatus = analysis.analyzeFactorShift(state.history, config.STRATEGY_CONFIG);
+    const factorShiftStatus = analysis.analyzeFactorShift(state.history, config.STRATEGY_CONFIG); 
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
-    // --- Get AI Prediction (if ready) ---
     ui.updateAiStatus('AI Model: Getting prediction...');
     const aiPredictionData = await analysis.getAiPrediction(state.history); 
     ui.updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
 
-    // --- Get Recommendation ---
     const recommendation = getRecommendation({
         trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
-        isForWeightUpdate: false, // This is for display, not for weight updates
+        isForWeightUpdate: false, 
         aiPredictionData, 
         currentAdaptiveInfluences: state.adaptiveFactorInfluences,
         lastWinningNumber: lastWinning, useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
@@ -474,6 +462,31 @@ export async function updateCurrentRecommendationDisplay() { // Exported for ana
         currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
         allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
     });
+    return recommendation;
+}
+
+
+/**
+ * Updates the main recommendation display and calculation groups UI.
+ * This function does NOT create new history items or modify existing ones.
+ * It is called when settings change to provide live feedback.
+ * @returns {Promise<void>}
+ */
+export async function updateMainRecommendationDisplay() {
+    const num1Val = parseInt(dom.number1.value, 10);
+    const num2Val = parseInt(dom.number2.value, 10);
+    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+
+
+    if (isNaN(num1Val) || isNaN(num2Val)) {
+        dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
+        dom.resultDisplay.classList.remove('hidden');
+        hidePatternAlert();
+        drawRouletteWheel(null, lastWinning); // Clear highlights if inputs are invalid
+        return;
+    }
+
+    const recommendation = await getRecommendationDataForDisplay(num1Val, num2Val);
     
     // --- Render Recommendation and Calculation Groups ---
     let fullResultHtml = `
@@ -484,6 +497,10 @@ export async function updateCurrentRecommendationDisplay() { // Exported for ana
         <h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3>
         <div class="space-y-2">
     `;
+
+    // Re-calculate all necessary stats again to populate "Calculation Groups"
+    const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+    const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
 
     state.activePredictionTypes.forEach(type => {
         const predictionTypeDefinition = config.allPredictionTypes.find(t => t.id === type.id);
@@ -540,10 +557,9 @@ export async function updateCurrentRecommendationDisplay() { // Exported for ana
         hidePatternAlert();
     }
 
-    // Only draw the roulette wheel to reflect current inputs/settings, not linked to history creation
+    // Always redraw the roulette wheel to reflect current inputs/settings (and last winning number)
     drawRouletteWheel(Math.abs(num2Val - num1Val), lastWinning);
 }
-
 
 /**
  * Handles the "Calculate" button click. Creates a new history item and gets its initial recommendation.
@@ -554,12 +570,12 @@ function handleNewCalculation() {
     const num2Val = parseInt(dom.number2.value, 10);
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
-        // If inputs are invalid, just display the error without creating a history item.
-        updateCurrentRecommendationDisplay(); 
+        // If inputs are invalid, just update the display to show the error.
+        updateMainRecommendationDisplay(); 
         return;
     }
 
-    // Create a new history item for this calculation
+    // Create a new history item
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
@@ -575,10 +591,25 @@ function handleNewCalculation() {
     };
     state.history.push(newHistoryItem);
 
-    // Call updateCurrentRecommendationDisplay to show the recommendation for this NEW pending item
-    // It will fetch prediction data and display the result.
-    updateCurrentRecommendationDisplay();
-    renderHistory(); // Re-render history to immediately show the newly added pending item
+    // Get the recommendation data for this specific new history item
+    // This is asynchronous, so handle with .then()
+    getRecommendationDataForDisplay(num1Val, num2Val).then(recommendation => {
+        // Find the newly created item (or last pending if it's updated logic) and populate its details
+        // It's safer to find it by ID or assume the last one is the one we just added.
+        const itemToUpdate = state.history.find(item => item.id === newHistoryItem.id);
+        if (itemToUpdate) {
+            itemToUpdate.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+            itemToUpdate.recommendationDetails = { 
+                ...recommendation.details, 
+                signal: recommendation.signal, 
+                reason: recommendation.reason
+            };
+        }
+        // Update the main display using the *same* recommendation data that was just calculated for the history item.
+        // This ensures what's displayed matches what's recorded for this specific pending item.
+        updateMainRecommendationDisplay(); // Calls it without creating new history, just renders
+        renderHistory(); // Re-render history to immediately show the newly added pending item
+    });
 }
 
 
@@ -593,8 +624,8 @@ function handleSubmitResult() {
     if (!lastPendingForSubmission) {
         console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
         hidePatternAlert();
-        // If there's no pending calculation, just update the display based on current inputs.
-        updateCurrentRecommendationDisplay(); 
+        // If no pending calculation, just ensure the display is updated based on current inputs.
+        updateMainRecommendationDisplay(); 
         return;
     }
 
@@ -623,7 +654,10 @@ function handleSubmitResult() {
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id)); 
 
     // Run all analyses to update panels (board state, neighbour, weights etc)
-    // This will *also* implicitly update the recommendation details for the just-resolved item in history
+    // This also updates the `recommendedGroupId` and `recommendationDetails` for any pending items
+    // in history to reflect the latest strategy context *at the time of evaluation*.
+    // This is important for ensuring `recommendedGroupId` on a history item is consistent with
+    // the parameters that were active when its outcome was evaluated.
     analysis.runAllAnalyses(winningNumber); 
     renderHistory(); // Re-render history with updated item and win/loss counter
 
@@ -634,14 +668,14 @@ function handleSubmitResult() {
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
-        // Trigger a new calculation for the *next* spin, creating a new pending entry
+        // Trigger a new calculation for the *next* spin, creating a NEW pending entry
         setTimeout(() => {
-            handleNewCalculation(); // This will create a NEW pending item for the next spin
+            handleNewCalculation(); 
         }, 50);
     } else {
         console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
         // If auto-calculation isn't possible, just update the current display
-        updateCurrentRecommendationDisplay();
+        updateMainRecommendationDisplay();
     }
     hidePatternAlert(); 
 }
@@ -653,14 +687,11 @@ function handleClearInputs() {
     dom.winningNumberInput.value = '';
     dom.resultDisplay.classList.add('hidden');
     dom.number1.focus();
-    const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
-    drawRouletteWheel(null, lastWinning);
-    if (dom.resultDisplay.textContent.includes('valid numbers')) {
-        dom.resultDisplay.textContent = '';
-    }
+    // After clearing inputs, redraw wheel with no highlights and then update the display
+    drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
+    // Update the main display to show "Please enter two valid numbers."
+    updateMainRecommendationDisplay(); 
     hidePatternAlert(); 
-    // After clearing inputs, update the display to show "Please enter two valid numbers."
-    updateCurrentRecommendationDisplay();
 }
 
 function handleSwap() { 
@@ -668,7 +699,7 @@ function handleSwap() {
     dom.number1.value = dom.number2.value; 
     dom.number2.value = v; 
     // After swap, re-evaluate and display for current inputs (no new history item)
-    updateCurrentRecommendationDisplay(); 
+    updateMainRecommendationDisplay(); 
 }
 
 function handleHistoryAction(event) { 
@@ -685,16 +716,9 @@ function handleHistoryAction(event) {
     
     analysis.runAllAnalyses(); 
     renderHistory();
-    drawRouletteWheel();
-    
-    if (state.history.filter(item => item.status === 'success').length < config.AI_CONFIG.trainingMinHistory) {
-        state.setIsAiReady(false);
-        updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
-        aiWorker.postMessage({ type: 'clear_model' });
-    }
+    // Re-evaluate and display for current inputs after history modification
+    updateMainRecommendationDisplay(); 
     hidePatternAlert(); 
-    // After history modification, re-evaluate and display for current inputs (no new history item)
-    updateCurrentRecommendationDisplay(); 
 }
 
 function handleClearHistory() { 
@@ -716,8 +740,8 @@ function handleClearHistory() {
     
     aiWorker.postMessage({ type: 'clear_model' });
     hidePatternAlert(); 
-    // After history clear, re-evaluate and display for current inputs (no new history item)
-    updateCurrentRecommendationDisplay(); 
+    // Re-evaluate and display for current inputs after history clear
+    updateMainRecommendationDisplay(); 
 }
 
 function handleVideoUpload(event) {
@@ -781,7 +805,7 @@ function handlePresetSelection(presetName) {
     analysis.handleStrategyChange(); // This will update all analysis panels
     hidePatternAlert(); 
     // Automatically trigger a display update for current inputs after applying a preset
-    updateCurrentRecommendationDisplay(); 
+    updateMainRecommendationDisplay(); 
 }
 
 // MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
@@ -824,7 +848,7 @@ function createSlider(containerId, label, paramObj, paramName) {
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
         analysis.handleStrategyChange(); // This will update all analysis panels
         // Automatically trigger a display update for current inputs after a parameter change
-        updateCurrentRecommendationDisplay(); 
+        updateMainRecommendationDisplay(); 
     };
 
     slider.addEventListener('input', (e) => updateValue(e.target.value)); 
@@ -897,7 +921,7 @@ function resetAllParameters() {
     analysis.handleStrategyChange(); // This will update all analysis panels
     hidePatternAlert(); 
     // Automatically trigger a display update for current inputs after resetting parameters
-    updateCurrentRecommendationDisplay(); 
+    updateMainRecommendationDisplay(); 
 }
 
 function saveParametersToFile() {
@@ -946,7 +970,7 @@ function loadParametersFromFile(event) {
     event.target.value = '';
     hidePatternAlert(); 
     // Automatically trigger a display update for current inputs after loading parameters
-    updateCurrentRecommendationDisplay(); 
+    updateMainRecommendationDisplay(); 
 }
 
 export function toggleParameterSliders(enable) {
@@ -1000,7 +1024,7 @@ function attachMainActionListeners() {
     dom.historyList.addEventListener('click', handleHistoryAction);
     dom.recalculateAnalysisButton.addEventListener('click', () => {
         analysis.runAllAnalyses(); // Recalculate all underlying analyses
-        updateCurrentRecommendationDisplay(); // Trigger a display update for current inputs
+        updateMainRecommendationDisplay(); // Trigger a display update for current inputs
     }); 
     
     // Add Enter key listener for the main inputs
@@ -1128,7 +1152,7 @@ export function attachOptimizationButtonListeners() {
                 analysis.handleStrategyChange(); // This will update all analysis panels
                 hidePatternAlert();
                 // Automatically trigger a display update for current inputs after applying best parameters
-                updateCurrentRecommendationDisplay(); 
+                updateMainRecommendationDisplay(); 
             }
         });
     }
@@ -1164,7 +1188,7 @@ function attachToggleListeners() {
             }
             hidePatternAlert(); 
             // Automatically trigger a display update for current inputs after toggling a strategy
-            updateCurrentRecommendationDisplay(); 
+            updateMainRecommendationDisplay(); 
         });
     }
 }
