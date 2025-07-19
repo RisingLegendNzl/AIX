@@ -90,7 +90,7 @@ ui.renderHistory(); // Ensure history list is rendered based on loaded state
 // NEW: Call updateMainRecommendationDisplay explicitly on initial load to show current recommendation
 // This uses the current input fields (which might be empty) and current settings.
 console.log("main.js: Calling updateMainRecommendationDisplay on initial load.");
-ui.updateMainRecommendationDisplay(); 
+ui.updateMainRecommendationDisplay();
 
 // 5. Initialize the AI worker correctly, giving it time to load its resources
 console.log("main.js: Initializing AI worker.");
