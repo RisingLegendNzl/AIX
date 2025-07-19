@@ -1,4 +1,4 @@
-// analysis.js
+// js/analysis.js
 
 // --- IMPORTS ---
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
@@ -240,7 +240,7 @@ export function analyzeFactorShift(history, strategyConfig) {
     // Check for high diversity (if diversity score is below a threshold, meaning many different factors are hitting)
     // The diversity threshold is usually 1 - (1/N) where N is number of unique factors, but can be a set value.
     // Let's use 1 - WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD for simplicity, if diversityScore is *less* than that, it's diverse.
-    if (!factorShiftDetected && diversityScore < (1 - strategy.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) { // Corrected typo here
+    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) { // Corrected typo here
         factorShiftDetected = true;
         reason = `High diversity of primary factors in recent successful plays.`;
     }
