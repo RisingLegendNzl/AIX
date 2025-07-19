@@ -569,26 +569,25 @@ export async function updateMainRecommendationDisplay() {
  * This function should *only* be called when the user explicitly initiates a new calculation.
  */
 function handleNewCalculation() {
+    console.log("handleNewCalculation: Function started.");
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
+        console.log("handleNewCalculation: Invalid inputs. Updating display and returning.");
         // If inputs are invalid, just update the display to show the error.
         updateMainRecommendationDisplay();
         return;
     }
 
     // NEW: Check if there's already an UNRESOLVED pending calculation.
-    // If so, warn the user instead of creating a new one.
     const existingPendingItem = state.history.find(
         item => item.status === 'pending' && item.winningNumber === null
     );
 
     if (existingPendingItem) {
-        // Option 1: Alert user
+        console.warn(`handleNewCalculation: An unresolved pending calculation (ID: ${existingPendingItem.id}) already exists. Not creating a new one.`);
         alert("There's already a pending calculation. Please submit the winning number for that one first, or clear history.");
-        // Option 2: Just log to console and don't create a new item
-        console.warn("Attempted to create a new calculation, but an unresolved pending one already exists. Ignoring.");
         updateMainRecommendationDisplay(); // Ensure display is consistent
         return;
     }
@@ -609,14 +608,17 @@ function handleNewCalculation() {
         recommendationDetails: null // Will be filled after async recommendation
     };
     state.history.push(newHistoryItem);
+    console.log(`handleNewCalculation: New history item created with ID: ${newHistoryItem.id}`);
 
     // NEW: Store the ID of this newly created pending calculation
-    state.setCurrentPendingCalculationId(newHistoryItem.id); //
+    state.setCurrentPendingCalculationId(newHistoryItem.id);
 
     // Get the recommendation data for this specific new history item.
     // Then, update the history item and refresh UI.
     getRecommendationDataForDisplay(num1Val, num2Val).then(recommendation => {
+        console.log(`handleNewCalculation: Got recommendation for ID ${newHistoryItem.id}.`);
         // Find the newly created item by ID (ensuring it's still pending) and populate its details.
+        // Re-finding ensures we modify the exact object in state.history if state.history was rebuilt for some reason.
         const itemToUpdate = state.history.find(item =>
             item.id === newHistoryItem.id && item.status === 'pending' && item.winningNumber === null
         );
@@ -627,23 +629,28 @@ function handleNewCalculation() {
                 signal: recommendation.signal,
                 reason: recommendation.reason
             };
+            console.log(`handleNewCalculation: Updated history item ID ${itemToUpdate.id} with recommendation details.`);
+        } else {
+            console.error(`handleNewCalculation: Failed to find newly created item (ID: ${newHistoryItem.id}) for detail update. It might have been modified or removed prematurely.`);
         }
         // After history item is updated, re-render history list.
         renderHistory();
         // Update the main display to show the recommendation for the new pending item.
         updateMainRecommendationDisplay();
+        console.log("handleNewCalculation: UI updated.");
     });
 }
 
 
 function handleSubmitResult() {
-    // Check if the submit button was actually pressed or if it's an accidental trigger.
-    // This is a defensive check, potentially from some strange Enter key interaction.
-    // The key is to only proceed if there is a known pending calculation.
-    if (!state.currentPendingCalculationId) { //
-        console.log("handleSubmitResult: No current pending calculation ID set. Assuming accidental trigger. Winning number input:", dom.winningNumberInput.value);
+    console.log("handleSubmitResult: Function started.");
+    console.log(`handleSubmitResult: state.currentPendingCalculationId at start: ${state.currentPendingCalculationId}`);
+
+    // This check is now the primary gate for finding the pending item
+    if (!state.currentPendingCalculationId) {
+        console.log("handleSubmitResult: No current pending calculation ID set. This is an unexpected call, or no calculation was initiated. Winning number input:", dom.winningNumberInput.value);
         hidePatternAlert();
-        updateMainRecommendationDisplay(); // Keep UI consistent
+        updateMainRecommendationDisplay(); // Keep UI consistent if no pending item
         return;
     }
 
@@ -660,23 +667,27 @@ function handleSubmitResult() {
 
     // Find the specific pending item using the stored ID
     const lastPendingForSubmission = state.history.find(
-        item => item.id === state.currentPendingCalculationId && item.status === 'pending' && item.winningNumber === null //
+        item => item.id === state.currentPendingCalculationId && item.status === 'pending' && item.winningNumber === null
     );
 
     if (!lastPendingForSubmission) {
-        // This case should ideally not be hit if currentPendingCalculationId is reliable.
-        // It means the item referred to by the ID is no longer pending or doesn't exist.
-        console.error("handleSubmitResult: Could not find pending calculation by stored ID, or its status changed unexpectedly.");
+        // This means state.currentPendingCalculationId was set, but the item itself
+        // is no longer pending or doesn't exist under those conditions.
+        // This is the error point from your console log.
+        console.error("handleSubmitResult: Could not find pending calculation by stored ID, or its status changed unexpectedly BEFORE submission. Stored ID:", state.currentPendingCalculationId);
         state.setCurrentPendingCalculationId(null); // Clear the stale ID
-        updateMainRecommendationDisplay();
+        updateMainRecommendationDisplay(); // Update UI to reflect no active pending
         return;
     }
+    console.log(`handleSubmitResult: Found pending item by ID: ${lastPendingForSubmission.id}`);
+
 
     // Apply winning number to the specific pending item identified
     evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status}`);
 
-    // After resolving, clear the pending calculation ID
-    state.setCurrentPendingCalculationId(null); //
+    // After resolving, clear the pending calculation ID. This is crucial.
+    state.setCurrentPendingCalculationId(null);
 
     // Update confirmedWinsLog based on *all* confirmed spins
     const newLog = state.history
@@ -684,6 +695,7 @@ function handleSubmitResult() {
         .sort((a, b) => a.id - b.id)
         .map(item => item.winningNumber);
     state.setConfirmedWinsLog(newLog);
+    console.log("handleSubmitResult: confirmedWinsLog updated.");
 
     // Re-label failures across the entire history based on the latest context
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
@@ -693,17 +705,23 @@ function handleSubmitResult() {
     // in history to reflect the latest strategy context *at the time of evaluation*.
     analysis.runAllAnalyses(winningNumber);
     renderHistory(); // Re-render history with updated item and win/loss counter
+    console.log("handleSubmitResult: Analysis and history re-rendered.");
+
 
     dom.winningNumberInput.value = ''; // Clear the input field
+    console.log("handleSubmitResult: Winning number input cleared.");
+
 
     // Auto-populate for next calculation and trigger a new calculation for the NEXT spin
     const prevNum2 = parseInt(lastPendingForSubmission.num2, 10);
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
+        console.log(`handleSubmitResult: Auto-populating for next spin: ${dom.number1.value} and ${dom.number2.value}`);
         // Trigger a new calculation for the *next* spin, creating a NEW pending entry.
         // This is a NEW calculation, so it calls handleNewCalculation.
         setTimeout(() => {
+            console.log("handleSubmitResult: Triggering next handleNewCalculation via setTimeout.");
             handleNewCalculation();
         }, 50);
     } else {
@@ -716,30 +734,35 @@ function handleSubmitResult() {
 
 
 function handleClearInputs() {
+    console.log("handleClearInputs: Function started.");
     dom.number1.value = '';
     dom.number2.value = '';
     dom.winningNumberInput.value = '';
     dom.resultDisplay.classList.add('hidden');
     dom.number1.focus();
     // Clear any pending calculation ID when inputs are cleared
-    state.setCurrentPendingCalculationId(null); //
+    state.setCurrentPendingCalculationId(null);
 
     // After clearing inputs, redraw wheel with no highlights and then update the display
     drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
     // Update the main display, which will now show "Please enter two valid numbers."
     updateMainRecommendationDisplay();
     hidePatternAlert();
+    console.log("handleClearInputs: Inputs cleared and UI updated.");
 }
 
 function handleSwap() {
+    console.log("handleSwap: Function started.");
     const v = dom.number1.value;
     dom.number1.value = dom.number2.value;
     dom.number2.value = v;
     // After swap, re-evaluate and display for current inputs (no new history item)
     updateMainRecommendationDisplay();
+    console.log("handleSwap: Inputs swapped and UI updated.");
 }
 
 function handleHistoryAction(event) {
+    console.log("handleHistoryAction: Function started.");
     const button = event.target.closest('.delete-btn');
     if (!button) return;
 
@@ -749,7 +772,8 @@ function handleHistoryAction(event) {
 
     // If the deleted item was the currently pending one, clear the ID
     if (state.currentPendingCalculationId === deletedId) {
-        state.setCurrentPendingCalculationId(null); //
+        state.setCurrentPendingCalculationId(null);
+        console.log(`handleHistoryAction: Cleared currentPendingCalculationId as deleted item (ID: ${deletedId}) was pending.`);
     }
 
     const newLog = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
@@ -762,9 +786,11 @@ function handleHistoryAction(event) {
     // Re-evaluate and display for current inputs after history modification
     updateMainRecommendationDisplay();
     hidePatternAlert();
+    console.log("handleHistoryAction: History modified and UI updated.");
 }
 
 function handleClearHistory() {
+    console.log("handleClearHistory: Function started.");
     state.setHistory([]);
     state.setConfirmedWinsLog([]);
     state.setPatternMemory({});
@@ -775,7 +801,7 @@ function handleClearHistory() {
     state.setIsAiReady(false);
     updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
     // Clear any pending calculation ID when history is cleared
-    state.setCurrentPendingCalculationId(null); //
+    state.setCurrentPendingCalculationId(null);
 
     analysis.runAllAnalyses();
     renderHistory();
@@ -787,6 +813,7 @@ function handleClearHistory() {
     hidePatternAlert();
     // Re-evaluate and display for current inputs after history clear
     updateMainRecommendationDisplay();
+    console.log("handleClearHistory: History cleared and UI updated.");
 }
 
 function handleVideoUpload(event) {
@@ -834,6 +861,7 @@ function clearVideoState() {
 }
 
 function handlePresetSelection(presetName) {
+    console.log(`handlePresetSelection: Applying preset ${presetName}.`);
     const preset = config.STRATEGY_PRESETS[presetName];
     if (!preset) {
         console.error(`Preset "${presetName}" not found.`);
@@ -847,10 +875,11 @@ function handlePresetSelection(presetName) {
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
     analysis.updateActivePredictionTypes();
-    analysis.handleStrategyChange(); // This will update all analysis panels
+    analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
     hidePatternAlert();
     // Automatically trigger a display update for current inputs after applying a preset
     updateMainRecommendationDisplay();
+    console.log(`handlePresetSelection: Preset ${presetName} applied and UI updated.`);
 }
 
 // MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
@@ -881,6 +910,7 @@ function createSlider(containerId, label, paramObj, paramName) {
     const numberInput = document.getElementById(`${id}Input`);
 
     const updateValue = (newValue) => {
+        console.log(`Slider ${paramName} value updated to: ${newValue}`);
         let val = parseFloat(newValue);
         if (isNaN(val)) val = paramObj[paramName];
         val = Math.max(min, Math.min(max, val));
@@ -891,7 +921,7 @@ function createSlider(containerId, label, paramObj, paramName) {
 
         state.saveState();
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
-        analysis.handleStrategyChange(); // This will update all analysis panels
+        analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
         // Automatically trigger a display update for current inputs after a parameter change
         updateMainRecommendationDisplay();
     };
@@ -957,19 +987,22 @@ export function initializeAdvancedSettingsUI() {
 
 
 function resetAllParameters() {
+    console.log("resetAllParameters: Function started.");
     Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
     Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
     state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
-    analysis.handleStrategyChange(); // This will update all analysis panels
+    analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
     hidePatternAlert();
     // Automatically trigger a display update for current inputs after resetting parameters
     updateMainRecommendationDisplay();
+    console.log("resetAllParameters: Parameters reset and UI updated.");
 }
 
 function saveParametersToFile() {
+    console.log("saveParametersToFile: Function started.");
     const parametersToSave = {
         STRATEGY_CONFIG: config.STRATEGY_CONFIG,
         ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
@@ -991,11 +1024,16 @@ function saveParametersToFile() {
     a.click();
     URL.revokeObjectURL(a.href);
     dom.parameterStatusMessage.textContent = 'Parameters saved.';
+    console.log("saveParametersToFile: Parameters saved.");
 }
 
 function loadParametersFromFile(event) {
+    console.log("loadParametersFromFile: Function started.");
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file) {
+        console.log("loadParametersFromFile: No file selected.");
+        return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
         try {
@@ -1006,9 +1044,10 @@ function loadParametersFromFile(event) {
             updateAllTogglesUI();
             initializeAdvancedSettingsUI();
             dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
-            analysis.handleStrategyChange(); // This will update all analysis panels
+            analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
         } catch (error) {
             dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
+            console.error("loadParametersFromFile: Error loading parameters:", error);
         }
     };
     reader.readAsText(file);
@@ -1016,10 +1055,12 @@ function loadParametersFromFile(event) {
     hidePatternAlert();
     // Automatically trigger a display update for current inputs after loading parameters
     updateMainRecommendationDisplay();
+    console.log("loadParametersFromFile: File processed and UI updated.");
 }
 
 export function toggleParameterSliders(enable) {
     if (!dom.advancedSettingsContent) return;
+    console.log(`toggleParameterSliders: ${enable ? 'Enabling' : 'Disabling'} sliders.`);
 
     // Toggle main action buttons
     dom.setHighestWinRatePreset.disabled = !enable;
@@ -1068,18 +1109,25 @@ function attachMainActionListeners() {
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
     dom.recalculateAnalysisButton.addEventListener('click', () => {
+        console.log("Recalculate All Analyses button clicked.");
         analysis.runAllAnalyses(); // Recalculate all underlying analyses
         updateMainRecommendationDisplay(); // Trigger a display update for current inputs
     });
 
     // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleNewCalculation();
+        if (e.key === 'Enter') {
+            console.log("Enter key pressed in number input. Triggering handleNewCalculation.");
+            handleNewCalculation();
+        }
     }));
 
     // Add Enter key listener for the winning number input
     dom.winningNumberInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleSubmitResult();
+        if (e.key === 'Enter') {
+            console.log("Enter key pressed in winning number input. Triggering handleSubmitResult.");
+            handleSubmitResult();
+        }
     });
     // Optimization buttons are handled by attachOptimizationButtonListeners
 }
@@ -1088,6 +1136,7 @@ function attachMainActionListeners() {
 export function attachOptimizationButtonListeners() {
     if (dom.startOptimizationButton) {
         dom.startOptimizationButton.addEventListener('click', () => {
+            console.log("Start Optimization button clicked.");
             if (state.history.length < 20) {
                 updateOptimizationStatus('Error: Need at least 20 history items.');
                 return;
@@ -1133,6 +1182,7 @@ export function attachOptimizationButtonListeners() {
 
     if (dom.stopOptimizationButton) {
         dom.stopOptimizationButton.addEventListener('click', () => {
+            console.log("Stop Optimization button clicked.");
             optimizationWorker.postMessage({ type: 'stop' });
         });
     }
@@ -1140,6 +1190,7 @@ export function attachOptimizationButtonListeners() {
     // Also need to ensure applyBestParamsButton is correctly attached here or elsewhere
     if (dom.applyBestParamsButton) {
         dom.applyBestParamsButton.addEventListener('click', () => {
+            console.log("Apply Best Params button clicked.");
             if (state.bestFoundParams) {
                 const params = state.bestFoundParams.bestIndividual;
                 const toggles = state.bestFoundParams.togglesUsed;
@@ -1194,11 +1245,12 @@ export function attachOptimizationButtonListeners() {
 
                 initializeAdvancedSettingsUI();
                 updateOptimizationStatus('Best parameters applied!');
-                analysis.handleStrategyChange(); // This will update all analysis panels
+                analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
                 hidePatternAlert();
                 // Automatically trigger a display update for current inputs after applying best parameters
                 updateMainRecommendationDisplay();
             }
+            console.log("Apply Best Params: Settings applied and UI updated.");
         });
     }
 }
@@ -1216,6 +1268,7 @@ function attachToggleListeners() {
 
     for (const [toggleId, stateKey] of Object.entries(toggles)) {
         dom[toggleId].addEventListener('change', () => {
+            console.log(`Toggle '${toggleId}' changed.`);
             const newToggleStates = { ...state };
             newToggleStates[stateKey] = dom[toggleId].checked;
             state.setToggles(newToggleStates);
@@ -1224,7 +1277,7 @@ function attachToggleListeners() {
                 renderHistory(); // Only rerender history if this specific toggle is changed
             } else {
                 // For most toggles, a strategy change means re-simulating and re-analyzing
-                analysis.handleStrategyChange(); // This will update all analysis panels
+                analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
                 // Redraw roulette wheel with current inputs and last winning
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
@@ -1234,6 +1287,7 @@ function attachToggleListeners() {
             hidePatternAlert();
             // Automatically trigger a display update for current inputs after toggling a strategy
             updateMainRecommendationDisplay();
+            console.log(`Toggle '${toggleId}' change processed and UI updated.`);
         });
     }
 }
