@@ -4,7 +4,7 @@
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
-import * as ui from './ui.js';
+import * as ui from './ui.js'; // Import ui specifically for updateAiStatus, updateMainRecommendationDisplay
 import { aiWorker } from './workers.js';
 import { calculatePocketDistance } from './shared-logic.js'; // Ensure calculatePocketDistance is imported for local helpers
 
@@ -390,20 +390,14 @@ export async function runAllAnalyses(winningNumber = null) {
     ui.renderStrategyWeights();
     ui.renderBoardState(boardStats);
 
-    const num1Val = parseInt(document.getElementById('number1').value, 10);
-    const num2Val = parseInt(document.getElementById('number2').value, 10);
-
-    // This section previously handled updating the last pending item's recommendation details.
-    // With `updateCurrentRecommendationDisplay`, the primary display update is offloaded.
-    // However, we still need to make sure the *history item itself* (especially the most recent pending one)
-    // has its `recommendedGroupId` and `recommendationDetails` accurately filled based on the *latest* analysis.
-    // This is crucial for correct win/loss tracking and adaptive influence updates.
-
+    // This section ensures the `recommendedGroupId` and `recommendationDetails` on any pending history item
+    // reflect the *latest* strategy settings after runAllAnalyses is called.
     const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending' && item.winningNumber === null);
 
     if (lastPendingItem) {
-        // We need to re-run getRecommendation specifically to update this pending item's stored details.
-        // This is separate from `updateCurrentRecommendationDisplay` which focuses on the UI.
+        // Get the recommendation for the numbers associated with this pending item
+        // Note: This is a separate call to getRecommendationDataForDisplay logic,
+        // it does NOT affect the UI display, just the history item's properties.
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
         const aiPredictionData = await getAiPrediction(state.history); 
 
@@ -430,15 +424,15 @@ export async function runAllAnalyses(winningNumber = null) {
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
 
+        // Update the actual pending history item's details
         lastPendingItem.recommendedGroupId = recommendationForPendingItem.bestCandidate?.type.id || null;
         lastPendingItem.recommendationDetails = { 
             ...recommendationForPendingItem.details, 
             signal: recommendationForPendingItem.signal, 
             reason: recommendationForPendingItem.reason
         };
+        ui.renderHistory(); // Re-render history to reflect updated pending item details
     }
-    // No explicit call to ui.updateCurrentRecommendationDisplay here; that's handled by specific UI events.
-    // This function focuses on recalculating *analysis data* and updating *history item details*.
 }
 
 export function updateActivePredictionTypes() {
@@ -483,7 +477,7 @@ export async function handleHistoricalAnalysis() {
     await runAllAnalyses();
     ui.renderHistory();
     // After historical analysis, update the display based on current inputs.
-    ui.updateCurrentRecommendationDisplay(); 
+    ui.updateMainRecommendationDisplay(); 
     
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
     if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
@@ -515,12 +509,12 @@ export async function handleStrategyChange() {
         labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     }
     
-    await runAllAnalyses();
-    ui.renderHistory();
+    await runAllAnalyses(); // Updates analysis panels and pending history item details
+    ui.renderHistory(); // Re-render history if pending item details changed
 
     // After strategy change and full analysis, update the *current recommendation display*
     // This is the key change: DO NOT create a new history item here, just refresh the display
-    ui.updateCurrentRecommendationDisplay(); 
+    ui.updateMainRecommendationDisplay(); 
 }
 
 // FIX: Renamed to be more specific. This is for retraining on load.
