@@ -510,10 +510,9 @@ export async function handleStrategyChange() {
     }
     
     await runAllAnalyses(); // Updates analysis panels and pending history item details
-    ui.renderHistory(); // Re-render history if pending item details changed
+    // ui.renderHistory(); // renderHistory is called within runAllAnalyses if pending item updated
 
     // After strategy change and full analysis, update the *current recommendation display*
-    // This is the key change: DO NOT create a new history item here, just refresh the display
     ui.updateMainRecommendationDisplay(); 
 }
 
