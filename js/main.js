@@ -29,6 +29,24 @@ function loadState() {
     state.setHistory(newHistory);
     state.setConfirmedWinsLog(appState.confirmedWinsLog || []);
 
+    // Load currentPendingCalculationId
+    if (appState.currentPendingCalculationId !== undefined) {
+        // Validate if the loaded ID actually points to a pending item in the loaded history
+        const foundPendingItem = newHistory.find(
+            item => item.id === appState.currentPendingCalculationId && item.status === 'pending' && item.winningNumber === null
+        );
+        if (foundPendingItem) {
+            state.setCurrentPendingCalculationId(appState.currentPendingCalculationId);
+        } else {
+            // If the ID is invalid or doesn't match a pending item, reset it to null
+            state.setCurrentPendingCalculationId(null);
+            console.warn("Loaded currentPendingCalculationId did not match a valid pending item in history. Resetting ID.");
+        }
+    } else {
+        state.setCurrentPendingCalculationId(null); // Ensure it's null if not in saved state
+    }
+
+
     if (appState.TOGGLES) {
         state.setToggles(appState.TOGGLES);
     }
@@ -62,6 +80,9 @@ initializeWorkers();
 analysis.runAllAnalyses();
 ui.renderHistory();
 
+// NEW: Call updateMainRecommendationDisplay explicitly on initial load to show current recommendation
+ui.updateMainRecommendationDisplay(); //
+
 // 5. Initialize the AI worker correctly, giving it time to load its resources
 analysis.initializeAi();
 
@@ -73,6 +94,7 @@ const initialNum1 = parseInt(document.getElementById('number1').value, 10);
 const initialNum2 = parseInt(document.getElementById('number2').value, 10);
 const lastWinningOnLoad = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
+// This will now be handled by updateMainRecommendationDisplay, but keep for clarity if inputs are empty
 if (!isNaN(initialNum1) && !isNaN(initialNum2)) {
     ui.drawRouletteWheel(Math.abs(initialNum2 - initialNum1), lastWinningOnLoad);
 } else {
