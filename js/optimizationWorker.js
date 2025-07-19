@@ -213,8 +213,9 @@ function calculateFitness(individual) {
     };
 
     for (let i = 2; i < sortedHistory.length; i++) { // Start from index 2 to have num1 and num2 available
+        if (!isRunning) return 0; // Check isRunning more frequently
+
         const rawItem = sortedHistory[i]; // The current spin result we are evaluating against
-        if (!isRunning) return 0;
         if (rawItem.winningNumber === null) continue; // Skip if no winning number is available for evaluation
 
         const num1 = sortedHistory[i - 2].winningNumber; // Get n-2 winning number
@@ -227,6 +228,7 @@ function calculateFitness(individual) {
         // but only if that previous item was an actual 'Play' recommendation.
         // This makes sure the rolling performance is current *before* calculating recommendation for the current spin.
         if (simulatedHistory.length > 0) {
+            if (!isRunning) return 0; // Check isRunning more frequently
             const prevSimItem = simulatedHistory[simulatedHistory.length - 1];
             if (prevSimItem.recommendationDetails && prevSimItem.recommendationDetails.finalScore > 0 && prevSimItem.recommendationDetails.signal !== 'Avoid Play') { // Was an actual 'Play' signal
                 simRollingPerformance.totalPlaysInWindow++;
@@ -240,6 +242,7 @@ function calculateFitness(individual) {
                 let playsInWindowCalc = 0;
                 const windowStart = Math.max(0, simulatedHistory.length - SIM_STRATEGY_CONFIG.WARNING_ROLLING_WINDOW_SIZE);
                 for (let j = simulatedHistory.length - 1; j >= windowStart; j--) {
+                     if (!isRunning) return 0; // Check isRunning more frequently
                      const historyItemInWindow = simulatedHistory[j];
                      if (historyItemInWindow.recommendationDetails && historyItemInWindow.recommendationDetails.finalScore > 0 && historyItemInWindow.recommendationDetails.signal !== 'Avoid Play') {
                         playsInWindowCalc++;
@@ -254,6 +257,7 @@ function calculateFitness(individual) {
 
         // --- Apply forget factor to adaptive influences BEFORE calculating recommendation for current spin ---
         for (const factorName in localAdaptiveFactorInfluences) {
+            if (!isRunning) return 0; // Check isRunning more frequently
             localAdaptiveFactorInfluences[factorName] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * SIM_ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
         }
 
@@ -321,6 +325,7 @@ function calculateFitness(individual) {
 
         // Apply adaptive influence updates based on the *simulated* outcome and recommendation
         if (simItem.recommendedGroupId && simItem.recommendationDetails?.primaryDrivingFactor) {
+            if (!isRunning) return 0; // Check isRunning more frequently
             const primaryFactor = simItem.recommendationDetails.primaryDrivingFactor;
             // Calculate influence change magnitude based on finalScore
             const influenceChangeMagnitude = Math.max(0, simItem.recommendationDetails.finalScore - SIM_ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * SIM_ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
@@ -359,10 +364,11 @@ async function runEvolution() {
         while (isRunning && generationCount < currentGaConfig.maxGenerations) {
             generationCount++;
             for (const p of population) {
-                if (!isRunning) return;
+                if (!isRunning) break; // Exit inner loop if stopped
                 p.fitness = calculateFitness(p.individual);
             }
-            if (!isRunning) return;
+            if (!isRunning) break; // Exit outer loop if stopped after fitness calculation
+
             population.sort((a, b) => b.fitness - a.fitness);
             
             self.postMessage({
@@ -376,12 +382,17 @@ async function runEvolution() {
                     populationSize: currentGaConfig.populationSize
                 }
             });
+
+            // Introduce a yield point to allow the worker to process messages
+            await new Promise(resolve => setTimeout(resolve, 0)); // Yield control for a tiny bit
+            if (!isRunning) break; // Check again after yielding
+
             const newPopulation = [];
             for (let i = 0; i < currentGaConfig.eliteCount; i++) {
                 newPopulation.push(population[i]);
             }
             while (newPopulation.length < currentGaConfig.populationSize) {
-                if (!isRunning) return;
+                if (!isRunning) break; // Exit if stopped during population generation
                 const parent1 = selectParent(population);
                 const parent2 = selectParent(population);
 
@@ -396,7 +407,7 @@ async function runEvolution() {
             }
             population = newPopulation;
         }
-        if (isRunning) {
+        if (isRunning) { // Only send complete message if not explicitly stopped
             self.postMessage({
                 type: 'complete',
                 payload: {
@@ -406,6 +417,8 @@ async function runEvolution() {
                     togglesUsed: sharedData.toggles // Include the toggles used for this run
                 }
             });
+        } else {
+            self.postMessage({ type: 'stopped' }); // Explicitly send stopped if loop exited due to isRunning = false
         }
     } catch (error) {
         console.error("Error during evolution:", error);
@@ -431,8 +444,8 @@ self.onmessage = (event) => {
             runEvolution();
             break;
         case 'stop':
-            isRunning = false;
-            self.postMessage({ type: 'stopped' }); 
+            isRunning = false; // Set flag immediately
+            // The runEvolution loop will pick this up at its next check and send 'stopped' message.
             break;
     }
 };
