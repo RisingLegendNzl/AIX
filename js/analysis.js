@@ -370,6 +370,7 @@ function runSimulationOnHistory(spinsToProcess) {
 }
 
 export async function runAllAnalyses(winningNumber = null) {
+    console.log(`ANALYSIS: runAllAnalyses started. Passed winningNumber: ${winningNumber}`);
     // --- Apply forget factor to current adaptive influences BEFORE calculating new recommendation ---
     for (const factorName in state.adaptiveFactorInfluences) {
         state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
@@ -389,15 +390,17 @@ export async function runAllAnalyses(winningNumber = null) {
     ui.renderAnalysisList(neighbourScores);
     ui.renderStrategyWeights();
     ui.renderBoardState(boardStats);
+    console.log("ANALYSIS: Analysis panels rendered.");
+
 
     // This section ensures the `recommendedGroupId` and `recommendationDetails` on any pending history item
     // reflect the *latest* strategy settings after runAllAnalyses is called.
     const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending' && item.winningNumber === null);
 
     if (lastPendingItem) {
+        console.log(`ANALYSIS: runAllAnalyses found pending item ID: ${lastPendingItem.id}. Its current status: ${lastPendingItem.status}, winningNumber: ${lastPendingItem.winningNumber}`);
+
         // Get the recommendation for the numbers associated with this pending item
-        // Note: This is a separate call to getRecommendationDataForDisplay logic,
-        // it does NOT affect the UI display, just the history item's properties.
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
         const aiPredictionData = await getAiPrediction(state.history); 
 
@@ -424,15 +427,22 @@ export async function runAllAnalyses(winningNumber = null) {
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
 
-        // Update the actual pending history item's details
-        lastPendingItem.recommendedGroupId = recommendationForPendingItem.bestCandidate?.type.id || null;
-        lastPendingItem.recommendationDetails = { 
-            ...recommendationForPendingItem.details, 
-            signal: recommendationForPendingItem.signal, 
-            reason: recommendationForPendingItem.reason
-        };
+        // Defensive check: Ensure the item is STILL pending before updating its recommendation details
+        const currentPendingStateOfItem = state.history.find(item => item.id === lastPendingItem.id);
+        if (currentPendingStateOfItem && currentPendingStateOfItem.status === 'pending' && currentPendingStateOfItem.winningNumber === null) {
+            currentPendingStateOfItem.recommendedGroupId = recommendationForPendingItem.bestCandidate?.type.id || null;
+            currentPendingStateOfItem.recommendationDetails = { 
+                ...recommendationForPendingItem.details, 
+                signal: recommendationForPendingItem.signal, 
+                reason: recommendationForPendingItem.reason
+            };
+            console.log(`ANALYSIS: runAllAnalyses successfully updated pending item ID: ${lastPendingItem.id} with new recommendation details.`);
+        } else {
+            console.warn(`ANALYSIS: runAllAnalyses NOT updating pending item ID: ${lastPendingItem.id} because its state changed unexpectedly (status: ${currentPendingStateOfItem?.status}, winningNumber: ${currentPendingStateOfItem?.winningNumber}).`);
+        }
         ui.renderHistory(); // Re-render history to reflect updated pending item details
     }
+    console.log("ANALYSIS: runAllAnalyses finished.");
 }
 
 export function updateActivePredictionTypes() {
@@ -455,6 +465,7 @@ export function updateActivePredictionTypes() {
 }
 
 export async function handleHistoricalAnalysis() {
+    console.log("handleHistoricalAnalysis: Function started.");
     const historicalNumbersInput = document.getElementById('historicalNumbersInput');
     const historicalAnalysisMessage = document.getElementById('historicalAnalysisMessage');
     
@@ -463,6 +474,7 @@ export async function handleHistoricalAnalysis() {
 
     if (numbers.length < 3 || numbers.some(n => isNaN(n) || n < 0 || n > 36)) {
         historicalAnalysisMessage.textContent = 'Please provide at least 3 valid numbers (0-36).';
+        console.warn("handleHistoricalAnalysis: Invalid historical numbers provided.");
         return;
     }
 
@@ -472,6 +484,9 @@ export async function handleHistoricalAnalysis() {
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+
+    // After historical analysis, clear any potentially stale pending ID
+    state.setCurrentPendingCalculationId(null); //
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
     await runAllAnalyses();
@@ -497,9 +512,17 @@ export async function handleHistoricalAnalysis() {
         state.setIsAiReady(false);
         ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
     }
+    console.log("handleHistoricalAnalysis: Historical data analyzed and UI updated.");
 }
 
 export async function handleStrategyChange() {
+    console.log("handleStrategyChange: Function started.");
+    // Apply forget factor before analysis runs
+    for (const factorName in state.adaptiveFactorInfluences) {
+        state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+    }
+    state.saveState();
+
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
     if (currentWinningNumbers.length >= 3) {
@@ -507,13 +530,16 @@ export async function handleStrategyChange() {
         state.setHistory(simulatedHistory);
         state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
         labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+        console.log("handleStrategyChange: History re-simulated based on strategy change.");
     }
     
     await runAllAnalyses(); // Updates analysis panels and pending history item details
     // ui.renderHistory(); // renderHistory is called within runAllAnalyses if pending item updated
 
     // After strategy change and full analysis, update the *current recommendation display*
+    // This is the key change: DO NOT create a new history item here, just refresh the display
     ui.updateMainRecommendationDisplay(); 
+    console.log("handleStrategyChange: UI updated based on strategy change.");
 }
 
 // FIX: Renamed to be more specific. This is for retraining on load.
