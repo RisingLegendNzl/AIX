@@ -240,7 +240,7 @@ export function analyzeFactorShift(history, strategyConfig) {
     // Check for high diversity (if diversity score is below a threshold, meaning many different factors are hitting)
     // The diversity threshold is usually 1 - (1/N) where N is number of unique factors, but can be a set value.
     // Let's use 1 - WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD for simplicity, if diversityScore is *less* than that, it's diverse.
-    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) {
+    if (!factorShiftDetected && diversityScore < (1 - strategy.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) { // Corrected typo here
         factorShiftDetected = true;
         reason = `High diversity of primary factors in recent successful plays.`;
     }
@@ -338,12 +338,22 @@ function runSimulationOnHistory(spinsToProcess) {
             terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
 
+        // IMPORTANT: runSimulationOnHistory should ONLY generate RESOLVED items.
+        // It should NOT create or modify pending items from its input stream.
         const newHistoryItem = {
-            id: Date.now() + i, num1, num2, difference: Math.abs(num2 - num1), status: 'pending', 
-            hitTypes: [], typeSuccessStatus: {}, winningNumber, recommendedGroupId: recommendation.bestCandidate?.type.id || null,
+            id: Date.now() + i, // Generate unique ID for this simulated item
+            num1,
+            num2,
+            difference: Math.abs(num2 - num1),
+            status: 'resolved', // Always 'resolved' for simulated history
+            hitTypes: [],
+            typeSuccessStatus: {},
+            winningNumber, // This is the resolved winning number
+            recommendedGroupId: recommendation.bestCandidate?.type.id || null,
             recommendationDetails: recommendation.bestCandidate?.details || null
         };
 
+        // Evaluate status of this RESOLVED item (based on its own winningNumber)
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
@@ -487,33 +497,34 @@ export async function handleHistoricalAnalysis() {
         } else {
             currentLivePendingItem = null; // Don't preserve if it's not truly pending
             state.setCurrentPendingCalculationId(null); // Clear stale ID
+            console.warn(`handleHistoricalAnalysis: currentPendingCalculationId (${state.currentPendingCalculationId}) did not point to a valid pending item. Resetting.`);
         }
     }
 
 
     const historicalSpinsChronological = numbers.slice().reverse();
     const simulatedHistory = runSimulationOnHistory(historicalSpinsChronological);
-    
+    console.log(`handleHistoricalAnalysis: runSimulationOnHistory generated ${simulatedHistory.length} items.`);
+
     // Add the preserved pending item back to the new history, if it exists
     if (currentLivePendingItem) {
-        simulatedHistory.push(currentLivePendingItem);
-        console.log(`handleHistoricalAnalysis: Re-added preserved pending item ID: ${currentLivePendingItem.id} to simulated history.`);
+        // Create a shallow copy to ensure we're not adding the exact same object reference if it was already in simulatedHistory (unlikely, but defensive)
+        const newPendingCopy = { ...currentLivePendingItem };
+        simulatedHistory.push(newPendingCopy);
+        state.setCurrentPendingCalculationId(newPendingCopy.id); // Re-set ID to the copy's ID (important if ID was derived from object)
+        console.log(`handleHistoricalAnalysis: Re-added preserved pending item ID: ${newPendingCopy.id} to simulated history.`);
+    } else {
+        state.setCurrentPendingCalculationId(null); // Ensure null if no pending item was preserved
+        console.log("handleHistoricalAnalysis: No pending item to re-add to history.");
     }
 
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
-    // After historical analysis, ensure currentPendingCalculationId is correctly set for the preserved item, or nullified.
-    if (currentLivePendingItem && state.history.find(item => item.id === currentLivePendingItem.id)) {
-        state.setCurrentPendingCalculationId(currentLivePendingItem.id);
-    } else {
-        state.setCurrentPendingCalculationId(null);
-    }
-
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
-    await runAllAnalyses();
+    await runAllAnalyses(); // This will update analysis panels and pending history item details if re-added
     ui.renderHistory();
     // After historical analysis, update the display based on current inputs.
     ui.updateMainRecommendationDisplay(); 
@@ -556,35 +567,41 @@ export async function handleStrategyChange() {
         } else {
             currentLivePendingItem = null; // Don't preserve if it's not truly pending
             state.setCurrentPendingCalculationId(null); // Clear stale ID
+            console.warn(`handleStrategyChange: currentPendingCalculationId (${state.currentPendingCalculationId}) did not point to a valid pending item. Resetting.`);
         }
     }
 
 
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
+    let simulatedHistory = [];
     // Only run simulation if there's enough data and it's meaningful
     if (currentWinningNumbers.length >= 3) {
-        const simulatedHistory = runSimulationOnHistory(currentWinningNumbers);
-        
-        // Add the preserved pending item back to the new history, if it exists
-        if (currentLivePendingItem) {
-            simulatedHistory.push(currentLivePendingItem);
-            console.log(`handleStrategyChange: Re-added preserved pending item ID: ${currentLivePendingItem.id} to simulated history.`);
-        }
-        state.setHistory(simulatedHistory);
-        state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
-        labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
-        console.log("handleStrategyChange: History re-simulated based on strategy change.");
+        simulatedHistory = runSimulationOnHistory(currentWinningNumbers);
+        console.log(`handleStrategyChange: runSimulationOnHistory generated ${simulatedHistory.length} items.`);
+    } else {
+        console.log("handleStrategyChange: Not enough confirmed winning numbers for re-simulation. Using empty simulated history.");
     }
     
-    // Ensure currentPendingCalculationId is correctly set for the preserved item, or nullified.
-    if (currentLivePendingItem && state.history.find(item => item.id === currentLivePendingItem.id)) {
-        state.setCurrentPendingCalculationId(currentLivePendingItem.id);
+    // Add the preserved pending item back to the new history, if it exists
+    if (currentLivePendingItem) {
+        // Create a shallow copy to ensure we're not adding the exact same object reference if it was already in simulatedHistory (unlikely, but defensive)
+        const newPendingCopy = { ...currentLivePendingItem };
+        simulatedHistory.push(newPendingCopy);
+        state.setCurrentPendingCalculationId(newPendingCopy.id); // Re-set ID to the copy's ID (important if ID was derived from object)
+        console.log(`handleStrategyChange: Re-added preserved pending item ID: ${newPendingCopy.id} to simulated history.`);
     } else {
-        state.setCurrentPendingCalculationId(null);
+        state.setCurrentPendingCalculationId(null); // Ensure null if no pending item was preserved
+        console.log("handleStrategyChange: No pending item to re-add to history.");
     }
+    
+    state.setHistory(simulatedHistory);
+    state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
+    labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    console.log("handleStrategyChange: History re-simulated and set.");
 
-    await runAllAnalyses(); // Updates analysis panels and pending history item details
+
+    await runAllAnalyses(); // Updates analysis panels and pending history item details if re-added
     // ui.renderHistory(); // renderHistory is called within runAllAnalyses if pending item updated
 
     // After strategy change and full analysis, update the *current recommendation display*
