@@ -8,6 +8,8 @@ export let isAiReady = false;
 export let bestFoundParams = null;
 export let currentVideoURL = null;
 export let activePredictionTypes = [];
+// NEW: Store the ID of the currently pending calculation
+export let currentPendingCalculationId = null; //
 
 export let strategyStates = {
     weightedZone: { weight: 1.0, name: 'Neighbour Weighting' },
@@ -50,6 +52,8 @@ export function setActivePredictionTypes(types) { activePredictionTypes = types;
 export function setStrategyStates(states) { strategyStates = states; }
 export function setPatternMemory(memory) { patternMemory = memory; }
 export function setAdaptiveFactorInfluences(influences) { adaptiveFactorInfluences = influences; }
+// NEW: Setter for currentPendingCalculationId
+export function setCurrentPendingCalculationId(id) { currentPendingCalculationId = id; } //
 
 export function setToggles(toggles) {
     useTrendConfirmation = toggles.useTrendConfirmation;
@@ -74,6 +78,7 @@ export function saveState() {
         strategyStates,
         patternMemory,
         adaptiveFactorInfluences,
+        currentPendingCalculationId, // NEW: Save the pending ID
         TOGGLES: {
             useTrendConfirmation, useWeightedZone, useProximityBoost, usePocketDistance, useLowestPocketDistance,
             useAdvancedCalculations, useDynamicStrategy, useAdaptivePlay, useTableChangeWarnings,
