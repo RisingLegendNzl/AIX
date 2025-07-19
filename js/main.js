@@ -9,8 +9,10 @@ import { initializeWorkers } from './workers.js';
 
 // --- STATE MANAGEMENT ---
 function loadState() {
+    console.log("main.js: loadState started.");
     const savedState = localStorage.getItem('terminalCalculatorState');
     if (!savedState) {
+        console.log("main.js: No saved state found. Using defaults.");
         // No saved state, use defaults
         analysis.updateActivePredictionTypes();
         ui.updateAllTogglesUI();
@@ -19,6 +21,7 @@ function loadState() {
     }
 
     const appState = JSON.parse(savedState);
+    console.log("main.js: Loaded appState from localStorage:", appState);
     
     const newHistory = (appState.history || []).map(item => ({
         ...item,
@@ -37,13 +40,15 @@ function loadState() {
         );
         if (foundPendingItem) {
             state.setCurrentPendingCalculationId(appState.currentPendingCalculationId);
+            console.log(`main.js: Successfully loaded and validated currentPendingCalculationId: ${appState.currentPendingCalculationId}`);
         } else {
             // If the ID is invalid or doesn't match a pending item, reset it to null
             state.setCurrentPendingCalculationId(null);
-            console.warn("Loaded currentPendingCalculationId did not match a valid pending item in history. Resetting ID.");
+            console.warn(`main.js: Loaded currentPendingCalculationId (${appState.currentPendingCalculationId}) did not match a valid pending item in history. Resetting ID to null.`);
         }
     } else {
         state.setCurrentPendingCalculationId(null); // Ensure it's null if not in saved state
+        console.log("main.js: currentPendingCalculationId not found in saved state. Setting to null.");
     }
 
 
@@ -59,6 +64,7 @@ function loadState() {
     analysis.updateActivePredictionTypes();
     ui.updateAllTogglesUI();
     ui.initializeAdvancedSettingsUI();
+    console.log("main.js: loadState finished.");
 }
 
 
@@ -77,24 +83,29 @@ loadState();
 initializeWorkers();
 
 // 4. Run the initial analyses and render the UI based on loaded state
-analysis.runAllAnalyses();
-ui.renderHistory();
+console.log("main.js: Running initial analyses.");
+analysis.runAllAnalyses(); // This will update analysis panels and potentially pending history item details
+ui.renderHistory(); // Ensure history list is rendered based on loaded state
 
 // NEW: Call updateMainRecommendationDisplay explicitly on initial load to show current recommendation
-ui.updateMainRecommendationDisplay(); //
+// This uses the current input fields (which might be empty) and current settings.
+console.log("main.js: Calling updateMainRecommendationDisplay on initial load.");
+ui.updateMainRecommendationDisplay(); 
 
 // 5. Initialize the AI worker correctly, giving it time to load its resources
+console.log("main.js: Initializing AI worker.");
 analysis.initializeAi();
 
 // NEW: Attach optimization button listeners *after* workers are initialized
-ui.attachOptimizationButtonListeners(); // FIXED: Call the new function here
+ui.attachOptimizationButtonListeners();
 
-// Read initial values directly for startup sequence
+// Read initial values directly for startup sequence (mostly for initial wheel draw if inputs are populated)
 const initialNum1 = parseInt(document.getElementById('number1').value, 10);
 const initialNum2 = parseInt(document.getElementById('number2').value, 10);
 const lastWinningOnLoad = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
-// This will now be handled by updateMainRecommendationDisplay, but keep for clarity if inputs are empty
+// This will be handled by updateMainRecommendationDisplay's internal call to drawRouletteWheel.
+// Keeping this as a fallback or for clarity if inputs are empty on load.
 if (!isNaN(initialNum1) && !isNaN(initialNum2)) {
     ui.drawRouletteWheel(Math.abs(initialNum2 - initialNum1), lastWinningOnLoad);
 } else {
