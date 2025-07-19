@@ -1,4 +1,4 @@
-// js/analysis.js
+// analysis.js
 
 // --- IMPORTS ---
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
