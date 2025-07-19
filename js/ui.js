@@ -479,6 +479,7 @@ export async function updateMainRecommendationDisplay() {
 
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
+        // Clear or show "enter numbers" message if inputs are invalid
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers.</p>`;
         dom.resultDisplay.classList.remove('hidden');
         hidePatternAlert();
@@ -486,6 +487,7 @@ export async function updateMainRecommendationDisplay() {
         return;
     }
 
+    // Get the recommendation data without affecting history
     const recommendation = await getRecommendationDataForDisplay(num1Val, num2Val);
     
     // --- Render Recommendation and Calculation Groups ---
@@ -499,6 +501,7 @@ export async function updateMainRecommendationDisplay() {
     `;
 
     // Re-calculate all necessary stats again to populate "Calculation Groups"
+    // This is done locally here to get up-to-date stats for display without touching global analysis state.
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
 
@@ -575,7 +578,10 @@ function handleNewCalculation() {
         return;
     }
 
-    // Create a new history item
+    // Check if there is already a pending item for the current input numbers
+    // If so, and it hasn't received a winning number, we might intend to re-calculate it.
+    // However, based on the clarified workflow, "Calculate" means "start a new spin".
+    // So, we always create a new one here.
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
@@ -591,11 +597,10 @@ function handleNewCalculation() {
     };
     state.history.push(newHistoryItem);
 
-    // Get the recommendation data for this specific new history item
-    // This is asynchronous, so handle with .then()
+    // Get the recommendation data for this specific new history item.
+    // Then, update the history item and refresh UI.
     getRecommendationDataForDisplay(num1Val, num2Val).then(recommendation => {
-        // Find the newly created item (or last pending if it's updated logic) and populate its details
-        // It's safer to find it by ID or assume the last one is the one we just added.
+        // Find the newly created item by ID and populate its details.
         const itemToUpdate = state.history.find(item => item.id === newHistoryItem.id);
         if (itemToUpdate) {
             itemToUpdate.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
@@ -605,26 +610,30 @@ function handleNewCalculation() {
                 reason: recommendation.reason
             };
         }
-        // Update the main display using the *same* recommendation data that was just calculated for the history item.
-        // This ensures what's displayed matches what's recorded for this specific pending item.
-        updateMainRecommendationDisplay(); // Calls it without creating new history, just renders
-        renderHistory(); // Re-render history to immediately show the newly added pending item
+        // After history item is updated, re-render history list.
+        renderHistory(); 
+        // Update the main display to show the recommendation for the new pending item.
+        updateMainRecommendationDisplay(); 
     });
 }
 
 
 function handleSubmitResult() {
-    if (!dom.winningNumberInput || !dom.number1 || !dom.number2) return;
+    if (!dom.winningNumberInput) { // Check only winningNumberInput as main inputs might be for next calculation
+        console.warn("handleSubmitResult: winningNumberInput not found. Exiting.");
+        return;
+    }
 
     // Find the truly last PENDING item where the user is expected to submit a winning number.
+    // This is the item that was created by the *last* call to handleNewCalculation().
     const lastPendingForSubmission = [...state.history].reverse().find(
         item => item.status === 'pending' && item.winningNumber === null
     );
 
     if (!lastPendingForSubmission) {
-        console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult.");
+        console.log("No pending calculation awaiting a winning number. Assuming accidental trigger of handleSubmitResult. Current winning number input:", dom.winningNumberInput.value);
         hidePatternAlert();
-        // If no pending calculation, just ensure the display is updated based on current inputs.
+        // If no pending calculation, just ensure the display is updated based on current inputs, but don't proceed with submission logic.
         updateMainRecommendationDisplay(); 
         return;
     }
@@ -656,8 +665,6 @@ function handleSubmitResult() {
     // Run all analyses to update panels (board state, neighbour, weights etc)
     // This also updates the `recommendedGroupId` and `recommendationDetails` for any pending items
     // in history to reflect the latest strategy context *at the time of evaluation*.
-    // This is important for ensuring `recommendedGroupId` on a history item is consistent with
-    // the parameters that were active when its outcome was evaluated.
     analysis.runAllAnalyses(winningNumber); 
     renderHistory(); // Re-render history with updated item and win/loss counter
 
@@ -668,13 +675,14 @@ function handleSubmitResult() {
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
-        // Trigger a new calculation for the *next* spin, creating a NEW pending entry
+        // Trigger a new calculation for the *next* spin, creating a NEW pending entry.
+        // This is a NEW calculation, so it calls handleNewCalculation.
         setTimeout(() => {
             handleNewCalculation(); 
         }, 50);
     } else {
-        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.', prevNum2);
-        // If auto-calculation isn't possible, just update the current display
+        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation. Not auto-calculating next spin.', prevNum2);
+        // If auto-calculation isn't possible (e.g., initial state), just update the current display
         updateMainRecommendationDisplay();
     }
     hidePatternAlert(); 
@@ -689,7 +697,7 @@ function handleClearInputs() {
     dom.number1.focus();
     // After clearing inputs, redraw wheel with no highlights and then update the display
     drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
-    // Update the main display to show "Please enter two valid numbers."
+    // Update the main display, which will now show "Please enter two valid numbers."
     updateMainRecommendationDisplay(); 
     hidePatternAlert(); 
 }
