@@ -1,4 +1,4 @@
-// js/analysis.js
+// analysis.js
 
 // --- IMPORTS ---
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
@@ -438,7 +438,7 @@ export async function runAllAnalyses(winningNumber = null) {
             };
             console.log(`ANALYSIS: runAllAnalyses successfully updated pending item ID: ${lastPendingItem.id} with new recommendation details.`);
         } else {
-            console.warn(`ANALYSIS: runAllAnalyses NOT updating pending item ID: ${lastPendingItem.id} because its state changed unexpectedly (status: ${currentPendingStateOfItem?.status}, winningNumber: ${currentPendingStateOfItem?.winningNumber}).`);
+            console.warn(`ANALYSIS: runAllAnalyses NOT updating pending item ID: ${lastPendingItem.id} because its state changed unexpectedly (status: ${currentPendingStateOfItem?.status}, winningNumber: ${currentPendingStateOfItem?.winningNumber}). This might indicate a race condition or incorrect state manipulation elsewhere.`);
         }
         ui.renderHistory(); // Re-render history to reflect updated pending item details
     }
@@ -478,15 +478,39 @@ export async function handleHistoricalAnalysis() {
         return;
     }
 
+    // Preserve the current pending item (if any) before rebuilding history
+    let currentLivePendingItem = null;
+    if (state.currentPendingCalculationId) {
+        currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
+        if (currentLivePendingItem && currentLivePendingItem.status === 'pending' && currentLivePendingItem.winningNumber === null) {
+            console.log(`handleHistoricalAnalysis: Preserving current pending item ID: ${currentLivePendingItem.id}`);
+        } else {
+            currentLivePendingItem = null; // Don't preserve if it's not truly pending
+            state.setCurrentPendingCalculationId(null); // Clear stale ID
+        }
+    }
+
+
     const historicalSpinsChronological = numbers.slice().reverse();
     const simulatedHistory = runSimulationOnHistory(historicalSpinsChronological);
     
+    // Add the preserved pending item back to the new history, if it exists
+    if (currentLivePendingItem) {
+        simulatedHistory.push(currentLivePendingItem);
+        console.log(`handleHistoricalAnalysis: Re-added preserved pending item ID: ${currentLivePendingItem.id} to simulated history.`);
+    }
+
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
-    // After historical analysis, clear any potentially stale pending ID
-    state.setCurrentPendingCalculationId(null); //
+    // After historical analysis, ensure currentPendingCalculationId is correctly set for the preserved item, or nullified.
+    if (currentLivePendingItem && state.history.find(item => item.id === currentLivePendingItem.id)) {
+        state.setCurrentPendingCalculationId(currentLivePendingItem.id);
+    } else {
+        state.setCurrentPendingCalculationId(null);
+    }
+
 
     historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
     await runAllAnalyses();
@@ -523,16 +547,43 @@ export async function handleStrategyChange() {
     }
     state.saveState();
 
+    // Preserve the current pending item (if any) before rebuilding history
+    let currentLivePendingItem = null;
+    if (state.currentPendingCalculationId) {
+        currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
+        if (currentLivePendingItem && currentLivePendingItem.status === 'pending' && currentLivePendingItem.winningNumber === null) {
+            console.log(`handleStrategyChange: Preserving current pending item ID: ${currentLivePendingItem.id}`);
+        } else {
+            currentLivePendingItem = null; // Don't preserve if it's not truly pending
+            state.setCurrentPendingCalculationId(null); // Clear stale ID
+        }
+    }
+
+
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
+    // Only run simulation if there's enough data and it's meaningful
     if (currentWinningNumbers.length >= 3) {
         const simulatedHistory = runSimulationOnHistory(currentWinningNumbers);
+        
+        // Add the preserved pending item back to the new history, if it exists
+        if (currentLivePendingItem) {
+            simulatedHistory.push(currentLivePendingItem);
+            console.log(`handleStrategyChange: Re-added preserved pending item ID: ${currentLivePendingItem.id} to simulated history.`);
+        }
         state.setHistory(simulatedHistory);
         state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
         labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
         console.log("handleStrategyChange: History re-simulated based on strategy change.");
     }
     
+    // Ensure currentPendingCalculationId is correctly set for the preserved item, or nullified.
+    if (currentLivePendingItem && state.history.find(item => item.id === currentLivePendingItem.id)) {
+        state.setCurrentPendingCalculationId(currentLivePendingItem.id);
+    } else {
+        state.setCurrentPendingCalculationId(null);
+    }
+
     await runAllAnalyses(); // Updates analysis panels and pending history item details
     // ui.renderHistory(); // renderHistory is called within runAllAnalyses if pending item updated
 
