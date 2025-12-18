@@ -20,11 +20,23 @@ export default async function handler(req, res) {
 
     try {
         // Forward the request body (provider, max, losses, spins)
-        const { provider, max, losses, spins } = req.body;
+        // FIXED: Enforce sensible defaults to ensure spins are always returned
+        const { 
+            provider, 
+            max = 30,           // Default: request 30 spins
+            losses = false,     // Default: don't filter by losses
+            spins = true        // Default: always request spins
+        } = req.body;
 
-        console.log('[Vercel API] Proxying request to RapidAPI for provider:', provider);
+        // Validate provider is provided
+        if (!provider) {
+            return res.status(400).json({ error: 'Provider is required' });
+        }
 
-        // Make request to RapidAPI
+        console.log('[Vercel API] Proxying request to RapidAPI for provider:', provider, 
+                    'with params:', { max, losses, spins });
+
+        // Make request to RapidAPI with enforced defaults
         const response = await fetch(RAPIDAPI_ENDPOINT, {
             method: 'POST',
             headers: {
