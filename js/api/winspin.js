@@ -5,7 +5,7 @@ const API_ENDPOINT = '/api/winspin'; // Vercel serverless function
 /**
  * Fetches roulette data via Vercel serverless API for a given provider
  * @param {string} provider - Provider name (Evolution, Pragmatic, Ezugi, Playtech)
- * @returns {Promise<Object>} API response data
+ * @returns {Promise<Array>} API response data (Array of table objects)
  */
 export async function fetchRouletteData(provider) {
     if (!provider) {
@@ -43,7 +43,6 @@ export async function fetchRouletteData(provider) {
             stack: error.stack
         });
         
-        // Provide more helpful error messages
         if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
             throw new Error(`Network error: Unable to connect to API. Check your network connection.`);
         } else if (error.name === 'SyntaxError') {
@@ -57,42 +56,22 @@ export async function fetchRouletteData(provider) {
 /**
  * Extracts table list from API response
  * Returns array of table objects with {id, name} structure
- * @param {Object} apiResponse - Raw API response
+ * @param {Array} apiResponse - Raw API response (Array of tables)
  * @returns {Array<{id: string|number, name: string}>} Array of table objects
  */
 export function extractTableNames(apiResponse) {
     console.log('[Winspin API] Extracting table names from response:', apiResponse);
     
-    if (!apiResponse) {
-        console.warn('[Winspin API] No API response provided');
-        return [];
-    }
-    
-    if (!apiResponse.tables) {
-        console.warn('[Winspin API] No tables found in API response');
+    if (!apiResponse || !Array.isArray(apiResponse)) {
+        console.warn('[Winspin API] Invalid API response: Expected an array of tables');
         return [];
     }
     
     try {
-        // Handle both array and object formats
-        if (Array.isArray(apiResponse.tables)) {
-            // Format: [{id: 1, name: "Auto_Roulette"}, ...]
-            console.log('[Winspin API] Processing tables as array');
-            return apiResponse.tables.map(table => ({
-                id: table.id,
-                name: table.name || `Table_${table.id}`
-            }));
-        } else if (typeof apiResponse.tables === 'object') {
-            // Format: {1: {name: "Auto_Roulette", ...}, 2: {...}}
-            console.log('[Winspin API] Processing tables as object');
-            return Object.entries(apiResponse.tables).map(([id, tableData]) => ({
-                id: id,
-                name: tableData.name || `Table_${id}`
-            }));
-        }
-        
-        console.warn('[Winspin API] Unexpected tables format:', typeof apiResponse.tables);
-        return [];
+        return apiResponse.map(table => ({
+            id: table.id,
+            name: table.name || `Table_${table.id}`
+        }));
     } catch (error) {
         console.error('[Winspin API] Error extracting table names:', error);
         return [];
@@ -101,29 +80,17 @@ export function extractTableNames(apiResponse) {
 
 /**
  * Gets the latest spin data for a specific table
- * @param {Object} apiResponse - Raw API response
+ * @param {Array} apiResponse - Raw API response (Array of tables)
  * @param {string} tableName - Table name to get data for
  * @returns {Object|null} Spin data {winningNumber, num1, num2} or null
  */
 export function getLatestSpin(apiResponse, tableName) {
-    if (!apiResponse || !apiResponse.tables) {
+    if (!apiResponse || !Array.isArray(apiResponse)) {
         return null;
     }
     
-    // Find the table by name
-    let tableData = null;
-    
-    if (Array.isArray(apiResponse.tables)) {
-        tableData = apiResponse.tables.find(t => t.name === tableName);
-    } else if (typeof apiResponse.tables === 'object') {
-        // Search through object values
-        for (const [id, data] of Object.entries(apiResponse.tables)) {
-            if (data.name === tableName) {
-                tableData = data;
-                break;
-            }
-        }
-    }
+    // Find the table by name directly in the root array
+    const tableData = apiResponse.find(t => t.name === tableName);
     
     if (!tableData || !tableData.history || tableData.history.length < 3) {
         return null;
@@ -140,29 +107,18 @@ export function getLatestSpin(apiResponse, tableName) {
 
 /**
  * Gets full history for a specific table
- * @param {Object} apiResponse - Raw API response
+ * @param {Array} apiResponse - Raw API response (Array of tables)
  * @param {string} tableName - Table name to get history for
  * @param {number} count - Number of spins to retrieve (default 30)
  * @returns {Array<number>} Array of numbers from newest to oldest
  */
 export function getTableHistory(apiResponse, tableName, count = 30) {
-    if (!apiResponse || !apiResponse.tables) {
+    if (!apiResponse || !Array.isArray(apiResponse)) {
         return [];
     }
     
-    // Find the table by name
-    let tableData = null;
-    
-    if (Array.isArray(apiResponse.tables)) {
-        tableData = apiResponse.tables.find(t => t.name === tableName);
-    } else if (typeof apiResponse.tables === 'object') {
-        for (const [id, data] of Object.entries(apiResponse.tables)) {
-            if (data.name === tableName) {
-                tableData = data;
-                break;
-            }
-        }
-    }
+    // Find the table by name directly in the root array
+    const tableData = apiResponse.find(t => t.name === tableName);
     
     if (!tableData || !tableData.history) {
         return [];
@@ -186,3 +142,4 @@ export function isNewSpin(currentSpin, lastSpin) {
            currentSpin.num1 !== lastSpin.num1 ||
            currentSpin.num2 !== lastSpin.num2;
 }
+
