@@ -8,6 +8,9 @@ import * as state from './state.js';
 import * as ui from './ui.js';
 import { aiWorker, optimizationWorker } from './workers.js';
 import * as analysis from './analysis.js';
+// NEW: API integration imports
+import * as winspinApi from './api/winspin.js';
+import * as apiContext from './api/apiContextManager.js';
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
@@ -605,6 +608,13 @@ export async function updateMainRecommendationDisplay() {
  */
 function handleNewCalculation() {
     console.log("handleNewCalculation: Function started.");
+    
+    // NEW: Prevent manual calculation when Auto mode is enabled
+    if (apiContext.isAutoModeEnabled()) {
+        alert('Auto mode is enabled. Disable it to use manual input.');
+        return;
+    }
+    
     const num1Val = parseInt(dom.number1.value, 10);
     const num2Val = parseInt(dom.number2.value, 10);
 
@@ -679,6 +689,13 @@ function handleNewCalculation() {
 
 function handleSubmitResult() {
     console.log("handleSubmitResult: Function started.");
+    
+    // NEW: Prevent manual submission when Auto mode is enabled
+    if (apiContext.isAutoModeEnabled()) {
+        alert('Auto mode is enabled. Disable it to use manual input.');
+        return;
+    }
+    
     console.log(`handleSubmitResult: state.currentPendingCalculationId at start: ${state.currentPendingCalculationId}`);
 
     // This check is now the primary gate for finding the pending item
@@ -780,6 +797,12 @@ function handleClearInputs() {
     // Clear any pending calculation ID when inputs are cleared
     state.setCurrentPendingCalculationId(null);
 
+    // NEW: Stop API polling if active
+    if (apiContext.isLivePollingActive()) {
+        apiContext.stopLivePolling();
+        updateApiLiveButtonState();
+    }
+
     // After clearing inputs, redraw wheel with no highlights and then update the display
     drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
     // Update the main display, which will now show "Please enter two valid numbers."
@@ -839,6 +862,9 @@ function handleClearHistory() {
     updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
     // Clear any pending calculation ID when history is cleared
     state.setCurrentPendingCalculationId(null);
+
+    // NEW: Clear API context but preserve provider/table selection
+    apiContext.clearContext();
 
     analysis.runAllAnalyses();
     renderHistory();
@@ -1134,6 +1160,474 @@ export function toggleParameterSliders(enable) {
     }
 }
 
+// --- NEW: API EVENT HANDLERS ---
+
+function attachApiEventHandlers() {
+    // Provider selection handler
+    if (dom.apiProviderSelect) {
+        dom.apiProviderSelect.addEventListener('change', async () => {
+            const provider = dom.apiProviderSelect.value;
+            
+            // Reset table selection and stop live polling
+            dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
+            dom.apiTableSelect.disabled = true;
+            dom.apiAutoToggle.disabled = true;
+            dom.apiLiveButton.disabled = true;
+            dom.apiRefreshButton.disabled = true;
+            dom.apiLoadHistoryButton.disabled = true;
+            apiContext.stopLivePolling();
+            updateApiLiveButtonState();
+            
+            if (!provider) {
+                dom.apiStatusMessage.textContent = '';
+                return;
+            }
+            
+            // Fetch tables for selected provider
+            dom.apiStatusMessage.textContent = 'Loading tables...';
+            try {
+                const apiResponse = await winspinApi.fetchRouletteData(provider);
+                apiContext.setLastApiResponse(apiResponse);
+                
+                const tableNames = winspinApi.extractTableNames(apiResponse);
+                
+                if (tableNames.length === 0) {
+                    dom.apiStatusMessage.textContent = 'No tables found for this provider.';
+                    return;
+                }
+                
+                // Populate table dropdown
+                tableNames.forEach(tableName => {
+                    const option = document.createElement('option');
+                    option.value = tableName;
+                    option.textContent = tableName;
+                    dom.apiTableSelect.appendChild(option);
+                });
+                
+                dom.apiTableSelect.disabled = false;
+                dom.apiStatusMessage.textContent = `${tableNames.length} table(s) available.`;
+            } catch (error) {
+                dom.apiStatusMessage.textContent = `Error: ${error.message}`;
+                console.error('Error loading tables:', error);
+            }
+        });
+    }
+    
+    // Table selection handler
+    if (dom.apiTableSelect) {
+        dom.apiTableSelect.addEventListener('change', () => {
+            const provider = dom.apiProviderSelect.value;
+            const tableName = dom.apiTableSelect.value;
+            
+            if (!provider || !tableName) {
+                dom.apiAutoToggle.disabled = true;
+                dom.apiLiveButton.disabled = true;
+                dom.apiRefreshButton.disabled = true;
+                dom.apiLoadHistoryButton.disabled = true;
+                return;
+            }
+            
+            // Set context
+            apiContext.setContext(provider, tableName);
+            
+            // Enable controls
+            dom.apiAutoToggle.disabled = false;
+            dom.apiRefreshButton.disabled = false;
+            dom.apiLoadHistoryButton.disabled = false;
+            
+            // Only enable Live if Auto is ON
+            if (apiContext.isAutoModeEnabled()) {
+                dom.apiLiveButton.disabled = false;
+            }
+            
+            dom.apiStatusMessage.textContent = `Table "${tableName}" selected.`;
+        });
+    }
+    
+    // Auto mode toggle handler
+    if (dom.apiAutoToggle) {
+        dom.apiAutoToggle.addEventListener('change', () => {
+            const isAutoEnabled = dom.apiAutoToggle.checked;
+            apiContext.setAutoMode(isAutoEnabled);
+            
+            if (isAutoEnabled) {
+                // Enable Live button
+                const tableName = dom.apiTableSelect.value;
+                if (tableName) {
+                    dom.apiLiveButton.disabled = false;
+                }
+                dom.apiStatusMessage.textContent = 'Auto mode enabled. API is now the input source.';
+            } else {
+                // Disable Live button and stop polling
+                dom.apiLiveButton.disabled = true;
+                apiContext.stopLivePolling();
+                updateApiLiveButtonState();
+                dom.apiStatusMessage.textContent = 'Auto mode disabled. Manual input resumed.';
+            }
+        });
+    }
+    
+    // Live button handler
+    if (dom.apiLiveButton) {
+        dom.apiLiveButton.addEventListener('click', () => {
+            if (apiContext.isLivePollingActive()) {
+                // Stop live polling
+                apiContext.stopLivePolling();
+                updateApiLiveButtonState();
+                dom.apiStatusMessage.textContent = 'Live polling stopped.';
+            } else {
+                // Start live polling
+                startLivePolling();
+                updateApiLiveButtonState();
+                dom.apiStatusMessage.textContent = 'Live polling started (every 2-3 seconds).';
+            }
+        });
+    }
+    
+    // Refresh button handler
+    if (dom.apiRefreshButton) {
+        dom.apiRefreshButton.addEventListener('click', async () => {
+            await handleApiRefresh();
+        });
+    }
+    
+    // Load History button handler
+    if (dom.apiLoadHistoryButton) {
+        dom.apiLoadHistoryButton.addEventListener('click', async () => {
+            await handleApiLoadHistory();
+        });
+    }
+}
+
+// --- NEW: API HELPER FUNCTIONS ---
+
+/**
+ * Updates the Live button text and style based on polling state
+ */
+function updateApiLiveButtonState() {
+    if (!dom.apiLiveButton) return;
+    
+    if (apiContext.isLivePollingActive()) {
+        dom.apiLiveButton.textContent = 'Stop Live';
+        dom.apiLiveButton.classList.remove('btn-primary');
+        dom.apiLiveButton.classList.add('btn-danger');
+    } else {
+        dom.apiLiveButton.textContent = 'Live';
+        dom.apiLiveButton.classList.remove('btn-danger');
+        dom.apiLiveButton.classList.add('btn-primary');
+    }
+}
+
+/**
+ * Starts live polling (fetches API every 2-3 seconds)
+ */
+function startLivePolling() {
+    // Clear any existing interval
+    apiContext.stopLivePolling();
+    
+    // Initial fetch
+    handleApiRefresh();
+    
+    // Set up polling (2.5 seconds)
+    const intervalId = setInterval(async () => {
+        await handleApiRefresh();
+    }, 2500);
+    
+    apiContext.setLivePollingInterval(intervalId);
+}
+
+/**
+ * Handles a single API refresh (appends at most one new spin)
+ */
+async function handleApiRefresh() {
+    const provider = dom.apiProviderSelect.value;
+    const tableName = dom.apiTableSelect.value;
+    
+    if (!provider || !tableName) {
+        dom.apiStatusMessage.textContent = 'Error: No provider or table selected.';
+        return;
+    }
+    
+    try {
+        const apiResponse = await winspinApi.fetchRouletteData(provider);
+        apiContext.setLastApiResponse(apiResponse);
+        
+        const latestSpin = winspinApi.getLatestSpin(apiResponse, tableName);
+        
+        if (latestSpin === null) {
+            dom.apiStatusMessage.textContent = 'No spins available for this table.';
+            return;
+        }
+        
+        // Add spin with deduplication
+        const wasAdded = apiContext.addSpin(latestSpin);
+        
+        if (wasAdded) {
+            // Process the new spin through the calculation pipeline
+            await processApiSpin(latestSpin);
+            dom.apiStatusMessage.textContent = `New spin: ${latestSpin}`;
+        } else {
+            dom.apiStatusMessage.textContent = `Latest spin: ${latestSpin} (no change)`;
+        }
+    } catch (error) {
+        dom.apiStatusMessage.textContent = `Error: ${error.message}`;
+        console.error('Error refreshing API data:', error);
+    }
+}
+
+/**
+ * Loads full history from API (replaces existing history)
+ */
+async function handleApiLoadHistory() {
+    const provider = dom.apiProviderSelect.value;
+    const tableName = dom.apiTableSelect.value;
+    
+    if (!provider || !tableName) {
+        dom.apiStatusMessage.textContent = 'Error: No provider or table selected.';
+        return;
+    }
+    
+    const confirmed = confirm(
+        'This will replace your current history with the last 30 spins from the API. Continue?'
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    try {
+        dom.apiStatusMessage.textContent = 'Loading history...';
+        
+        const apiResponse = await winspinApi.fetchRouletteData(provider);
+        apiContext.setLastApiResponse(apiResponse);
+        
+        const spins = winspinApi.getTableSpins(apiResponse, tableName);
+        
+        if (spins.length === 0) {
+            dom.apiStatusMessage.textContent = 'No spins available for this table.';
+            return;
+        }
+        
+        // Replace context spins
+        apiContext.replaceContextSpins(spins);
+        
+        // Process through historical analysis pipeline (similar to handleHistoricalAnalysis)
+        await processApiHistoryLoad(spins);
+        
+        dom.apiStatusMessage.textContent = `Loaded ${spins.length} spins from API.`;
+    } catch (error) {
+        dom.apiStatusMessage.textContent = `Error: ${error.message}`;
+        console.error('Error loading history:', error);
+    }
+}
+
+/**
+ * Processes a single API spin through the calculation pipeline
+ * @param {number} spin - The spin number
+ */
+async function processApiSpin(spin) {
+    // Get the last two spins from context to use as num1 and num2
+    const contextSpins = apiContext.getContextSpins();
+    
+    if (contextSpins.length < 3) {
+        console.log('Need at least 3 spins to process. Current count:', contextSpins.length);
+        return;
+    }
+    
+    const num1 = contextSpins[contextSpins.length - 3];
+    const num2 = contextSpins[contextSpins.length - 2];
+    const winningNumber = spin;
+    
+    // Create a new history item (similar to handleNewCalculation)
+    const newHistoryItem = {
+        id: Date.now(),
+        num1,
+        num2,
+        difference: Math.abs(num2 - num1),
+        status: 'pending',
+        hitTypes: [],
+        typeSuccessStatus: {},
+        winningNumber: null,
+        pocketDistance: null,
+        recommendedGroupId: null,
+        recommendationDetails: null
+    };
+    
+    state.history.push(newHistoryItem);
+    state.setCurrentPendingCalculationId(newHistoryItem.id);
+    
+    // Get recommendation
+    const recommendation = await getRecommendationDataForDisplay(num1, num2);
+    
+    const itemToUpdate = state.history.find(item =>
+        item.id === newHistoryItem.id && item.status === 'pending' && item.winningNumber === null
+    );
+    
+    if (itemToUpdate) {
+        itemToUpdate.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
+        itemToUpdate.recommendationDetails = {
+            ...recommendation.details,
+            signal: recommendation.signal,
+            reason: recommendation.reason
+        };
+    }
+    
+    // Immediately resolve with winning number
+    evaluateCalculationStatus(itemToUpdate, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+    
+    state.setCurrentPendingCalculationId(null);
+    
+    // Update confirmedWinsLog
+    const newLog = state.history
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => a.id - b.id)
+        .map(item => item.winningNumber);
+    state.setConfirmedWinsLog(newLog);
+    
+    // Re-label failures
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    
+    // Run analyses
+    await analysis.runAllAnalyses(winningNumber);
+    renderHistory();
+    
+    // Update display
+    await updateMainRecommendationDisplay();
+}
+
+/**
+ * Processes full API history load through simulation pipeline
+ * @param {Array<number>} spins - Array of spins (oldest to newest)
+ */
+async function processApiHistoryLoad(spins) {
+    // Similar to handleHistoricalAnalysis, but using API spins
+    
+    // Preserve current pending item (if any)
+    let currentLivePendingItem = null;
+    if (state.currentPendingCalculationId) {
+        currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
+        if (currentLivePendingItem && currentLivePendingItem.status === 'pending' && currentLivePendingItem.winningNumber === null) {
+            console.log(`API history load: Preserving current pending item ID: ${currentLivePendingItem.id}`);
+        } else {
+            currentLivePendingItem = null;
+            state.setCurrentPendingCalculationId(null);
+        }
+    }
+    
+    // Run simulation on spins (reusing existing runSimulationOnHistory logic from analysis.js)
+    const simulatedHistory = runSimulationOnHistory(spins);
+    
+    // Re-add preserved pending item if it exists
+    if (currentLivePendingItem) {
+        const newPendingCopy = { ...currentLivePendingItem };
+        simulatedHistory.push(newPendingCopy);
+        state.setCurrentPendingCalculationId(newPendingCopy.id);
+        console.log(`API history load: Re-added preserved pending item ID: ${newPendingCopy.id}`);
+    } else {
+        state.setCurrentPendingCalculationId(null);
+    }
+    
+    state.setHistory(simulatedHistory);
+    state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    
+    await analysis.runAllAnalyses();
+    renderHistory();
+    await updateMainRecommendationDisplay();
+}
+
+/**
+ * Helper function to run simulation on history (extracted from analysis.js logic)
+ * This should ideally be exported from analysis.js, but we'll duplicate the core logic here
+ */
+function runSimulationOnHistory(spinsToProcess) {
+    const localHistory = [];
+    let localConfirmedWinsLog = [];
+    let localAdaptiveFactorInfluences = {
+        'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
+        'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
+    };
+    
+    if (spinsToProcess.length < 3) return [];
+    
+    for (let i = 2; i < spinsToProcess.length; i++) {
+        const num1 = spinsToProcess[i - 2];
+        const num2 = spinsToProcess[i - 1];
+        const winningNumber = spinsToProcess[i];
+        
+        // Apply forget factor
+        for (const factorName in localAdaptiveFactorInfluences) {
+            localAdaptiveFactorInfluences[factorName] = Math.max(
+                config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
+                localAdaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR
+            );
+        }
+        
+        const trendStats = calculateTrendStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+        const boardStats = getBoardStateStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+        const neighbourScores = runSharedNeighbourAnalysis(localHistory, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
+        
+        const recommendation = getRecommendation({
+            trendStats, boardStats, neighbourScores, inputNum1: num1, inputNum2: num2,
+            isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: localAdaptiveFactorInfluences,
+            lastWinningNumber: localConfirmedWinsLog.length > 0 ? localConfirmedWinsLog[localConfirmedWinsLog.length - 1] : null,
+            useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
+            useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
+            useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+            currentHistoryForTrend: localHistory,
+            activePredictionTypes: state.activePredictionTypes,
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+            allPredictionTypes: config.allPredictionTypes,
+            terminalMapping: config.terminalMapping,
+            rouletteWheel: config.rouletteWheel
+        });
+        
+        const newHistoryItem = {
+            id: Date.now() + i,
+            num1,
+            num2,
+            difference: Math.abs(num2 - num1),
+            status: 'resolved',
+            hitTypes: [],
+            typeSuccessStatus: {},
+            winningNumber,
+            recommendedGroupId: recommendation.bestCandidate?.type.id || null,
+            recommendationDetails: recommendation.bestCandidate?.details || null
+        };
+        
+        evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+        localHistory.push(newHistoryItem);
+        
+        // Update adaptive influences
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
+            const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
+            const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+            
+            if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
+            
+            if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
+                localAdaptiveFactorInfluences[primaryFactor] = Math.min(
+                    config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE,
+                    localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)
+                );
+            } else {
+                localAdaptiveFactorInfluences[primaryFactor] = Math.max(
+                    config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
+                    localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)
+                );
+            }
+        }
+        
+        if (winningNumber !== null) {
+            localConfirmedWinsLog.push(winningNumber);
+        }
+    }
+    
+    return localHistory;
+}
+
 // --- UI INITIALIZATION HELPERS ---
 
 function attachMainActionListeners() {
@@ -1372,6 +1866,7 @@ function attachGuideAndInfoListeners() {
         });
     }
 }
+
 // --- INITIALIZATION ---
 export function initializeUI() {
     const elementIds = [
@@ -1392,7 +1887,10 @@ export function initializeUI() {
         'adaptiveInfluenceSliders', 'resetParametersButton', 'saveParametersButton', 'loadParametersInput',
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
         'warningParametersSliders',
-        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle'
+        'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
+        // NEW: API integration element IDs
+        'apiProviderSelect', 'apiTableSelect', 'apiAutoToggle', 'apiLiveButton', 
+        'apiRefreshButton', 'apiLoadHistoryButton', 'apiStatusMessage'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
 
@@ -1400,6 +1898,8 @@ export function initializeUI() {
     attachToggleListeners();
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
+    // NEW: Attach API event handlers
+    attachApiEventHandlers();
 
     // Optimization button listeners will be attached by main.js after workers are initialized
     // via ui.attachOptimizationButtonListeners();
