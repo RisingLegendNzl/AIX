@@ -4,9 +4,10 @@
 import { calculateTrendStats, getBoardStateStats, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
-import * as ui from './ui.js'; // Import ui specifically for updateAiStatus, updateMainRecommendationDisplay
+import * as ui from './ui.js';
 import { aiWorker } from './workers.js';
-import { calculatePocketDistance } from './shared-logic.js'; // Ensure calculatePocketDistance is imported for local helpers
+import { calculatePocketDistance } from './shared-logic.js';
+import { apiContext } from './api/apiContextManager.js';
 
 
 // --- ANALYSIS FUNCTIONS ---
@@ -18,26 +19,23 @@ import { calculatePocketDistance } from './shared-logic.js'; // Ensure calculate
  * @returns {Promise<object|null>} A promise that resolves with the prediction data (including aiExplanation) or null.
  */
 export function getAiPrediction(history) {
-    // Immediately return null if the AI isn't ready, to prevent delays.
     if (!state.isAiReady || !aiWorker) {
         return Promise.resolve(null);
     }
 
-    // This Promise will "wrap" the message passing, making it easy to await.
     return new Promise((resolve) => {
-        const timeout = 1000; // 1-second timeout
+        const timeout = 1000;
 
         const timer = setTimeout(() => {
             aiWorker.removeEventListener('message', tempListener);
             console.warn('AI prediction timed out.');
-            resolve(null); // Resolve with null if it takes too long
+            resolve(null);
         }, timeout);
 
         const tempListener = (event) => {
             if (event.data.type === 'predictionResult') {
-                clearTimeout(timer); // Cancel the timeout
+                clearTimeout(timer);
                 aiWorker.removeEventListener('message', tempListener);
-                // Return the full probabilities object which now includes aiExplanation
                 resolve(event.data.probabilities);
             }
         };
@@ -75,39 +73,31 @@ export function labelHistoryFailures(sortedHistory) {
 
 /**
  * Calculates rolling performance metrics for table change warnings.
- * @param {Array} history - The full history log.
- * @param {object} strategyConfig - The current strategy configuration.
- * @returns {object} Contains rolling win rate and consecutive losses for plays.
  */
 export function calculateRollingPerformance(history, strategyConfig) {
     let winsInWindow = 0;
     let lossesInWindow = 0;
     let playsInWindow = 0;
-    let consecutiveLosses = 0; // Consecutive losses for actual "Play" recommendations
+    let consecutiveLosses = 0;
 
     const relevantHistory = [...history]
-        .filter(item => item.winningNumber !== null && item.recommendationDetails && item.recommendedGroupId) // Only confirmed plays with recommendations
-        .sort((a, b) => b.id - a.id); // From newest to oldest
+        .filter(item => item.winningNumber !== null && item.recommendationDetails && item.recommendedGroupId)
+        .sort((a, b) => b.id - a.id);
 
     for (let i = 0; i < relevantHistory.length; i++) {
         const item = relevantHistory[i];
 
-        // Only count towards rolling window if it was an explicit "Play" signal
         if (item.recommendationDetails.finalScore > 0) {
             playsInWindow++;
             if (item.hitTypes.includes(item.recommendedGroupId)) {
                 winsInWindow++;
-                consecutiveLosses = 0; // Reset on a win
+                consecutiveLosses = 0;
             } else {
                 lossesInWindow++;
-                consecutiveLosses++; // Increment consecutive losses
+                consecutiveLosses++;
             }
-        } else {
-            // If it was a 'Wait' signal, it doesn't count towards the rolling performance for warnings
-            // Nor does it break the consecutive losses of *plays*
         }
 
-        // Stop once the window size is reached (or end of history)
         if (playsInWindow >= strategyConfig.WARNING_ROLLING_WINDOW_SIZE) {
             break;
         }
@@ -124,9 +114,6 @@ export function calculateRollingPerformance(history, strategyConfig) {
 
 /**
  * Calculates consecutive hits and misses for each prediction type.
- * @param {Array} history - The full history log.
- * @param {Array} allPredictionTypes - Array of all prediction type definitions.
- * @returns {object} An object with current consecutive hits and misses for each prediction type ID.
  */
 export function calculateConsecutivePerformance(history, allPredictionTypes) {
     const consecutiveHits = {};
@@ -139,54 +126,36 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
 
     if (history.length === 0) return { consecutiveHits, consecutiveMisses };
 
-    // Iterate backwards from the most recent item in the subset
     for (let i = history.length - 1; i >= 0; i--) {
         const item = history[i];
         if (item.status === 'pending' || item.winningNumber === null) {
-            // If the item is pending or missing winningNumber, it breaks the streak for all types
-            // that were active up to this point, effectively resetting counts.
-            // For robust AI features, we might need a more nuanced approach for pending.
-            // For now, let's assume only fully evaluated history items contribute to consecutive counts.
             break; 
         }
 
         let allTypesEvaluatedForThisItem = false;
         allPredictionTypes.forEach(type => {
             if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
-                allTypesEvaluatedForThisItem = true; // At least one type was evaluated
-                // Only count if not already started, or if continuing same streak
+                allTypesEvaluatedForThisItem = true;
                 if ((consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) || 
                     (item.typeSuccessStatus[type.id] && consecutiveHits[type.id] > 0) ||
                     (!item.typeSuccessStatus[type.id] && consecutiveMisses[type.id] > 0)) {
                     
-                    if (item.typeSuccessStatus[type.id]) { // Hit
+                    if (item.typeSuccessStatus[type.id]) {
                         consecutiveHits[type.id]++; 
-                        consecutiveMisses[type.id] = 0; // Reset miss streak
-                    } else { // Miss
+                        consecutiveMisses[type.id] = 0;
+                    } else {
                         consecutiveMisses[type.id]++; 
-                        consecutiveHits[type.id] = 0; // Reset hit streak
+                        consecutiveHits[type.id] = 0;
                     }
                 } else {
-                    // This means the streak for this specific type was broken by an opposite result earlier in the historySliceForThisItem
-                    // So we effectively stop counting for this type beyond this point for this specific snapshot.
-                    // This logic ensures we're only capturing the *current* consecutive streak.
-                    consecutiveHits[type.id] = 0; // Reset if streak broke earlier
-                    consecutiveMisses[type.id] = 0; // Reset if streak broke earlier
+                    consecutiveHits[type.id] = 0;
+                    consecutiveMisses[type.id] = 0;
                 }
             } else {
-                // If type success status isn't available for this type in this item,
-                // it means this type wasn't active or calculated. Break the streak.
-                // Reset for this specific type
                 consecutiveHits[type.id] = 0;
                 consecutiveMisses[type.id] = 0;
             }
         });
-        // If no types were evaluated in this item at all, it's like a break in the chain for all relevant types.
-        // This outer break is likely not needed if inner loop handles it for each type.
-        // Removing for now for more precise per-type tracking.
-        // if (!allTypesEvaluatedForThisItem) {
-        //     break;
-        // }
     }
 
     return { consecutiveHits, consecutiveMisses };
@@ -195,9 +164,6 @@ export function calculateConsecutivePerformance(history, allPredictionTypes) {
 
 /**
  * Analyzes recent successful plays to detect shifts in primary driving factors.
- * @param {Array} history - The full history log.
- * @param {object} strategyConfig - The current strategy configuration.
- * @returns {object} Contains boolean for shift detected and a reason.
  */
 export function analyzeFactorShift(history, strategyConfig) {
     let factorShiftDetected = false;
@@ -205,8 +171,8 @@ export function analyzeFactorShift(history, strategyConfig) {
 
     const relevantSuccessfulPlays = [...history]
         .filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.primaryDrivingFactor !== "N/A")
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE); // Get only the recent successful plays
+        .sort((a, b) => b.id - a.id)
+        .slice(0, strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE);
 
     if (relevantSuccessfulPlays.length < strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE) {
         return { factorShiftDetected: false, reason: 'Not enough successful plays to detect factor shift.' };
@@ -221,7 +187,7 @@ export function analyzeFactorShift(history, strategyConfig) {
     const totalFactorsConsidered = relevantSuccessfulPlays.length;
     let dominantFactor = null;
     let dominantFactorPercentage = 0;
-    let diversityScore = 0; // Higher diversity means more spread out factors
+    let diversityScore = 0;
 
     Object.keys(factorCounts).forEach(factor => {
         const percentage = (factorCounts[factor] / totalFactorsConsidered) * 100;
@@ -229,68 +195,49 @@ export function analyzeFactorShift(history, strategyConfig) {
             dominantFactorPercentage = percentage;
             dominantFactor = factor;
         }
-        // A simple way to measure diversity: sum of squares of proportions. Lower is more diverse.
         diversityScore += Math.pow(factorCounts[factor] / totalFactorsConsidered, 2);
     });
 
-    // Check for lack of dominance (factors are too spread out)
     if (dominantFactorPercentage < strategyConfig.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT) {
         factorShiftDetected = true;
         reason = `No single dominant primary factor (${dominantFactorPercentage.toFixed(1)}%) in recent successful plays.`;
     }
 
-    // Check for high diversity (if diversity score is below a threshold, meaning many different factors are hitting)
-    // The diversity threshold is usually 1 - (1/N) where N is number of unique factors, but can be a set value.
-    // Let's use 1 - WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD for simplicity, if diversityScore is *less* than that, it's diverse.
-    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) { // Corrected typo here
+    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) {
         factorShiftDetected = true;
         reason = `High diversity of primary factors in recent successful plays.`;
     }
-    
-    // You could also add logic to compare the *current* dominant factor to the *historical* dominant factor,
-    // but that would require storing and comparing historical factor dominance. For now, this focuses on recent diversity/lack of dominance.
 
     return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
 }
 
 /**
- * Detects if the winning number is a repeat of a number in the recent history (within SEQUENCE_LENGTH).
- * @param {number} winningNumber - The current winning number.
- * @param {Array} history - The current full history.
- * @param {number} recentHistoryLength - How many recent spins to check for repeats.
- * @returns {boolean} True if repeat detected.
+ * Detects if the winning number is a repeat of a number in the recent history.
  */
 export function isRepeatNumber(winningNumber, history, recentHistoryLength = config.AI_CONFIG.sequenceLength) {
     if (history.length === 0) return false;
     const relevantHistory = history
-        .filter(item => item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, recentHistoryLength); // Get only the recent spins
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, recentHistoryLength);
 
     return relevantHistory.some(item => item.winningNumber === winningNumber);
 }
 
 /**
- * Detects if the winning number is a neighbor of a number in the recent history (within SEQUENCE_LENGTH).
- * @param {number} winningNumber - The current winning number.
- * @param {Array} history - The current full history.
- * @param {number} recentHistoryLength - How many recent spins to check for neighbors.
- * @param {Array} rouletteWheel - The ordered roulette wheel array.
- * @param {number} neighborDistance - The maximum distance to consider a neighbor (e.g., 1 or 2).
- * @returns {boolean} True if neighbor hit detected.
+ * Detects if the winning number is a neighbor of a number in the recent history.
  */
 export function isNeighborHit(winningNumber, history, recentHistoryLength = config.AI_CONFIG.sequenceLength, rouletteWheel = config.rouletteWheel, neighborDistance = 1) {
     if (history.length === 0) return false;
     const relevantHistory = history
-        .filter(item => item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, recentHistoryLength); // Get only the recent spins
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, recentHistoryLength);
 
     for (const item of relevantHistory) {
         const lastSpin = item.winningNumber;
-        if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
+        if (lastSpin === winningNumber) continue;
         
-        // Calculate pocket distance between current winning number and the historical spin
         const distance = calculatePocketDistance(winningNumber, lastSpin, rouletteWheel);
         if (distance <= neighborDistance) {
             return true;
@@ -303,21 +250,20 @@ export function isNeighborHit(winningNumber, history, recentHistoryLength = conf
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
-    let localAdaptiveFactorInfluences = { // Initialized to defaults for simulation
+    let localAdaptiveFactorInfluences = {
         'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
         'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
     };
     if (spinsToProcess.length < 3) return [];
 
-    let wins = 0; // Initialize wins for this simulation
-    let losses = 0; // Initialize losses for this simulation
+    let wins = 0;
+    let losses = 0;
 
     for (let i = 2; i < spinsToProcess.length; i++) {
         const num1 = spinsToProcess[i - 2];
         const num2 = spinsToProcess[i - 1];
         const winningNumber = spinsToProcess[i];
         
-        // --- Apply forget factor to adaptive influences before current spin's recommendation ---
         for (const factorName in localAdaptiveFactorInfluences) {
             localAdaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
         }
@@ -333,43 +279,38 @@ function runSimulationOnHistory(spinsToProcess) {
             useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
-            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, // Use the current config for simulation
-            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory, // Use current adaptive rates config
+            current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory,
             activePredictionTypes: state.activePredictionTypes,
             useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
             terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
 
-        // IMPORTANT: runSimulationOnHistory should ONLY generate RESOLVED items.
-        // It should NOT create or modify pending items from its input stream.
         const newHistoryItem = {
-            id: Date.now() + i, // Generate unique ID for this simulated item
+            id: Date.now() + i,
             num1,
             num2,
             difference: Math.abs(num2 - num1),
-            status: 'resolved', // Always 'resolved' for simulated history
+            status: 'resolved',
             hitTypes: [],
             typeSuccessStatus: {},
-            winningNumber, // This is the resolved winning number
+            winningNumber,
             recommendedGroupId: recommendation.bestCandidate?.type.id || null,
             recommendationDetails: recommendation.bestCandidate?.details || null
         };
 
-        // Evaluate status of this RESOLVED item (based on its own winningNumber)
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
 
-        // Apply adaptive influence updates within the simulation
         if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
-            // Calculate influence change magnitude based on finalScore
             const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
             
             if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
             if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)); // Add confidence-weighted part
+                localAdaptiveFactorInfluences[primaryFactor] = Math.min(config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude));
             } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)); // Subtract confidence-weighted part
+                localAdaptiveFactorInfluences[primaryFactor] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude));
             }
         }
 
@@ -383,20 +324,17 @@ function runSimulationOnHistory(spinsToProcess) {
 
 export async function runAllAnalyses(winningNumber = null) {
     console.log(`ANALYSIS: runAllAnalyses started. Passed winningNumber: ${winningNumber}`);
-    // --- Apply forget factor to current adaptive influences BEFORE calculating new recommendation ---
+    
     for (const factorName in state.adaptiveFactorInfluences) {
         state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
     }
-    state.saveState(); // Save state after applying forget factor
+    state.saveState();
 
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     
-    // Calculate rolling performance for table change warnings
     const rollingPerformance = calculateRollingPerformance(state.history, config.STRATEGY_CONFIG); 
-
-    // NEW: Calculate factor shift status
     const factorShiftStatus = analyzeFactorShift(state.history, config.STRATEGY_CONFIG);
 
     ui.renderAnalysisList(neighbourScores);
@@ -404,15 +342,11 @@ export async function runAllAnalyses(winningNumber = null) {
     ui.renderBoardState(boardStats);
     console.log("ANALYSIS: Analysis panels rendered.");
 
-
-    // This section ensures the `recommendedGroupId` and `recommendationDetails` on any pending history item
-    // reflect the *latest* strategy settings after runAllAnalyses is called.
     const lastPendingItem = [...state.history].reverse().find(item => item.status === 'pending' && item.winningNumber === null);
 
     if (lastPendingItem) {
-        console.log(`ANALYSIS: runAllAnalyses found pending item ID: ${lastPendingItem.id}. Its current status: ${lastPendingItem.status}, winningNumber: ${lastPendingItem.winningNumber}`);
+        console.log(`ANALYSIS: runAllAnalyses found pending item ID: ${lastPendingItem.id}.`);
 
-        // Get the recommendation for the numbers associated with this pending item
         const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
         const aiPredictionData = await getAiPrediction(state.history); 
 
@@ -439,7 +373,6 @@ export async function runAllAnalyses(winningNumber = null) {
             allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
 
-        // Defensive check: Ensure the item is STILL pending before updating its recommendation details
         const currentPendingStateOfItem = state.history.find(item => item.id === lastPendingItem.id);
         if (currentPendingStateOfItem && currentPendingStateOfItem.status === 'pending' && currentPendingStateOfItem.winningNumber === null) {
             currentPendingStateOfItem.recommendedGroupId = recommendationForPendingItem.bestCandidate?.type.id || null;
@@ -448,11 +381,11 @@ export async function runAllAnalyses(winningNumber = null) {
                 signal: recommendationForPendingItem.signal, 
                 reason: recommendationForPendingItem.reason
             };
-            console.log(`ANALYSIS: runAllAnalyses successfully updated pending item ID: ${lastPendingItem.id} with new recommendation details.`);
+            console.log(`ANALYSIS: runAllAnalyses successfully updated pending item ID: ${lastPendingItem.id}.`);
         } else {
-            console.warn(`ANALYSIS: runAllAnalyses NOT updating pending item ID: ${lastPendingItem.id} because its state changed unexpectedly (status: ${currentPendingStateOfItem?.status}, winningNumber: ${currentPendingStateOfItem?.winningNumber}). This might indicate a race condition or incorrect state manipulation elsewhere.`);
+            console.warn(`ANALYSIS: runAllAnalyses NOT updating pending item ID: ${lastPendingItem.id}.`);
         }
-        ui.renderHistory(); // Re-render history to reflect updated pending item details
+        ui.renderHistory();
     }
     console.log("ANALYSIS: runAllAnalyses finished.");
 }
@@ -476,65 +409,117 @@ export function updateActivePredictionTypes() {
     }
 }
 
-export async function handleHistoricalAnalysis() {
-    console.log("handleHistoricalAnalysis: Function started.");
-    const historicalNumbersInput = document.getElementById('historicalNumbersInput');
-    const historicalAnalysisMessage = document.getElementById('historicalAnalysisMessage');
+/**
+ * NEW: Handles training from stored history (replaces old handleHistoricalAnalysis)
+ * Uses confirmedWinsLog from state instead of input fields
+ */
+export async function handleTrainFromHistory() {
+    console.log("handleTrainFromHistory: Function started.");
     
-    historicalAnalysisMessage.textContent = 'Processing...';
-    const numbers = historicalNumbersInput.value.trim().split(/[\s,]+/).filter(Boolean).map(Number);
-
-    if (numbers.length < 3 || numbers.some(n => isNaN(n) || n < 0 || n > 36)) {
-        historicalAnalysisMessage.textContent = 'Please provide at least 3 valid numbers (0-36).';
-        console.warn("handleHistoricalAnalysis: Invalid historical numbers provided.");
+    // Log training start
+    ui.addTrainingLogEntry('info', '=== Training Started ===');
+    
+    // Get confirmed spins from history (these are already stored in chronological order oldest→newest)
+    const confirmedSpins = state.confirmedWinsLog;
+    const totalHistoryItems = state.history.length;
+    const confirmedCount = confirmedSpins.length;
+    
+    // Log data source info
+    const hasApiContext = apiContext.getContextId() !== null;
+    const dataSource = hasApiContext ? `History (API: ${apiContext.getContextId()})` : 'History (Manual + API merged)';
+    ui.addTrainingLogEntry('data', `Source: ${dataSource}`);
+    ui.addTrainingLogEntry('data', `Total history items: ${totalHistoryItems}`);
+    ui.addTrainingLogEntry('data', `Confirmed spins available: ${confirmedCount}`);
+    
+    // Validate we have enough spins
+    if (confirmedCount < 3) {
+        const errorMsg = `Need at least 3 confirmed spins to train. Current: ${confirmedCount}`;
+        ui.addTrainingLogEntry('error', errorMsg);
+        ui.updateAiStatus(`AI Model: ${errorMsg}`);
+        console.warn("handleTrainFromHistory: Not enough confirmed spins.");
         return;
     }
-
-    // Preserve the current pending item (if any) before rebuilding history
+    
+    // Validate all spins are valid roulette numbers
+    const invalidSpins = confirmedSpins.filter(n => isNaN(n) || n < 0 || n > 36);
+    if (invalidSpins.length > 0) {
+        const errorMsg = `Invalid spin values detected: ${invalidSpins.join(', ')}`;
+        ui.addTrainingLogEntry('error', errorMsg);
+        ui.updateAiStatus(`AI Model: Training failed - invalid data`);
+        console.error("handleTrainFromHistory: Invalid spin values:", invalidSpins);
+        return;
+    }
+    
+    // Log order verification
+    // confirmedWinsLog should already be oldest→newest (sorted by history item id)
+    const first5 = confirmedSpins.slice(0, 5);
+    const last5 = confirmedSpins.slice(-5);
+    
+    ui.addTrainingLogEntry('data', `First 5 spins (oldest): [${first5.join(', ')}]`);
+    ui.addTrainingLogEntry('data', `Last 5 spins (newest): [${last5.join(', ')}]`);
+    
+    // Order verification against API context if available
+    const apiSpins = apiContext.getContextSpins();
+    if (apiSpins.length > 0) {
+        const apiNewest = apiSpins[0]; // API stores newest first
+        const historyNewest = confirmedSpins[confirmedSpins.length - 1];
+        
+        if (apiNewest === historyNewest) {
+            ui.addTrainingLogEntry('success', `Order check: PASS (newest spin matches API: ${historyNewest})`);
+        } else {
+            ui.addTrainingLogEntry('warning', `Order check: MISMATCH - History newest: ${historyNewest}, API newest: ${apiNewest}`);
+        }
+    } else {
+        ui.addTrainingLogEntry('info', 'Order check: N/A (no API context for comparison)');
+    }
+    
+    ui.addTrainingLogEntry('info', 'Processing and simulating history...');
+    ui.updateAiStatus('AI Model: Processing history...');
+    
+    // Preserve current pending item
     let currentLivePendingItem = null;
     if (state.currentPendingCalculationId) {
         currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
         if (currentLivePendingItem && currentLivePendingItem.status === 'pending' && currentLivePendingItem.winningNumber === null) {
-            console.log(`handleHistoricalAnalysis: Preserving current pending item ID: ${currentLivePendingItem.id}`);
+            console.log(`handleTrainFromHistory: Preserving current pending item ID: ${currentLivePendingItem.id}`);
         } else {
-            currentLivePendingItem = null; // Don't preserve if it's not truly pending
-            state.setCurrentPendingCalculationId(null); // Clear stale ID
-            console.warn(`handleHistoricalAnalysis: currentPendingCalculationId (${state.currentPendingCalculationId}) did not point to a valid pending item. Resetting.`);
+            currentLivePendingItem = null;
+            state.setCurrentPendingCalculationId(null);
         }
     }
 
+    // The confirmedSpins are already in chronological order (oldest→newest)
+    // Run simulation on them
+    const simulatedHistory = runSimulationOnHistory(confirmedSpins);
+    ui.addTrainingLogEntry('info', `Simulation complete: ${simulatedHistory.length} entries generated`);
 
-    const historicalSpinsChronological = numbers.slice().reverse();
-    const simulatedHistory = runSimulationOnHistory(historicalSpinsChronological);
-    console.log(`handleHistoricalAnalysis: runSimulationOnHistory generated ${simulatedHistory.length} items.`);
-
-    // Add the preserved pending item back to the new history, if it exists
+    // Re-add preserved pending item
     if (currentLivePendingItem) {
-        // Create a shallow copy to ensure we're not adding the exact same object reference if it was already in simulatedHistory (unlikely, but defensive)
         const newPendingCopy = { ...currentLivePendingItem };
         simulatedHistory.push(newPendingCopy);
-        state.setCurrentPendingCalculationId(newPendingCopy.id); // Re-set ID to the copy's ID (important if ID was derived from object)
-        console.log(`handleHistoricalAnalysis: Re-added preserved pending item ID: ${newPendingCopy.id} to simulated history.`);
+        state.setCurrentPendingCalculationId(newPendingCopy.id);
+        console.log(`handleTrainFromHistory: Re-added preserved pending item ID: ${newPendingCopy.id}`);
     } else {
-        state.setCurrentPendingCalculationId(null); // Ensure null if no pending item was preserved
-        console.log("handleHistoricalAnalysis: No pending item to re-add to history.");
+        state.setCurrentPendingCalculationId(null);
     }
 
     state.setHistory(simulatedHistory);
     state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
-
-    historicalAnalysisMessage.textContent = `Successfully processed and simulated ${state.history.length} entries.`;
-    await runAllAnalyses(); // This will update analysis panels and pending history item details if re-added
+    await runAllAnalyses();
     ui.renderHistory();
-    // After historical analysis, update the display based on current inputs.
-    ui.updateMainRecommendationDisplay(); 
+    ui.updateMainRecommendationDisplay();
     
+    // Check if we have enough for AI training
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
+    ui.addTrainingLogEntry('data', `Successful predictions in history: ${successfulHistoryCount}`);
+    
     if (successfulHistoryCount >= config.AI_CONFIG.trainingMinHistory) {
         state.setIsAiReady(false);
         ui.updateAiStatus('AI Model: Training...');
+        ui.addTrainingLogEntry('info', 'AI training started...');
+        
         const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); 
         aiWorker.postMessage({ 
             type: 'train', 
@@ -545,56 +530,56 @@ export async function handleHistoricalAnalysis() {
                 rouletteWheel: config.rouletteWheel
             } 
         });
+        
+        // Note: Training completion is handled by aiWorker.onmessage in workers.js
+        // We'll add a log entry when the AI status changes to "Ready"
     } else {
+        const msg = `Need ${config.AI_CONFIG.trainingMinHistory} successful predictions to train AI. Current: ${successfulHistoryCount}`;
         state.setIsAiReady(false);
-        ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
+        ui.updateAiStatus(`AI Model: ${msg}`);
+        ui.addTrainingLogEntry('warning', msg);
     }
-    console.log("handleHistoricalAnalysis: Historical data analyzed and UI updated.");
+    
+    ui.addTrainingLogEntry('success', `Analysis complete. Processed ${state.history.length} entries.`);
+    console.log("handleTrainFromHistory: Completed.");
 }
 
 export async function handleStrategyChange() {
     console.log("handleStrategyChange: Function started.");
-    // Apply forget factor before analysis runs
+    
     for (const factorName in state.adaptiveFactorInfluences) {
         state.adaptiveFactorInfluences[factorName] = Math.max(config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
     }
     state.saveState();
 
-    // Preserve the current pending item (if any) before rebuilding history
     let currentLivePendingItem = null;
     if (state.currentPendingCalculationId) {
         currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
         if (currentLivePendingItem && currentLivePendingItem.status === 'pending' && currentLivePendingItem.winningNumber === null) {
             console.log(`handleStrategyChange: Preserving current pending item ID: ${currentLivePendingItem.id}`);
         } else {
-            currentLivePendingItem = null; // Don't preserve if it's not truly pending
-            state.setCurrentPendingCalculationId(null); // Clear stale ID
-            console.warn(`handleStrategyChange: currentPendingCalculationId (${state.currentPendingCalculationId}) did not point to a valid pending item. Resetting.`);
+            currentLivePendingItem = null;
+            state.setCurrentPendingCalculationId(null);
         }
     }
-
 
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
 
     let simulatedHistory = [];
-    // Only run simulation if there's enough data and it's meaningful
     if (currentWinningNumbers.length >= 3) {
         simulatedHistory = runSimulationOnHistory(currentWinningNumbers);
         console.log(`handleStrategyChange: runSimulationOnHistory generated ${simulatedHistory.length} items.`);
     } else {
-        console.log("handleStrategyChange: Not enough confirmed winning numbers for re-simulation. Using empty simulated history.");
+        console.log("handleStrategyChange: Not enough confirmed winning numbers for re-simulation.");
     }
     
-    // Add the preserved pending item back to the new history, if it exists
     if (currentLivePendingItem) {
-        // Create a shallow copy to ensure we're not adding the exact same object reference if it was already in simulatedHistory (unlikely, but defensive)
         const newPendingCopy = { ...currentLivePendingItem };
         simulatedHistory.push(newPendingCopy);
-        state.setCurrentPendingCalculationId(newPendingCopy.id); // Re-set ID to the copy's ID (important if ID was derived from object)
-        console.log(`handleStrategyChange: Re-added preserved pending item ID: ${newPendingCopy.id} to simulated history.`);
+        state.setCurrentPendingCalculationId(newPendingCopy.id);
+        console.log(`handleStrategyChange: Re-added preserved pending item ID: ${newPendingCopy.id}`);
     } else {
-        state.setCurrentPendingCalculationId(null); // Ensure null if no pending item was preserved
-        console.log("handleStrategyChange: No pending item to re-add to history.");
+        state.setCurrentPendingCalculationId(null);
     }
     
     state.setHistory(simulatedHistory);
@@ -602,17 +587,11 @@ export async function handleStrategyChange() {
     labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     console.log("handleStrategyChange: History re-simulated and set.");
 
-
-    await runAllAnalyses(); // Updates analysis panels and pending history item details if re-added
-    // ui.renderHistory(); // renderHistory is called within runAllAnalyses if pending item updated
-
-    // After strategy change and full analysis, update the *current recommendation display*
-    // This is the key change: DO NOT create a new history item here, just refresh the display
+    await runAllAnalyses();
     ui.updateMainRecommendationDisplay(); 
     console.log("handleStrategyChange: UI updated based on strategy change.");
 }
 
-// FIX: Renamed to be more specific. This is for retraining on load.
 export function trainAiOnLoad() {
     if (!aiWorker || !state.isAiReady) {
         return;
@@ -620,14 +599,12 @@ export function trainAiOnLoad() {
 
     const successfulHistoryCount = state.history.filter(item => item.status === 'success').length;
 
-    // FIXED: Corrected the 'else' syntax error by restructuring the if/else logic
     if (successfulHistoryCount < config.AI_CONFIG.trainingMinHistory) {
         state.setIsAiReady(false);
         ui.updateAiStatus(`AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train. (Current: ${successfulHistoryCount})`);
         return;
     }
 
-    // If we reach here, history is sufficient, so proceed with training
     ui.updateAiStatus('AI Model: Re-training with loaded history...');
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel); 
     aiWorker.postMessage({ 
@@ -641,7 +618,6 @@ export function trainAiOnLoad() {
     });
 }
 
-// FIX: New function to properly initialize the AI worker on startup.
 export function initializeAi() {
     if (!aiWorker) return;
     const savedScaler = localStorage.getItem('roulette-ml-scaler');
