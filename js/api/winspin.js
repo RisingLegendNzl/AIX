@@ -1,11 +1,12 @@
 // js/api/winspin.js - Winspin.bet API Integration Module
 
-const API_BASE_URL = 'https://winspin.bet/api';
-const API_ENDPOINT = `${API_BASE_URL}/get_roulette`;
+const RAPIDAPI_HOST = 'winspin-bet-online-roulette-tracker-api.p.rapidapi.com';
+const API_ENDPOINT = `https://${RAPIDAPI_HOST}/api/get_roulette`;
+const RAPIDAPI_KEY = 'YOUR_RAPIDAPI_KEY_HERE'; // Replace with actual RapidAPI key
 
 /**
- * Fetches roulette data from Winspin API for a given provider
- * Uses single POST endpoint with provider in request body
+ * Fetches roulette data from RapidAPI for a given provider
+ * Uses RapidAPI endpoint with required headers
  * @param {string} provider - Provider name (Evolution, Pragmatic, Ezugi, Playtech)
  * @returns {Promise<Object>} API response data
  */
@@ -19,13 +20,14 @@ export async function fetchRouletteData(provider) {
     try {
         const response = await fetch(API_ENDPOINT, {
             method: 'POST',
-            mode: 'cors',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
+                'x-rapidapi-host': RAPIDAPI_HOST,
+                'x-rapidapi-key': RAPIDAPI_KEY
             },
             body: JSON.stringify({
-                provider: provider // Send provider in body, not URL
+                provider: provider // Send provider in body
             })
         });
         
@@ -48,9 +50,9 @@ export async function fetchRouletteData(provider) {
         
         // Provide more helpful error messages
         if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-            throw new Error(`Network error: Unable to connect to Winspin API. Check CORS settings or network connection.`);
+            throw new Error(`Network error: Unable to connect to RapidAPI. Check your API key and network connection.`);
         } else if (error.name === 'SyntaxError') {
-            throw new Error(`Invalid JSON response from Winspin API`);
+            throw new Error(`Invalid JSON response from RapidAPI`);
         }
         
         throw error;
