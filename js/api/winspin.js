@@ -8,14 +8,47 @@ const API_BASE_URL = 'https://winspin.bet/api';
  * @returns {Promise<Object>} API response data
  */
 export async function fetchRouletteData(provider) {
+    if (!provider) {
+        throw new Error('Provider is required');
+    }
+    
+    const providerLower = provider.toLowerCase();
+    const url = `${API_BASE_URL}/${providerLower}`;
+    
+    console.log(`[Winspin API] Fetching data for ${provider} from ${url}`);
+    
     try {
-        const response = await fetch(`${API_BASE_URL}/${provider.toLowerCase()}`);
+        const response = await fetch(url, {
+            method: 'GET',
+            mode: 'cors', // Enable CORS
+            headers: {
+                'Accept': 'application/json',
+            }
+        });
+        
+        console.log(`[Winspin API] Response status: ${response.status}`);
+        
         if (!response.ok) {
-            throw new Error(`API request failed: ${response.status}`);
+            throw new Error(`API request failed with status ${response.status}: ${response.statusText}`);
         }
-        return await response.json();
+        
+        const data = await response.json();
+        console.log(`[Winspin API] Successfully fetched data for ${provider}`, data);
+        return data;
     } catch (error) {
-        console.error(`Error fetching data for ${provider}:`, error);
+        console.error(`[Winspin API] Error fetching data for ${provider}:`, {
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+        });
+        
+        // Provide more helpful error messages
+        if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+            throw new Error(`Network error: Unable to connect to Winspin API. Check CORS settings or network connection.`);
+        } else if (error.name === 'SyntaxError') {
+            throw new Error(`Invalid JSON response from Winspin API`);
+        }
+        
         throw error;
     }
 }
@@ -27,26 +60,42 @@ export async function fetchRouletteData(provider) {
  * @returns {Array<{id: string|number, name: string}>} Array of table objects
  */
 export function extractTableNames(apiResponse) {
-    if (!apiResponse || !apiResponse.tables) {
+    console.log('[Winspin API] Extracting table names from response:', apiResponse);
+    
+    if (!apiResponse) {
+        console.warn('[Winspin API] No API response provided');
         return [];
     }
     
-    // Handle both array and object formats
-    if (Array.isArray(apiResponse.tables)) {
-        // Format: [{id: 1, name: "Auto_Roulette"}, ...]
-        return apiResponse.tables.map(table => ({
-            id: table.id,
-            name: table.name || `Table_${table.id}`
-        }));
-    } else if (typeof apiResponse.tables === 'object') {
-        // Format: {1: {name: "Auto_Roulette", ...}, 2: {...}}
-        return Object.entries(apiResponse.tables).map(([id, tableData]) => ({
-            id: id,
-            name: tableData.name || `Table_${id}`
-        }));
+    if (!apiResponse.tables) {
+        console.warn('[Winspin API] No tables found in API response');
+        return [];
     }
     
-    return [];
+    try {
+        // Handle both array and object formats
+        if (Array.isArray(apiResponse.tables)) {
+            // Format: [{id: 1, name: "Auto_Roulette"}, ...]
+            console.log('[Winspin API] Processing tables as array');
+            return apiResponse.tables.map(table => ({
+                id: table.id,
+                name: table.name || `Table_${table.id}`
+            }));
+        } else if (typeof apiResponse.tables === 'object') {
+            // Format: {1: {name: "Auto_Roulette", ...}, 2: {...}}
+            console.log('[Winspin API] Processing tables as object');
+            return Object.entries(apiResponse.tables).map(([id, tableData]) => ({
+                id: id,
+                name: tableData.name || `Table_${id}`
+            }));
+        }
+        
+        console.warn('[Winspin API] Unexpected tables format:', typeof apiResponse.tables);
+        return [];
+    } catch (error) {
+        console.error('[Winspin API] Error extracting table names:', error);
+        return [];
+    }
 }
 
 /**
