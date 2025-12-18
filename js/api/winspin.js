@@ -1,12 +1,9 @@
 // js/api/winspin.js - Winspin.bet API Integration Module
 
-const RAPIDAPI_HOST = 'winspin-bet-online-roulette-tracker-api.p.rapidapi.com';
-const API_ENDPOINT = `https://${RAPIDAPI_HOST}/api/get_roulette`;
-const RAPIDAPI_KEY = 'YOUR_RAPIDAPI_KEY_HERE'; // Replace with actual RapidAPI key
+const API_ENDPOINT = '/api/winspin'; // Vercel serverless function
 
 /**
- * Fetches roulette data from RapidAPI for a given provider
- * Uses RapidAPI endpoint with required headers
+ * Fetches roulette data via Vercel serverless API for a given provider
  * @param {string} provider - Provider name (Evolution, Pragmatic, Ezugi, Playtech)
  * @returns {Promise<Object>} API response data
  */
@@ -15,19 +12,17 @@ export async function fetchRouletteData(provider) {
         throw new Error('Provider is required');
     }
     
-    console.log(`[Winspin API] Fetching data for ${provider} using POST ${API_ENDPOINT}`);
+    console.log(`[Winspin API] Fetching data for ${provider} via ${API_ENDPOINT}`);
     
     try {
         const response = await fetch(API_ENDPOINT, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'x-rapidapi-host': RAPIDAPI_HOST,
-                'x-rapidapi-key': RAPIDAPI_KEY
+                'Accept': 'application/json'
             },
             body: JSON.stringify({
-                provider: provider // Send provider in body
+                provider: provider
             })
         });
         
@@ -50,9 +45,9 @@ export async function fetchRouletteData(provider) {
         
         // Provide more helpful error messages
         if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-            throw new Error(`Network error: Unable to connect to RapidAPI. Check your API key and network connection.`);
+            throw new Error(`Network error: Unable to connect to API. Check your network connection.`);
         } else if (error.name === 'SyntaxError') {
-            throw new Error(`Invalid JSON response from RapidAPI`);
+            throw new Error(`Invalid JSON response from API`);
         }
         
         throw error;
