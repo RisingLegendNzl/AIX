@@ -269,16 +269,47 @@ export function renderHistory() {
             additionalDetailsHtml = `<div class="additional-details">${detailsParts.join(' | ')}</div>`;
         }
         
-        // --- AI DETAILS ---
+        // --- AI DETAILS (UPDATED TO SHOW EXPLANATION) ---
         let aiDetailsHtml = '';
         if (item.recommendedGroupId && item.recommendationDetails) {
-            aiDetailsHtml = `
-                <div class="ai-details-toggle" data-target="ai-details-${item.id}">Show AI Details</div>
-                <div id="ai-details-${item.id}" class="ai-details-section">
-                    <ul>
-                        ${item.recommendationDetails.primaryDrivingFactor ? `<li><strong>Reason: ${item.recommendationDetails.primaryDrivingFactor}</strong></li>` : ''}
-                        <li>Final Score: ${item.recommendationDetails.finalScore.toFixed(2)}</li>
+            // Check if we have AI explanation data
+            const aiExplanation = item.recommendationDetails.aiExplanation;
+            
+            let aiContentHtml = '';
+            if (aiExplanation && state.isAiReady) {
+                // Display AI explanation with headline and bullets
+                const confidenceBadge = aiExplanation.confidence === 'high' 
+                    ? '<span class="text-green-600 font-semibold">High Confidence</span>'
+                    : aiExplanation.confidence === 'medium'
+                    ? '<span class="text-blue-600 font-semibold">Medium Confidence</span>'
+                    : '<span class="text-gray-600 font-semibold">Low Confidence</span>';
+                
+                aiContentHtml = `
+                    <p class="text-sm font-semibold text-gray-700 mb-1">${aiExplanation.headline}</p>
+                    <p class="text-xs text-gray-500 mb-2">Based on last ${aiExplanation.windowSize} spins | ${confidenceBadge}</p>
+                    <ul class="text-xs text-gray-600 list-disc list-inside space-y-1">
+                        ${aiExplanation.bullets.map(bullet => `<li>${bullet}</li>`).join('')}
                     </ul>
+                `;
+            } else if (state.isAiReady) {
+                // Fallback if AI is ready but no explanation available
+                aiContentHtml = `
+                    <p class="text-sm text-gray-600">AI prediction: ${((item.recommendationDetails.mlProbability || 0) * 100).toFixed(1)}% confidence</p>
+                    <p class="text-xs text-gray-500">Pattern analysis available after next calculation</p>
+                `;
+            } else {
+                // AI not ready yet
+                aiContentHtml = `<p class="text-sm text-gray-500">AI training in progress...</p>`;
+            }
+            
+            aiDetailsHtml = `
+                <div class="ai-details-toggle" data-target="ai-details-${item.id}">Show AI Insights</div>
+                <div id="ai-details-${item.id}" class="ai-details-section">
+                    ${aiContentHtml}
+                    <div class="mt-2 pt-2 border-t border-gray-200">
+                        <p class="text-xs text-gray-600"><strong>Primary Factor:</strong> ${item.recommendationDetails.primaryDrivingFactor || 'N/A'}</p>
+                        <p class="text-xs text-gray-600"><strong>Final Score:</strong> ${item.recommendationDetails.finalScore.toFixed(2)}</p>
+                    </div>
                 </div>
             `;
         }
@@ -303,7 +334,7 @@ export function renderHistory() {
             const targetElement = document.getElementById(toggle.dataset.target);
             if (targetElement) {
                 targetElement.classList.toggle('open');
-                toggle.textContent = targetElement.classList.contains('open') ? 'Hide AI Details' : 'Show AI Details';
+                toggle.textContent = targetElement.classList.contains('open') ? 'Hide AI Insights' : 'Show AI Insights';
             }
         };
     });
