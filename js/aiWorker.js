@@ -393,7 +393,279 @@ async function trainEnsemble(historyData, historicalStreakData) {
     self.postMessage({ type: 'status', message: 'AI Ensemble: Ready!' });
 }
 
-// Prediction function (updated for new features)
+// --- AI EXPLANATION GENERATION ---
+
+/**
+ * Analyzes the sequence to detect color patterns
+ */
+function analyzeColorPattern(sequence) {
+    const colors = sequence.map(item => {
+        const num = item.winningNumber;
+        if (num === 0) return 'green';
+        const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+        return redNumbers.includes(num) ? 'red' : 'black';
+    });
+    
+    // Check for streaks
+    let currentColor = colors[0];
+    let streakLength = 1;
+    let maxStreak = 1;
+    let streakColor = currentColor;
+    
+    for (let i = 1; i < colors.length; i++) {
+        if (colors[i] === currentColor) {
+            streakLength++;
+            if (streakLength > maxStreak) {
+                maxStreak = streakLength;
+                streakColor = currentColor;
+            }
+        } else {
+            streakLength = 1;
+            currentColor = colors[i];
+        }
+    }
+    
+    return { maxStreak, streakColor, colors };
+}
+
+/**
+ * Analyzes the sequence to detect even/odd patterns
+ */
+function analyzeParityPattern(sequence) {
+    const parities = sequence.map(item => {
+        const num = item.winningNumber;
+        if (num === 0) return 'zero';
+        return num % 2 === 0 ? 'even' : 'odd';
+    });
+    
+    const evenCount = parities.filter(p => p === 'even').length;
+    const oddCount = parities.filter(p => p === 'odd').length;
+    
+    return { evenCount, oddCount, parities };
+}
+
+/**
+ * Analyzes the sequence to detect repeats and neighbors
+ */
+function analyzeRepeatsAndNeighbors(sequence) {
+    const numbers = sequence.map(item => item.winningNumber);
+    const repeats = [];
+    const seen = new Set();
+    
+    for (const num of numbers) {
+        if (seen.has(num)) {
+            repeats.push(num);
+        }
+        seen.add(num);
+    }
+    
+    // Check for neighbors on the wheel
+    let neighborHits = 0;
+    for (let i = 1; i < numbers.length; i++) {
+        const distance = calculatePocketDistanceLocal(numbers[i], numbers[i-1], rouletteWheel);
+        if (distance <= 2) {
+            neighborHits++;
+        }
+    }
+    
+    return { repeats, neighborHits };
+}
+
+/**
+ * Local pocket distance calculation
+ */
+function calculatePocketDistanceLocal(num1, num2, wheel) {
+    const idx1 = wheel.indexOf(num1);
+    const idx2 = wheel.indexOf(num2);
+    if (idx1 === -1 || idx2 === -1) return Infinity;
+    const directDist = Math.abs(idx1 - idx2);
+    const wrapDist = wheel.length - directDist;
+    return Math.min(directDist, wrapDist);
+}
+
+/**
+ * Analyzes consecutive performance for prediction types
+ */
+function analyzeConsecutivePerformance(validHistory, lastSequence) {
+    const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(validHistory, config.allPredictionTypes);
+    
+    // Find types with notable streaks
+    const notableHits = [];
+    const notableMisses = [];
+    
+    for (const type of config.allPredictionTypes) {
+        if (consecutiveHits[type.id] >= 2) {
+            notableHits.push({ type: type.displayLabel, count: consecutiveHits[type.id] });
+        }
+        if (consecutiveMisses[type.id] >= 3) {
+            notableMisses.push({ type: type.displayLabel, count: consecutiveMisses[type.id] });
+        }
+    }
+    
+    return { notableHits, notableMisses };
+}
+
+/**
+ * Analyzes pocket distance trends
+ */
+function analyzePocketDistanceTrend(sequence) {
+    const distances = [];
+    for (let i = 1; i < sequence.length; i++) {
+        const dist = calculatePocketDistanceLocal(
+            sequence[i].winningNumber,
+            sequence[i-1].winningNumber,
+            rouletteWheel
+        );
+        if (dist !== Infinity) {
+            distances.push(dist);
+        }
+    }
+    
+    const avgDistance = distances.length > 0 
+        ? distances.reduce((a, b) => a + b, 0) / distances.length 
+        : null;
+    
+    const closeClusters = distances.filter(d => d <= 3).length;
+    
+    return { avgDistance, closeClusters, totalSpins: distances.length };
+}
+
+/**
+ * Determines confidence level based on prediction probabilities
+ */
+function determineConfidence(averagedGroupProbs) {
+    const maxProb = Math.max(...Object.values(averagedGroupProbs));
+    const sortedProbs = Object.values(averagedGroupProbs).sort((a, b) => b - a);
+    const spread = sortedProbs[0] - sortedProbs[1]; // Difference between top 2
+    
+    if (maxProb >= 0.6 && spread >= 0.15) return 'high';
+    if (maxProb >= 0.4 && spread >= 0.08) return 'medium';
+    return 'low';
+}
+
+/**
+ * Generates the headline for the AI explanation
+ */
+function generateHeadline(lastSequence, averagedGroupProbs) {
+    const confidence = determineConfidence(averagedGroupProbs);
+    
+    if (confidence === 'low') {
+        return "AI signals show mixed patterns with low confidence";
+    }
+    
+    const maxProb = Math.max(...Object.values(averagedGroupProbs));
+    const topGroup = Object.entries(averagedGroupProbs)
+        .find(([_, prob]) => prob === maxProb);
+    
+    if (!topGroup) {
+        return "AI suggests monitoring for clearer pattern emergence";
+    }
+    
+    const groupName = config.allPredictionTypes.find(t => t.id === topGroup[0])?.displayLabel || 'a group';
+    
+    if (confidence === 'high') {
+        return `AI detects strong pattern favoring ${groupName}`;
+    }
+    
+    return `AI suggests ${groupName} based on recent trends`;
+}
+
+/**
+ * Generates bullet points for the AI explanation
+ */
+function generateBullets(lastSequence, validHistory, averagedGroupProbs) {
+    const bullets = [];
+    const windowSize = SEQUENCE_LENGTH;
+    
+    // Analyze various patterns
+    const colorAnalysis = analyzeColorPattern(lastSequence);
+    const parityAnalysis = analyzeParityPattern(lastSequence);
+    const repeatAnalysis = analyzeRepeatsAndNeighbors(lastSequence);
+    const consecutiveAnalysis = analyzeConsecutivePerformance(validHistory, lastSequence);
+    const distanceAnalysis = analyzePocketDistanceTrend(lastSequence);
+    
+    // Priority 1: Strong color streaks
+    if (colorAnalysis.maxStreak >= 3) {
+        bullets.push(`${colorAnalysis.maxStreak} ${colorAnalysis.streakColor} numbers in last ${windowSize} spins`);
+    }
+    
+    // Priority 2: Consecutive hits on prediction types
+    if (consecutiveAnalysis.notableHits.length > 0) {
+        const best = consecutiveAnalysis.notableHits[0];
+        bullets.push(`${best.type} hit ${best.count} times consecutively`);
+    }
+    
+    // Priority 3: Pocket distance clustering
+    if (distanceAnalysis.closeClusters >= 3) {
+        bullets.push(`${distanceAnalysis.closeClusters} of ${distanceAnalysis.totalSpins} spins landed near previous number`);
+    }
+    
+    // Priority 4: Parity patterns
+    if (parityAnalysis.evenCount === 0 || parityAnalysis.oddCount === 0) {
+        const dominantParity = parityAnalysis.evenCount === 0 ? 'odd' : 'even';
+        bullets.push(`All ${windowSize} recent spins were ${dominantParity} numbers`);
+    } else if (Math.abs(parityAnalysis.evenCount - parityAnalysis.oddCount) >= 3) {
+        const dominantParity = parityAnalysis.evenCount > parityAnalysis.oddCount ? 'even' : 'odd';
+        const count = Math.max(parityAnalysis.evenCount, parityAnalysis.oddCount);
+        bullets.push(`${count} of ${windowSize} spins were ${dominantParity}`);
+    }
+    
+    // Priority 5: Repeats
+    if (repeatAnalysis.repeats.length > 0) {
+        bullets.push(`${repeatAnalysis.repeats.length} repeat number(s) detected in sequence`);
+    }
+    
+    // Priority 6: Neighbor clustering
+    if (repeatAnalysis.neighborHits >= 2) {
+        bullets.push(`${repeatAnalysis.neighborHits} consecutive spins landed in nearby wheel sectors`);
+    }
+    
+    // Priority 7: Consecutive misses (contrarian signal)
+    if (consecutiveAnalysis.notableMisses.length > 0) {
+        const worst = consecutiveAnalysis.notableMisses[0];
+        bullets.push(`${worst.type} missed ${worst.count} times (possible reversal)`);
+    }
+    
+    // If no patterns detected, provide a fallback
+    if (bullets.length === 0) {
+        const avgDist = distanceAnalysis.avgDistance;
+        if (avgDist !== null) {
+            bullets.push(`Average pocket distance: ${avgDist.toFixed(1)} positions`);
+        }
+        bullets.push(`Pattern analysis based on ${windowSize} most recent spins`);
+    }
+    
+    // Return up to 3 bullets
+    return bullets.slice(0, 3);
+}
+
+/**
+ * Generates a complete AI explanation
+ */
+function generateAiExplanation(lastSequence, validHistory, averagedGroupProbs) {
+    if (!lastSequence || lastSequence.length === 0) {
+        return {
+            headline: "Insufficient data for AI pattern analysis",
+            bullets: ["Need at least 5 confirmed spins for predictions"],
+            confidence: "none",
+            windowSize: 0
+        };
+    }
+    
+    const windowSize = SEQUENCE_LENGTH;
+    const headline = generateHeadline(lastSequence, averagedGroupProbs);
+    const bullets = generateBullets(lastSequence, validHistory, averagedGroupProbs);
+    const confidence = determineConfidence(averagedGroupProbs);
+    
+    return {
+        headline,
+        bullets,
+        confidence,
+        windowSize
+    };
+}
+
+// Prediction function (updated to include explanation)
 async function predictWithEnsemble(historyData) {
     await tfInitializedPromise;
 
@@ -481,6 +753,10 @@ async function predictWithEnsemble(historyData) {
         config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
         config.allPredictionTypes.forEach((type, i) => finalResult.streakPredictions[type.id] = averagedStreakPreds[i]);
+
+        // Generate AI explanation
+        const aiExplanation = generateAiExplanation(lastSequence, validHistory, averagedGroupProbs);
+        finalResult.aiExplanation = aiExplanation;
 
         return finalResult;
 
