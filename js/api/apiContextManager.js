@@ -10,7 +10,8 @@ class ApiContextManager {
         this.lastSpin = null;
         this.lastApiResponse = null;
         this.pollingIntervalMs = 2500; // 2.5 seconds
-        this.autoModeEnabled = false; // NEW: Track auto mode state
+        this.autoModeEnabled = false;
+        this.contextSpins = []; // NEW: Store spin history for current context
     }
 
     /**
@@ -65,6 +66,7 @@ class ApiContextManager {
         if (this.currentProvider !== provider || this.currentTable !== table) {
             this.stopLivePolling();
             this.lastSpin = null; // Reset last spin for new context
+            this.contextSpins = []; // NEW: Clear spins for new context
         }
         
         this.currentProvider = provider;
@@ -148,6 +150,47 @@ class ApiContextManager {
     }
 
     /**
+     * Sets the polling interval ID (for external interval management)
+     * @param {number} intervalId - The interval ID to store
+     */
+    setLivePollingInterval(intervalId) {
+        this.pollingInterval = intervalId;
+        this.isLivePolling = true;
+    }
+
+    /**
+     * Adds a single spin to the context history with deduplication
+     * @param {number} spin - The spin number to add
+     * @returns {boolean} True if spin was added (new), false if duplicate
+     */
+    addSpin(spin) {
+        // Check if this spin is already the most recent one
+        if (this.contextSpins.length > 0 && this.contextSpins[0] === spin) {
+            return false; // Duplicate
+        }
+        
+        // Add to beginning (newest first)
+        this.contextSpins.unshift(spin);
+        return true;
+    }
+
+    /**
+     * Replaces the entire context spin history with a new array
+     * @param {Array<number>} spins - Array of spins (newest to oldest)
+     */
+    replaceContextSpins(spins) {
+        this.contextSpins = [...spins]; // Create a copy to avoid external mutation
+    }
+
+    /**
+     * Gets the current context spin history
+     * @returns {Array<number>} Array of spins (newest to oldest)
+     */
+    getContextSpins() {
+        return [...this.contextSpins]; // Return a copy to prevent external mutation
+    }
+
+    /**
      * Clears spin data and stops polling, but preserves provider/table/autoMode settings
      * Used when clearing history
      */
@@ -155,6 +198,7 @@ class ApiContextManager {
         this.stopLivePolling();
         this.lastSpin = null;
         this.lastApiResponse = null;
+        this.contextSpins = []; // NEW: Clear spins
         // Note: Does NOT reset provider, table, or autoMode
     }
 
@@ -168,6 +212,7 @@ class ApiContextManager {
         this.lastSpin = null;
         this.lastApiResponse = null;
         this.autoModeEnabled = false; // Reset auto mode
+        this.contextSpins = []; // NEW: Clear spins
     }
 }
 
