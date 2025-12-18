@@ -1189,23 +1189,23 @@ function attachApiEventHandlers() {
                 const apiResponse = await winspinApi.fetchRouletteData(provider);
                 apiContext.setLastApiResponse(apiResponse);
                 
-                const tableNames = winspinApi.extractTableNames(apiResponse);
+                const tables = winspinApi.extractTableNames(apiResponse);
                 
-                if (tableNames.length === 0) {
+                if (tables.length === 0) {
                     dom.apiStatusMessage.textContent = 'No tables found for this provider.';
                     return;
                 }
                 
-                // Populate table dropdown
-                tableNames.forEach(tableName => {
+                // Populate table dropdown with table objects
+                tables.forEach(table => {
                     const option = document.createElement('option');
-                    option.value = tableName; // Keep original for API calls
-                    option.textContent = tableName.replace(/_/g, ' '); // Display with spaces
+                    option.value = table.name; // Use table.name for value (keeps underscores for API calls)
+                    option.textContent = table.name.replace(/_/g, ' '); // Display with spaces
                     dom.apiTableSelect.appendChild(option);
                 });
                 
                 dom.apiTableSelect.disabled = false;
-                dom.apiStatusMessage.textContent = `${tableNames.length} table(s) available.`;
+                dom.apiStatusMessage.textContent = `${tables.length} table(s) available.`;
             } catch (error) {
                 dom.apiStatusMessage.textContent = `Error: ${error.message}`;
                 console.error('Error loading tables:', error);
