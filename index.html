@@ -376,7 +376,37 @@
                 </div>
             </div>
 
-            <!-- NEW: API Live Data Integration Card -->
+            <div class="card p-8 space-y-4" id="historySection">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-4">
+                        <h2 class="text-xl font-bold text-gray-700">History</h2>
+                        <div class="text-sm font-medium">
+                            <span class="text-green-600 font-semibold">Wins: <span id="winCount">0</span></span> |
+                            <span class="text-red-600 font-semibold">Losses: <span id="lossCount">0</span></span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                         <button id="historyInfoToggle" class="bg-gray-100 text-gray-600 hover:bg-gray-200 px-3 py-1 rounded-md text-sm font-semibold transition-colors duration-200">
+                            Info
+                            <svg class="inline-block w-4 h-4 ml-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </button>
+                        <div id="historyInfoDropdown" class="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-sm text-gray-700 z-10 hidden">
+                            <p class="font-semibold mb-2">History Log Insights:</p>
+                            <ul class="list-disc pl-4 space-y-1">
+                                <li><strong class="text-gray-800">Reco: [Group] (Hit)</strong> <span class="text-xs text-gray-500">(Group Color Badge):</span> Your recommended group was successful.</li>
+                                <li><strong class="text-gray-800">Reco: [Group] (Missed), Hit: [Other Group(s)]</strong> <span class="text-xs text-gray-500">(Red Badge):</span> Your recommended group missed, but another group happened to hit.</li>
+                                <li><strong class="text-gray-800">Reco: [Group] (Missed)</strong> <span class="text-xs text-gray-500">(Group Color Badge/Red Cross):</span> Your recommended group and all other active groups missed.</li>
+                                <li><strong class="green-600">Green checkmark:</strong> Overall, at least one active group hit.</li>
+                                <li><strong class="red-600">Red cross:</strong> Overall, no active group hit.</li>
+                            </ul>
+                        </div>
+                        <button id="clearHistoryButton" class="btn btn-danger text-sm py-2 px-3">Clear History</button>
+                    </div>
+                </div>
+                <ul id="historyList" class="history-list space-y-3"></ul>
+            </div>
+
+            <!-- API Live Data Integration Card -->
             <div class="card p-8 space-y-4">
                 <h2 class="text-xl font-bold text-gray-700">Live Data Integration</h2>
                 <p class="text-sm text-gray-500">Connect to live roulette tables via Winspin.bet API</p>
@@ -424,36 +454,6 @@
                         Select a provider to begin
                     </div>
                 </div>
-            </div>
-
-            <div class="card p-8 space-y-4" id="historySection">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center gap-4">
-                        <h2 class="text-xl font-bold text-gray-700">History</h2>
-                        <div class="text-sm font-medium">
-                            <span class="text-green-600 font-semibold">Wins: <span id="winCount">0</span></span> |
-                            <span class="text-red-600 font-semibold">Losses: <span id="lossCount">0</span></span>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2">
-                         <button id="historyInfoToggle" class="bg-gray-100 text-gray-600 hover:bg-gray-200 px-3 py-1 rounded-md text-sm font-semibold transition-colors duration-200">
-                            Info
-                            <svg class="inline-block w-4 h-4 ml-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        </button>
-                        <div id="historyInfoDropdown" class="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-sm text-gray-700 z-10 hidden">
-                            <p class="font-semibold mb-2">History Log Insights:</p>
-                            <ul class="list-disc pl-4 space-y-1">
-                                <li><strong class="text-gray-800">Reco: [Group] (Hit)</strong> <span class="text-xs text-gray-500">(Group Color Badge):</span> Your recommended group was successful.</li>
-                                <li><strong class="text-gray-800">Reco: [Group] (Missed), Hit: [Other Group(s)]</strong> <span class="text-xs text-gray-500">(Red Badge):</span> Your recommended group missed, but another group happened to hit.</li>
-                                <li><strong class="text-gray-800">Reco: [Group] (Missed)</strong> <span class="text-xs text-gray-500">(Group Color Badge/Red Cross):</span> Your recommended group and all other active groups missed.</li>
-                                <li><strong class="green-600">Green checkmark:</strong> Overall, at least one active group hit.</li>
-                                <li><strong class="red-600">Red cross:</strong> Overall, no active group hit.</li>
-                            </ul>
-                        </div>
-                        <button id="clearHistoryButton" class="btn btn-danger text-sm py-2 px-3">Clear History</button>
-                    </div>
-                </div>
-                <ul id="historyList" class="history-list space-y-3"></ul>
             </div>
         </main>
         
