@@ -10,7 +10,7 @@ import { aiWorker, optimizationWorker } from './workers.js';
 import * as analysis from './analysis.js';
 // NEW: API integration imports
 import * as winspinApi from './api/winspin.js';
-import * as apiContext from './api/apiContextManager.js';
+import { apiContext } from './api/apiContextManager.js'; // Import singleton instance
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
