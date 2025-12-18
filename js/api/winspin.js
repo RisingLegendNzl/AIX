@@ -16,13 +16,16 @@ export async function fetchRouletteData(provider) {
     
     try {
         const response = await fetch(API_ENDPOINT, {
-            method: 'POST',
+            method: "POST",
             headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                "Content-Type": "application/json",
+                "Accept": "application/json"
             },
             body: JSON.stringify({
-                provider: provider
+                provider: provider,
+                spins: true,  // FIXED: Always request spins
+                max: 30,      // FIXED: Request up to 30 spins
+                losses: false // FIXED: Don't filter by losses
             })
         });
         
@@ -142,4 +145,3 @@ export function isNewSpin(currentSpin, lastSpin) {
            currentSpin.num1 !== lastSpin.num1 ||
            currentSpin.num2 !== lastSpin.num2;
 }
-
