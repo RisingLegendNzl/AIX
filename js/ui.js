@@ -1498,7 +1498,7 @@ async function processApiSpin(spin) {
 
 /**
  * Processes full API history load through simulation pipeline
- * @param {Array<number>} spins - Array of spins (oldest to newest)
+ * @param {Array<number>} spins - Array of spins (newest to oldest from API)
  */
 async function processApiHistoryLoad(spins) {
     // Similar to handleHistoricalAnalysis, but using API spins
@@ -1515,8 +1515,12 @@ async function processApiHistoryLoad(spins) {
         }
     }
     
+    // FIXED: Reverse spins array so they're processed oldest→newest (chronologically)
+    // API returns newest→oldest, but simulation needs oldest→newest
+    const spinsOldestFirst = [...spins].reverse();
+    
     // Run simulation on spins (reusing existing runSimulationOnHistory logic from analysis.js)
-    const simulatedHistory = runSimulationOnHistory(spins);
+    const simulatedHistory = runSimulationOnHistory(spinsOldestFirst);
     
     // Re-add preserved pending item if it exists
     if (currentLivePendingItem) {
