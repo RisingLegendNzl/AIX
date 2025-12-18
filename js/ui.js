@@ -1401,7 +1401,8 @@ async function handleApiLoadHistory() {
         const apiResponse = await winspinApi.fetchRouletteData(provider);
         apiContext.setLastApiResponse(apiResponse);
         
-        const spins = winspinApi.getTableSpins(apiResponse, tableName);
+        // FIXED: Changed from getTableSpins to getTableHistory
+        const spins = winspinApi.getTableHistory(apiResponse, tableName);
         
         if (spins.length === 0) {
             dom.apiStatusMessage.textContent = 'No spins available for this table.';
