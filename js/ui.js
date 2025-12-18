@@ -1199,8 +1199,8 @@ function attachApiEventHandlers() {
                 // Populate table dropdown
                 tableNames.forEach(tableName => {
                     const option = document.createElement('option');
-                    option.value = tableName;
-                    option.textContent = tableName;
+                    option.value = tableName; // Keep original for API calls
+                    option.textContent = tableName.replace(/_/g, ' '); // Display with spaces
                     dom.apiTableSelect.appendChild(option);
                 });
                 
