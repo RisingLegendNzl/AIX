@@ -288,7 +288,8 @@ export function getRecommendation(context) {
             adaptiveInfluenceUsed: 1.0,
             confluenceBonus: 1.0, 
             reason: [],
-            individualScores: {}
+            individualScores: {},
+            aiExplanation: null // NEW: Store AI explanation
         };
 
         const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
@@ -376,6 +377,11 @@ export function getRecommendation(context) {
         details.baseScore = rawHitRatePoints + rawStreakPoints; // Re-calculate baseScore with actual points
         details.primaryDrivingFactor = mostInfluentialFactor;
         details.adaptiveInfluenceUsed = currentAdaptiveInfluences[mostInfluentialFactor] || 1.0;
+
+        // NEW: Store AI explanation if available
+        if (aiPredictionData && aiPredictionData.aiExplanation) {
+            details.aiExplanation = aiPredictionData.aiExplanation;
+        }
 
         return {
             type: {
