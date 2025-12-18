@@ -1,183 +1,119 @@
-// js/api/apiContextManager.js
-// Manages API contexts (provider + table combinations) and their spin history
+// js/api/apiContextManager.js - API Context Manager
+// Manages API state, polling intervals, and deduplication
 
-/**
- * API Context Manager
- * Tracks spins per context (provider:table) and handles deduplication
- */
+class ApiContextManager {
+    constructor() {
+        this.currentProvider = null;
+        this.currentTable = null;
+        this.isLivePolling = false;
+        this.pollingInterval = null;
+        this.lastSpin = null;
+        this.lastApiResponse = null;
+        this.pollingIntervalMs = 2500; // 2.5 seconds
+    }
 
-let currentContext = {
-    provider: null,
-    tableName: null,
-    contextId: null,
-    spins: [] // Stores spins for this context (oldest → newest)
-};
+    /**
+     * Sets the current provider and table context
+     * Stops any active polling when context changes
+     */
+    setContext(provider, table) {
+        // If context is changing, stop polling
+        if (this.currentProvider !== provider || this.currentTable !== table) {
+            this.stopLivePolling();
+            this.lastSpin = null; // Reset last spin for new context
+        }
+        
+        this.currentProvider = provider;
+        this.currentTable = table;
+    }
 
-let livePollingInterval = null;
-let isAutoMode = false;
-let lastApiResponse = null;
+    /**
+     * Gets the current context identifier (provider:table)
+     */
+    getContextId() {
+        if (!this.currentProvider || !this.currentTable) {
+            return null;
+        }
+        return `${this.currentProvider}:${this.currentTable}`;
+    }
 
-/**
- * Generates a context ID from provider and table name
- * @param {string} provider - Provider name
- * @param {string} tableName - Table name
- * @returns {string} Context ID in format "provider:tableName"
- */
-export function generateContextId(provider, tableName) {
-    return `${provider}:${tableName}`;
-}
+    /**
+     * Stores the last API response for reference
+     */
+    setLastApiResponse(response) {
+        this.lastApiResponse = response;
+    }
 
-/**
- * Gets the current context
- * @returns {Object} Current context object
- */
-export function getCurrentContext() {
-    return { ...currentContext };
-}
+    /**
+     * Gets the last API response
+     */
+    getLastApiResponse() {
+        return this.lastApiResponse;
+    }
 
-/**
- * Sets the current context
- * @param {string} provider - Provider name
- * @param {string} tableName - Table name
- */
-export function setContext(provider, tableName) {
-    const newContextId = generateContextId(provider, tableName);
-    
-    // If context changed, reset spins
-    if (currentContext.contextId !== newContextId) {
-        console.log(`API Context changed from "${currentContext.contextId}" to "${newContextId}". Resetting spins.`);
-        currentContext = {
-            provider,
-            tableName,
-            contextId: newContextId,
-            spins: []
-        };
+    /**
+     * Updates the last known spin data (for deduplication)
+     */
+    setLastSpin(spinData) {
+        this.lastSpin = spinData;
+    }
+
+    /**
+     * Gets the last known spin data
+     */
+    getLastSpin() {
+        return this.lastSpin;
+    }
+
+    /**
+     * Checks if currently in live polling mode
+     */
+    isPolling() {
+        return this.isLivePolling;
+    }
+
+    /**
+     * Starts live polling with a callback function
+     * @param {Function} callback - Function to call on each poll interval
+     */
+    startLivePolling(callback) {
+        if (this.isLivePolling) {
+            return; // Already polling
+        }
+
+        this.isLivePolling = true;
+        
+        // Execute immediately once
+        callback();
+        
+        // Then start interval
+        this.pollingInterval = setInterval(() => {
+            callback();
+        }, this.pollingIntervalMs);
+    }
+
+    /**
+     * Stops live polling
+     */
+    stopLivePolling() {
+        this.isLivePolling = false;
+        if (this.pollingInterval) {
+            clearInterval(this.pollingInterval);
+            this.pollingInterval = null;
+        }
+    }
+
+    /**
+     * Resets the entire context (used when clearing history or disconnecting)
+     */
+    reset() {
+        this.stopLivePolling();
+        this.currentProvider = null;
+        this.currentTable = null;
+        this.lastSpin = null;
+        this.lastApiResponse = null;
     }
 }
 
-/**
- * Clears the current context
- */
-export function clearContext() {
-    console.log('API Context cleared.');
-    currentContext = {
-        provider: null,
-        tableName: null,
-        contextId: null,
-        spins: []
-    };
-}
-
-/**
- * Gets spins for the current context
- * @returns {Array<number>} Array of spins
- */
-export function getContextSpins() {
-    return [...currentContext.spins];
-}
-
-/**
- * Adds a spin to the current context (with deduplication)
- * @param {number} spin - Spin number to add
- * @returns {boolean} True if spin was added, false if duplicate
- */
-export function addSpin(spin) {
-    const lastSpin = currentContext.spins[currentContext.spins.length - 1];
-    
-    if (spin !== lastSpin) {
-        currentContext.spins.push(spin);
-        console.log(`Added spin ${spin} to context "${currentContext.contextId}". Total spins: ${currentContext.spins.length}`);
-        return true;
-    }
-    
-    console.log(`Duplicate spin ${spin} ignored for context "${currentContext.contextId}".`);
-    return false;
-}
-
-/**
- * Replaces all spins in the current context
- * @param {Array<number>} spins - New array of spins
- */
-export function replaceContextSpins(spins) {
-    currentContext.spins = [...spins];
-    console.log(`Replaced spins for context "${currentContext.contextId}". Total spins: ${currentContext.spins.length}`);
-}
-
-/**
- * Gets the latest spin in the current context
- * @returns {number|null} Latest spin or null if no spins
- */
-export function getLatestContextSpin() {
-    if (currentContext.spins.length === 0) {
-        return null;
-    }
-    return currentContext.spins[currentContext.spins.length - 1];
-}
-
-/**
- * Checks if auto mode is enabled
- * @returns {boolean} True if auto mode is on
- */
-export function isAutoModeEnabled() {
-    return isAutoMode;
-}
-
-/**
- * Sets auto mode state
- * @param {boolean} enabled - Whether auto mode is enabled
- */
-export function setAutoMode(enabled) {
-    isAutoMode = enabled;
-    console.log(`Auto mode ${enabled ? 'enabled' : 'disabled'}.`);
-}
-
-/**
- * Gets the live polling interval ID
- * @returns {number|null} Interval ID or null
- */
-export function getLivePollingInterval() {
-    return livePollingInterval;
-}
-
-/**
- * Sets the live polling interval ID
- * @param {number|null} intervalId - Interval ID
- */
-export function setLivePollingInterval(intervalId) {
-    livePollingInterval = intervalId;
-}
-
-/**
- * Stops live polling
- */
-export function stopLivePolling() {
-    if (livePollingInterval) {
-        clearInterval(livePollingInterval);
-        livePollingInterval = null;
-        console.log('Live polling stopped.');
-    }
-}
-
-/**
- * Checks if live polling is active
- * @returns {boolean} True if live polling is active
- */
-export function isLivePollingActive() {
-    return livePollingInterval !== null;
-}
-
-/**
- * Stores the last API response
- * @param {Object} response - API response object
- */
-export function setLastApiResponse(response) {
-    lastApiResponse = response;
-}
-
-/**
- * Gets the last API response
- * @returns {Object|null} Last API response or null
- */
-export function getLastApiResponse() {
-    return lastApiResponse;
-}
+// Export singleton instance
+export const apiContext = new ApiContextManager();
