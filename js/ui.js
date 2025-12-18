@@ -1,22 +1,24 @@
 // js/ui.js
 
 // --- IMPORTS ---
-// Added getBoardStateStats and calculatePocketDistance
 import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDistance, runNeighbourAnalysis as runSharedNeighbourAnalysis, getRecommendation, evaluateCalculationStatus } from './shared-logic.js';
 import * as config from './config.js';
 import * as state from './state.js';
 import * as ui from './ui.js';
 import { aiWorker, optimizationWorker } from './workers.js';
 import * as analysis from './analysis.js';
-// NEW: API integration imports
+// API integration imports
 import * as winspinApi from './api/winspin.js';
-import { apiContext } from './api/apiContextManager.js'; // Import singleton instance
+import { apiContext } from './api/apiContextManager.js';
 
 // --- DOM ELEMENT REFERENCES (Private to this module) ---
 const dom = {};
 
+// --- TRAINING LOG STATE ---
+const MAX_TRAINING_LOG_ENTRIES = 200;
+let trainingLogEntries = [];
+
 // --- PARAMETER DEFINITIONS for UI (matches optimizationWorker's parameterSpace) ---
-// Centralize min/max/step for all numerical parameters for slider generation
 const parameterDefinitions = {
     // Core Strategy Parameters
     learningRate_success: { min: 0.01, max: 1.0, step: 0.01, category: 'coreStrategy' },
@@ -29,17 +31,16 @@ const parameterDefinitions = {
     triggerMinAttempts: { min: 1, max: 20, step: 1, category: 'coreStrategy' },
     triggerSuccessThreshold: { min: 50, max: 100, step: 1, category: 'coreStrategy' },
     // Adaptive Influence Rates
-    SUCCESS: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' }, // Corresponds to adaptiveSuccessRate in GA
-    FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },  // Corresponds to adaptiveFailureRate in GA
+    SUCCESS: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },
+    FAILURE: { min: 0.01, max: 0.5, step: 0.01, category: 'adaptiveRates' },
     MIN_INFLUENCE: { min: 0.0, max: 1.0, step: 0.01, category: 'adaptiveRates' },
     MAX_INFLUENCE: { min: 1.0, max: 5.0, step: 0.1, category: 'adaptiveRates' },
-
-    // NEW: Table Change Warning Parameters for Sliders (Match config.js)
-    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' }, // Example range
-    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' }, // Example range
-    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' }, // Example range
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' }, // Example range
-    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' } // Example range
+    // Table Change Warning Parameters
+    WARNING_ROLLING_WINDOW_SIZE: { min: 5, max: 50, step: 1, category: 'warningParameters' },
+    WARNING_MIN_PLAYS_FOR_EVAL: { min: 1, max: 20, step: 1, category: 'warningParameters' },
+    WARNING_LOSS_STREAK_THRESHOLD: { min: 1, max: 10, step: 1, category: 'warningParameters' },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { min: 0, max: 100, step: 1, category: 'warningParameters' },
+    DEFAULT_AVERAGE_WIN_RATE: { min: 0, max: 100, step: 1, category: 'warningParameters' }
 };
 
 // Map parameter names to their respective config objects and display labels
@@ -83,6 +84,94 @@ function toggleGuide(contentId) {
     }
 }
 
+// --- TRAINING LOG FUNCTIONS ---
+
+/**
+ * Adds an entry to the training log
+ * @param {string} type - 'info' | 'success' | 'warning' | 'error' | 'data'
+ * @param {string} message - The log message
+ * @param {boolean} autoExpand - Whether to auto-expand log on this entry (default: false for non-errors)
+ */
+export function addTrainingLogEntry(type, message, autoExpand = false) {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = { type, message, timestamp };
+    
+    trainingLogEntries.unshift(entry); // Add to beginning (newest first)
+    
+    // Cap log length
+    if (trainingLogEntries.length > MAX_TRAINING_LOG_ENTRIES) {
+        trainingLogEntries = trainingLogEntries.slice(0, MAX_TRAINING_LOG_ENTRIES);
+    }
+    
+    renderTrainingLog();
+    
+    // Auto-expand on errors
+    if (type === 'error' || autoExpand) {
+        expandTrainingLog();
+    }
+}
+
+/**
+ * Clears all training log entries
+ */
+export function clearTrainingLog() {
+    trainingLogEntries = [];
+    renderTrainingLog();
+}
+
+/**
+ * Expands the training log panel
+ */
+export function expandTrainingLog() {
+    if (dom.trainingLogContent) {
+        dom.trainingLogContent.classList.add('open');
+    }
+    if (dom.trainingLogToggle) {
+        dom.trainingLogToggle.textContent = 'Hide Log ▲';
+    }
+}
+
+/**
+ * Collapses the training log panel
+ */
+export function collapseTrainingLog() {
+    if (dom.trainingLogContent) {
+        dom.trainingLogContent.classList.remove('open');
+    }
+    if (dom.trainingLogToggle) {
+        dom.trainingLogToggle.textContent = 'Show Log ▼';
+    }
+}
+
+/**
+ * Toggles the training log panel
+ */
+function toggleTrainingLog() {
+    if (dom.trainingLogContent && dom.trainingLogContent.classList.contains('open')) {
+        collapseTrainingLog();
+    } else {
+        expandTrainingLog();
+    }
+}
+
+/**
+ * Renders the training log entries to the DOM
+ */
+function renderTrainingLog() {
+    if (!dom.trainingLogList) return;
+    
+    if (trainingLogEntries.length === 0) {
+        dom.trainingLogList.innerHTML = '<div class="text-gray-400 text-center py-4">No log entries yet</div>';
+        return;
+    }
+    
+    dom.trainingLogList.innerHTML = trainingLogEntries.map(entry => {
+        return `<div class="training-log-entry ${entry.type}">
+            <span class="text-gray-400">[${entry.timestamp}]</span> ${entry.message}
+        </div>`;
+    }).join('');
+}
+
 // --- UI RENDERING & MANIPULATION (Exported for other modules to use) ---
 
 export function updateAllTogglesUI() {
@@ -106,13 +195,7 @@ export function updateWinLossCounter() {
     let losses = 0;
 
     state.history.forEach(item => {
-        // Only count wins/losses if:
-        // 1. A recommendation was explicitly made (recommendedGroupId exists)
-        // 2. A winning number was entered for that round (item.winningNumber !== null)
-        // 3. The recommendation had a positive final score (item.recommendationDetails.finalScore > 0),
-        //    indicating it was an explicit "Play" signal, not "Wait for Signal" or "Low Confidence".
         if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.finalScore > 0) {
-            // Check if the recommended group hit
             if (item.hitTypes && item.hitTypes.includes(item.recommendedGroupId)) {
                 wins++;
             } else {
@@ -219,7 +302,6 @@ export function renderHistory() {
         let stateBadgeContent = '';
         let stateBadgeClass = 'bg-gray-400';
 
-        // --- NEW BADGE LOGIC ---
         if (item.status === 'pending') {
             stateBadgeContent = 'Pending';
         } else if (item.recommendedGroupId && item.recommendationDetails) {
@@ -230,28 +312,26 @@ export function renderHistory() {
             const recommendedHit = item.hitTypes.includes(item.recommendedGroupId);
 
             let resultText = '';
-            // Determine result text for display purposes (HIT/MISS/WAIT/AVOID)
             if (item.status !== 'pending') {
-                if (details.signal === 'Avoid Play') { // Explicit avoid signal
+                if (details.signal === 'Avoid Play') {
                     resultText = ' - AVOID';
-                } else if (details.finalScore > 0) { // Was an actionable "Play" signal
+                } else if (details.finalScore > 0) {
                     resultText = recommendedHit ? ' - HIT' : ' - MISS';
-                } else { // Was a "Wait for Signal" or "Low Confidence"
+                } else {
                     resultText = ' - WAIT';
                 }
             }
 
             stateBadgeContent = `Top: ${recommendedLabel} (${hitRate.toFixed(1)}%) ${resultText}`;
             
-            // Determine badge color
-            if (item.status !== 'pending' && details.signal === 'Avoid Play') { // Explicit avoid signal
-                stateBadgeClass = 'bg-red-700'; // Dark red for avoid
+            if (item.status !== 'pending' && details.signal === 'Avoid Play') {
+                stateBadgeClass = 'bg-red-700';
             } else if (item.status !== 'pending' && details.finalScore <= 0) {
-                 stateBadgeClass = 'bg-gray-500'; // "Wait" signal should be gray
+                 stateBadgeClass = 'bg-gray-500';
             } else if (recommendedHit) {
-                stateBadgeClass = recommendedType?.colorClass || 'bg-green-500'; // Green or type color for hits
+                stateBadgeClass = recommendedType?.colorClass || 'bg-green-500';
             } else {
-                stateBadgeClass = 'bg-red-500'; // Red for misses
+                stateBadgeClass = 'bg-red-500';
             }
 
         } else {
@@ -259,11 +339,9 @@ export function renderHistory() {
             stateBadgeClass = 'bg-gray-500';
         }
 
-        // --- NEW ADDITIONAL DETAILS LOGIC ---
         let additionalDetailsHtml = '';
         const detailsParts = [];
 
-        // "Pocket Distance" detail
         if (state.usePocketDistance && item.status !== 'pending' && item.pocketDistance !== null) {
             detailsParts.push(`<span class="text-pink-500">Pocket Distance: <strong>${item.pocketDistance}</strong></span>`);
         }
@@ -272,15 +350,12 @@ export function renderHistory() {
             additionalDetailsHtml = `<div class="additional-details">${detailsParts.join(' | ')}</div>`;
         }
         
-        // --- AI DETAILS (UPDATED TO SHOW EXPLANATION) ---
         let aiDetailsHtml = '';
         if (item.recommendedGroupId && item.recommendationDetails) {
-            // Check if we have AI explanation data
             const aiExplanation = item.recommendationDetails.aiExplanation;
             
             let aiContentHtml = '';
             if (aiExplanation && state.isAiReady) {
-                // Display AI explanation with headline and bullets
                 const confidenceBadge = aiExplanation.confidence === 'high' 
                     ? '<span class="text-green-600 font-semibold">High Confidence</span>'
                     : aiExplanation.confidence === 'medium'
@@ -295,13 +370,11 @@ export function renderHistory() {
                     </ul>
                 `;
             } else if (state.isAiReady) {
-                // Fallback if AI is ready but no explanation available
                 aiContentHtml = `
                     <p class="text-sm text-gray-600">AI prediction: ${((item.recommendationDetails.mlProbability || 0) * 100).toFixed(1)}% confidence</p>
                     <p class="text-xs text-gray-500">Pattern analysis available after next calculation</p>
                 `;
             } else {
-                // AI not ready yet
                 aiContentHtml = `<p class="text-sm text-gray-500">AI training in progress...</p>`;
             }
             
@@ -331,7 +404,6 @@ export function renderHistory() {
         dom.historyList.appendChild(li);
     });
 
-    // Re-attach listeners for the new "Show Details" toggles
     document.querySelectorAll('.ai-details-toggle').forEach(toggle => {
         toggle.onclick = () => {
             const targetElement = document.getElementById(toggle.dataset.target);
@@ -434,7 +506,6 @@ export function updateAiStatus(message) {
 
 /**
  * Displays a warning message in the dedicated pattern alert section.
- * @param {string} message - The warning message to display.
  */
 function showPatternAlert(message) {
     if (dom.patternAlert) {
@@ -455,12 +526,6 @@ function hidePatternAlert() {
 
 /**
  * Retrieves all necessary data and calculates a recommendation object.
- * This function is pure in the sense that it doesn't modify global state or UI.
- * It's used by both `handleNewCalculation` (for initial recommendation of a new history item)
- * and `updateMainRecommendationDisplay` (for live UI updates based on current settings).
- * @param {number} num1Val - The first input number.
- * @param {number} num2Val - The second input number.
- * @returns {Promise<object>} The recommendation object.
  */
 async function getRecommendationDataForDisplay(num1Val, num2Val) {
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
@@ -502,9 +567,6 @@ async function getRecommendationDataForDisplay(num1Val, num2Val) {
 
 /**
  * Updates the main recommendation display and calculation groups UI.
- * This function does NOT create new history items or modify existing ones.
- * It is called when settings change to provide live feedback.
- * @returns {Promise<void>}
  */
 export async function updateMainRecommendationDisplay() {
     console.log("updateMainRecommendationDisplay: Function started.");
@@ -515,19 +577,16 @@ export async function updateMainRecommendationDisplay() {
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
         console.log("updateMainRecommendationDisplay: Invalid inputs detected. Showing placeholder message.");
-        // Clear or show "enter numbers" message if inputs are invalid
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers to see a recommendation.</p>`;
         dom.resultDisplay.classList.remove('hidden');
         hidePatternAlert();
-        drawRouletteWheel(null, lastWinning); // Clear highlights if inputs are invalid
+        drawRouletteWheel(null, lastWinning);
         return;
     }
 
-    // Get the recommendation data without affecting history
     const recommendation = await getRecommendationDataForDisplay(num1Val, num2Val);
     console.log("updateMainRecommendationDisplay: Got recommendation data.");
 
-    // --- Render Recommendation and Calculation Groups ---
     let fullResultHtml = `
         <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
         <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
@@ -537,8 +596,6 @@ export async function updateMainRecommendationDisplay() {
         <div class="space-y-2">
     `;
 
-    // Re-calculate all necessary stats again to populate "Calculation Groups"
-    // This is done locally here to get up-to-date stats for display without touching global analysis state.
     const trendStats = calculateTrendStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
 
@@ -597,19 +654,16 @@ export async function updateMainRecommendationDisplay() {
         hidePatternAlert();
     }
 
-    // Always redraw the roulette wheel to reflect current inputs/settings (and last winning number)
     drawRouletteWheel(Math.abs(num2Val - num1Val), lastWinning);
     console.log("updateMainRecommendationDisplay: UI elements rendered and wheel drawn.");
 }
 
 /**
- * Handles the "Calculate" button click. Creates a new history item and gets its initial recommendation.
- * This function should *only* be called when the user explicitly initiates a new calculation.
+ * Handles the "Calculate" button click.
  */
 function handleNewCalculation() {
     console.log("handleNewCalculation: Function started.");
     
-    // NEW: Prevent manual calculation when Auto mode is enabled
     if (apiContext.isAutoModeEnabled()) {
         alert('Auto mode is enabled. Disable it to use manual input.');
         return;
@@ -620,12 +674,10 @@ function handleNewCalculation() {
 
     if (isNaN(num1Val) || isNaN(num2Val)) {
         console.log("handleNewCalculation: Invalid inputs detected. Updating display and returning.");
-        // If inputs are invalid, just update the display to show the error.
         updateMainRecommendationDisplay();
         return;
     }
 
-    // NEW: Check if there's already an UNRESOLVED pending calculation.
     const existingPendingItem = state.history.find(
         item => item.status === 'pending' && item.winningNumber === null
     );
@@ -633,37 +685,31 @@ function handleNewCalculation() {
     if (existingPendingItem) {
         console.warn(`handleNewCalculation: An unresolved pending calculation (ID: ${existingPendingItem.id}) already exists. Not creating a new one.`);
         alert("There's already a pending calculation. Please submit the winning number for that one first, or clear history.");
-        updateMainRecommendationDisplay(); // Ensure display is consistent
+        updateMainRecommendationDisplay();
         return;
     }
 
 
-    // Create a new history item
     const newHistoryItem = {
         id: Date.now(),
         num1: num1Val,
         num2: num2Val,
         difference: Math.abs(num2Val - num1Val),
-        status: 'pending', // Mark as pending, awaiting a winning number
+        status: 'pending',
         hitTypes: [],
         typeSuccessStatus: {},
         winningNumber: null,
         pocketDistance: null,
-        recommendedGroupId: null, // Will be filled after async recommendation
-        recommendationDetails: null // Will be filled after async recommendation
+        recommendedGroupId: null,
+        recommendationDetails: null
     };
     state.history.push(newHistoryItem);
     console.log(`handleNewCalculation: New history item created with ID: ${newHistoryItem.id}. Total history items: ${state.history.length}`);
 
-    // NEW: Store the ID of this newly created pending calculation
     state.setCurrentPendingCalculationId(newHistoryItem.id);
 
-    // Get the recommendation data for this specific new history item.
-    // Then, update the history item and refresh UI.
     getRecommendationDataForDisplay(num1Val, num2Val).then(recommendation => {
         console.log(`handleNewCalculation: Got recommendation for ID ${newHistoryItem.id}.`);
-        // Find the newly created item by ID (ensuring it's still pending) and populate its details.
-        // Re-finding ensures we modify the exact object in state.history if state.history was rebuilt for some reason.
         const itemToUpdate = state.history.find(item =>
             item.id === newHistoryItem.id && item.status === 'pending' && item.winningNumber === null
         );
@@ -676,11 +722,9 @@ function handleNewCalculation() {
             };
             console.log(`handleNewCalculation: Updated history item ID ${itemToUpdate.id} with recommendation details.`);
         } else {
-            console.error(`handleNewCalculation: Failed to find newly created item (ID: ${newHistoryItem.id}) for detail update. It might have been modified or removed prematurely.`);
+            console.error(`handleNewCalculation: Failed to find newly created item (ID: ${newHistoryItem.id}) for detail update.`);
         }
-        // After history item is updated, re-render history list.
         renderHistory();
-        // Update the main display to show the recommendation for the new pending item.
         updateMainRecommendationDisplay();
         console.log("handleNewCalculation: UI updated and function finished.");
     });
@@ -690,7 +734,6 @@ function handleNewCalculation() {
 function handleSubmitResult() {
     console.log("handleSubmitResult: Function started.");
     
-    // NEW: Prevent manual submission when Auto mode is enabled
     if (apiContext.isAutoModeEnabled()) {
         alert('Auto mode is enabled. Disable it to use manual input.');
         return;
@@ -698,11 +741,10 @@ function handleSubmitResult() {
     
     console.log(`handleSubmitResult: state.currentPendingCalculationId at start: ${state.currentPendingCalculationId}`);
 
-    // This check is now the primary gate for finding the pending item
     if (!state.currentPendingCalculationId) {
-        console.log("handleSubmitResult: No current pending calculation ID set. This is an unexpected call, or no calculation was initiated. Winning number input:", dom.winningNumberInput.value);
+        console.log("handleSubmitResult: No current pending calculation ID set.");
         hidePatternAlert();
-        updateMainRecommendationDisplay(); // Keep UI consistent if no pending item
+        updateMainRecommendationDisplay();
         return;
     }
 
@@ -718,31 +760,23 @@ function handleSubmitResult() {
         return;
     }
 
-    // Find the specific pending item using the stored ID
     const lastPendingForSubmission = state.history.find(
         item => item.id === state.currentPendingCalculationId && item.status === 'pending' && item.winningNumber === null
     );
 
     if (!lastPendingForSubmission) {
-        // This means state.currentPendingCalculationId was set, but the item itself
-        // is no longer pending or doesn't exist under those conditions.
-        // This is the error point from your console log.
-        console.error("handleSubmitResult: Could not find pending calculation by stored ID, or its status changed unexpectedly BEFORE submission. Stored ID:", state.currentPendingCalculationId);
-        state.setCurrentPendingCalculationId(null); // Clear the stale ID to prevent future errors with this ID
-        updateMainRecommendationDisplay(); // Update UI to reflect no active pending
+        console.error("handleSubmitResult: Could not find pending calculation by stored ID.");
+        state.setCurrentPendingCalculationId(null);
+        updateMainRecommendationDisplay();
         return;
     }
     console.log(`handleSubmitResult: Found pending item by stored ID: ${lastPendingForSubmission.id}. Resolving this item.`);
 
-
-    // Apply winning number to the specific pending item identified
     evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status} with winning number ${winningNumber}.`);
+    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status}`);
 
-    // After resolving, clear the pending calculation ID. This is crucial for the next cycle.
     state.setCurrentPendingCalculationId(null);
 
-    // Update confirmedWinsLog based on *all* confirmed spins
     const newLog = state.history
         .filter(item => item.winningNumber !== null)
         .sort((a, b) => a.id - b.id)
@@ -750,36 +784,26 @@ function handleSubmitResult() {
     state.setConfirmedWinsLog(newLog);
     console.log("handleSubmitResult: confirmedWinsLog updated.");
 
-    // Re-label failures across the entire history based on the latest context
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
-    // Run all analyses to update panels (board state, neighbour, weights etc)
-    // This also updates the `recommendedGroupId` and `recommendationDetails` for any pending items
-    // in history (though none should be pending now except the one just resolved).
-    analysis.runAllAnalyses(winningNumber); // Pass winningNumber to analysis.runAllAnalyses if needed for context
-    renderHistory(); // Re-render history with updated item and win/loss counter
+    analysis.runAllAnalyses(winningNumber);
+    renderHistory();
     console.log("handleSubmitResult: Analysis and history re-rendered.");
 
-
-    dom.winningNumberInput.value = ''; // Clear the input field
+    dom.winningNumberInput.value = '';
     console.log("handleSubmitResult: Winning number input cleared.");
 
-
-    // Auto-populate for next calculation and trigger a new calculation for the NEXT spin
     const prevNum2 = parseInt(lastPendingForSubmission.num2, 10);
     if (!isNaN(prevNum2)) {
         dom.number1.value = prevNum2;
         dom.number2.value = winningNumber;
         console.log(`handleSubmitResult: Auto-populating for next spin: num1=${dom.number1.value}, num2=${dom.number2.value}`);
-        // Trigger a new calculation for the *next* spin, creating a NEW pending entry.
-        // This is a NEW calculation, so it calls handleNewCalculation.
         setTimeout(() => {
             console.log("handleSubmitResult: Triggering next handleNewCalculation via setTimeout.");
             handleNewCalculation();
         }, 50);
     } else {
-        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation. Not auto-calculating next spin. Value:', prevNum2);
-        // If auto-calculation isn't possible (e.g., initial state), just update the current display
+        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.');
         updateMainRecommendationDisplay();
     }
     hidePatternAlert();
@@ -794,18 +818,14 @@ function handleClearInputs() {
     dom.winningNumberInput.value = '';
     dom.resultDisplay.classList.add('hidden');
     dom.number1.focus();
-    // Clear any pending calculation ID when inputs are cleared
     state.setCurrentPendingCalculationId(null);
 
-    // NEW: Stop API polling if active
     if (apiContext.isLivePollingActive()) {
         apiContext.stopLivePolling();
         updateApiLiveButtonState();
     }
 
-    // After clearing inputs, redraw wheel with no highlights and then update the display
     drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
-    // Update the main display, which will now show "Please enter two valid numbers."
     updateMainRecommendationDisplay();
     hidePatternAlert();
     console.log("handleClearInputs: Inputs cleared and UI updated.");
@@ -816,7 +836,6 @@ function handleSwap() {
     const v = dom.number1.value;
     dom.number1.value = dom.number2.value;
     dom.number2.value = v;
-    // After swap, re-evaluate and display for current inputs (no new history item)
     updateMainRecommendationDisplay();
     console.log("handleSwap: Inputs swapped and UI updated.");
 }
@@ -830,7 +849,6 @@ function handleHistoryAction(event) {
     const newHistory = state.history.filter(item => item.id !== deletedId);
     state.setHistory(newHistory);
 
-    // If the deleted item was the currently pending one, clear the ID
     if (state.currentPendingCalculationId === deletedId) {
         state.setCurrentPendingCalculationId(null);
         console.log(`handleHistoryAction: Cleared currentPendingCalculationId as deleted item (ID: ${deletedId}) was pending.`);
@@ -843,7 +861,6 @@ function handleHistoryAction(event) {
 
     analysis.runAllAnalyses();
     renderHistory();
-    // Re-evaluate and display for current inputs after history modification
     updateMainRecommendationDisplay();
     hidePatternAlert();
     console.log("handleHistoryAction: History modified and UI updated.");
@@ -860,67 +877,23 @@ function handleClearHistory() {
     });
     state.setIsAiReady(false);
     updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
-    // Clear any pending calculation ID when history is cleared
     state.setCurrentPendingCalculationId(null);
 
-    // NEW: Clear API context but preserve provider/table selection
     apiContext.clearContext();
 
     analysis.runAllAnalyses();
     renderHistory();
 
-    dom.historicalAnalysisMessage.textContent = 'History cleared.';
     drawRouletteWheel();
 
     aiWorker.postMessage({ type: 'clear_model' });
     hidePatternAlert();
-    // Re-evaluate and display for current inputs after history clear
     updateMainRecommendationDisplay();
+    
+    // Log the clear action
+    addTrainingLogEntry('info', 'History cleared. AI model reset.');
+    
     console.log("handleClearHistory: History cleared and UI updated.");
-}
-
-function handleVideoUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (state.currentVideoURL) {
-        URL.revokeObjectURL(state.currentVideoURL);
-    }
-    state.setCurrentVideoURL(URL.createObjectURL(file));
-
-    dom.videoPlayer.src = state.currentVideoURL;
-    dom.videoPlayer.classList.remove('hidden');
-    dom.videoUploadContainer.classList.add('hidden');
-    dom.videoControlsContainer.classList.remove('hidden');
-    dom.videoStatus.textContent = 'Video loaded. Ready to analyze.';
-    hidePatternAlert();
-}
-
-function startVideoAnalysis() {
-    dom.analyzeVideoButton.disabled = true;
-    dom.videoStatus.textContent = 'Analyzing... (Feature in development)';
-    console.log("Video analysis initiated.");
-    setTimeout(() => {
-        dom.analyzeVideoButton.disabled = false;
-        dom.videoStatus.textContent = 'Analysis complete (simulation).';
-    }, 2000);
-    hidePatternAlert();
-}
-
-function clearVideoState() {
-    if (state.currentVideoURL) {
-        URL.revokeObjectURL(state.currentVideoURL);
-        state.setCurrentVideoURL(null);
-    }
-    dom.videoPlayer.src = '';
-    dom.videoUpload.value = '';
-
-    dom.videoPlayer.classList.add('hidden');
-    dom.frameCanvas.classList.add('hidden');
-    dom.videoControlsContainer.classList.add('hidden');
-    dom.videoUploadContainer.classList.remove('hidden');
-    dom.videoStatus.textContent = '';
-    hidePatternAlert();
 }
 
 function handlePresetSelection(presetName) {
@@ -938,14 +911,12 @@ function handlePresetSelection(presetName) {
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
     analysis.updateActivePredictionTypes();
-    analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
+    analysis.handleStrategyChange();
     hidePatternAlert();
-    // Automatically trigger a display update for current inputs after applying a preset
     updateMainRecommendationDisplay();
     console.log(`handlePresetSelection: Preset ${presetName} applied and UI updated.`);
 }
 
-// MODIFIED createSlider to use the new parameterDefinitions (no change needed from last time, just confirming it's there)
 function createSlider(containerId, label, paramObj, paramName) {
     const container = document.getElementById(containerId);
     if (!container) {
@@ -984,8 +955,7 @@ function createSlider(containerId, label, paramObj, paramName) {
 
         state.saveState();
         dom.parameterStatusMessage.textContent = 'Parameter changed. Re-analyzing...';
-        analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
-        // Automatically trigger a display update for current inputs after a parameter change
+        analysis.handleStrategyChange();
         updateMainRecommendationDisplay();
     };
 
@@ -993,53 +963,39 @@ function createSlider(containerId, label, paramObj, paramName) {
     numberInput.addEventListener('change', (e) => updateValue(e.target.value));
 }
 
-// MODIFIED: initializeAdvancedSettingsUI to add all sliders (THIS WAS THE KEY CHANGE)
 export function initializeAdvancedSettingsUI() {
-    // Clear previous sliders
     dom.strategyLearningRatesSliders.innerHTML = '';
     dom.patternThresholdsSliders.innerHTML = '';
     dom.adaptiveInfluenceSliders.innerHTML = '';
-    // NEW: Clear warnings parameter sliders container
     if (dom.warningParametersSliders) dom.warningParametersSliders.innerHTML = '';
 
-
-    // Separate containers for logical grouping
     const strategyLearningRatesContainer = document.getElementById('strategyLearningRatesSliders');
     const patternThresholdsContainer = document.getElementById('patternThresholdsSliders');
     const adaptiveInfluenceContainer = document.getElementById('adaptiveInfluenceSliders');
-    // NEW: Get warnings parameter sliders container
     const warningParametersContainer = document.getElementById('warningParametersSliders');
 
-
-    // Headers for each sub-category
     strategyLearningRatesContainer.innerHTML = '<h3>Strategy Learning Rates</h3>';
     patternThresholdsContainer.innerHTML = '<h3>Pattern & Trigger Thresholds</h3>';
     adaptiveInfluenceContainer.innerHTML = '<h3>Adaptive Influence Learning</h3>';
-    // NEW: Header for warnings parameter sliders
     if (warningParametersContainer) warningParametersContainer.innerHTML = '<h3>Table Change Warning Parameters</h3>';
 
-
-    // Create sliders for Core Strategy Parameters
     createSlider('strategyLearningRatesSliders', 'Success Learn Rate', config.STRATEGY_CONFIG, 'learningRate_success');
     createSlider('strategyLearningRatesSliders', 'Failure Learn Rate', config.STRATEGY_CONFIG, 'learningRate_failure');
     createSlider('strategyLearningRatesSliders', 'Max Weight', config.STRATEGY_CONFIG, 'maxWeight');
     createSlider('strategyLearningRatesSliders', 'Min Weight', config.STRATEGY_CONFIG, 'minWeight');
     createSlider('strategyLearningRatesSliders', 'Decay Factor', config.STRATEGY_CONFIG, 'decayFactor');
 
-    // Create sliders for Pattern & Trigger Thresholds
     createSlider('patternThresholdsSliders', 'Pattern Min Attempts', config.STRATEGY_CONFIG, 'patternMinAttempts');
     createSlider('patternThresholdsSliders', 'Pattern Success %', config.STRATEGY_CONFIG, 'patternSuccessThreshold');
     createSlider('patternThresholdsSliders', 'Trigger Min Attempts', config.STRATEGY_CONFIG, 'triggerMinAttempts');
     createSlider('patternThresholdsSliders', 'Trigger Success %', config.STRATEGY_CONFIG, 'triggerSuccessThreshold');
 
-    // Create sliders for Adaptive Influence Learning
     createSlider('adaptiveInfluenceSliders', 'Adaptive Success Rate', config.ADAPTIVE_LEARNING_RATES, 'SUCCESS');
     createSlider('adaptiveInfluenceSliders', 'Adaptive Failure Rate', config.ADAPTIVE_LEARNING_RATES, 'FAILURE');
     createSlider('adaptiveInfluenceSliders', 'Min Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MIN_INFLUENCE');
     createSlider('adaptiveInfluenceSliders', 'Max Adaptive Influence', config.ADAPTIVE_LEARNING_RATES, 'MAX_INFLUENCE');
 
-    // NEW: Add sliders for Table Change Warning Parameters
-    if (warningParametersContainer) { // Only create if container exists
+    if (warningParametersContainer) {
         createSlider('warningParametersSliders', 'Warn Window Size', config.STRATEGY_CONFIG, 'WARNING_ROLLING_WINDOW_SIZE');
         createSlider('warningParametersSliders', 'Min Plays for Eval', config.STRATEGY_CONFIG, 'WARNING_MIN_PLAYS_FOR_EVAL');
         createSlider('warningParametersSliders', 'Loss Streak Threshold', config.STRATEGY_CONFIG, 'WARNING_LOSS_STREAK_THRESHOLD');
@@ -1057,9 +1013,8 @@ function resetAllParameters() {
     updateAllTogglesUI();
     initializeAdvancedSettingsUI();
     dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
-    analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
+    analysis.handleStrategyChange();
     hidePatternAlert();
-    // Automatically trigger a display update for current inputs after resetting parameters
     updateMainRecommendationDisplay();
     console.log("resetAllParameters: Parameters reset and UI updated.");
 }
@@ -1107,7 +1062,7 @@ function loadParametersFromFile(event) {
             updateAllTogglesUI();
             initializeAdvancedSettingsUI();
             dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
-            analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
+            analysis.handleStrategyChange();
         } catch (error) {
             dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
             console.error("loadParametersFromFile: Error loading parameters:", error);
@@ -1116,7 +1071,6 @@ function loadParametersFromFile(event) {
     reader.readAsText(file);
     event.target.value = '';
     hidePatternAlert();
-    // Automatically trigger a display update for current inputs after loading parameters
     updateMainRecommendationDisplay();
     console.log("loadParametersFromFile: File processed and UI updated.");
 }
@@ -1125,34 +1079,27 @@ export function toggleParameterSliders(enable) {
     if (!dom.advancedSettingsContent) return;
     console.log(`toggleParameterSliders: ${enable ? 'Enabling' : 'Disabling'} sliders.`);
 
-    // Toggle main action buttons
-    // Removed: dom.setHighestWinRatePreset.disabled = !enable;
-    // Removed: dom.setBalancedSafePreset.disabled = !enable;
-    // Removed: dom.setAggressiveSignalsPreset.disabled = !enable;
     dom.resetParametersButton.disabled = !enable;
     dom.saveParametersButton.disabled = !enable;
     dom.loadParametersLabel.classList.toggle('btn-disabled', !enable);
     dom.loadParametersInput.disabled = !enable;
 
-    // Toggle individual parameter sliders based on their categories' optimization toggles
     for (const paramName in parameterMap) {
         const sliderElement = document.getElementById(`${paramName}Slider`);
         const numberInput = document.getElementById(`${paramName}SliderInput`);
 
         if (sliderElement && numberInput) {
-            let categoryToggleChecked = true; // Assume enabled by default
+            let categoryToggleChecked = true;
 
             if (parameterDefinitions[paramName].category === 'coreStrategy') {
                 categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
             } else if (parameterDefinitions[paramName].category === 'adaptiveRates') {
                 categoryToggleChecked = dom.optimizeAdaptiveRatesToggle.checked;
             }
-            // NEW: Handle warning parameters category
             else if (parameterDefinitions[paramName].category === 'warningParameters') {
-                categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked; // Link to core strategy optimization
+                categoryToggleChecked = dom.optimizeCoreStrategyToggle.checked;
             }
 
-            // A slider/input is enabled if the main `enable` is true AND its category toggle is checked
             const shouldBeEnabled = enable && categoryToggleChecked;
             sliderElement.disabled = !shouldBeEnabled;
             numberInput.disabled = !shouldBeEnabled;
@@ -1160,15 +1107,13 @@ export function toggleParameterSliders(enable) {
     }
 }
 
-// --- NEW: API EVENT HANDLERS ---
+// --- API EVENT HANDLERS ---
 
 function attachApiEventHandlers() {
-    // Provider selection handler
     if (dom.apiProviderSelect) {
         dom.apiProviderSelect.addEventListener('change', async () => {
             const provider = dom.apiProviderSelect.value;
             
-            // Reset table selection and stop live polling
             dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
             dom.apiTableSelect.disabled = true;
             dom.apiAutoToggle.disabled = true;
@@ -1183,7 +1128,6 @@ function attachApiEventHandlers() {
                 return;
             }
             
-            // Fetch tables for selected provider
             dom.apiStatusMessage.textContent = 'Loading tables...';
             try {
                 const apiResponse = await winspinApi.fetchRouletteData(provider);
@@ -1196,11 +1140,10 @@ function attachApiEventHandlers() {
                     return;
                 }
                 
-                // Populate table dropdown with table objects
                 tables.forEach(table => {
                     const option = document.createElement('option');
-                    option.value = table.name; // Use table.name for value (keeps underscores for API calls)
-                    option.textContent = table.name.replace(/_/g, ' '); // Display with spaces
+                    option.value = table.name;
+                    option.textContent = table.name.replace(/_/g, ' ');
                     dom.apiTableSelect.appendChild(option);
                 });
                 
@@ -1213,7 +1156,6 @@ function attachApiEventHandlers() {
         });
     }
     
-    // Table selection handler
     if (dom.apiTableSelect) {
         dom.apiTableSelect.addEventListener('change', () => {
             const provider = dom.apiProviderSelect.value;
@@ -1227,15 +1169,12 @@ function attachApiEventHandlers() {
                 return;
             }
             
-            // Set context
             apiContext.setContext(provider, tableName);
             
-            // Enable controls
             dom.apiAutoToggle.disabled = false;
             dom.apiRefreshButton.disabled = false;
             dom.apiLoadHistoryButton.disabled = false;
             
-            // Only enable Live if Auto is ON
             if (apiContext.isAutoModeEnabled()) {
                 dom.apiLiveButton.disabled = false;
             }
@@ -1244,21 +1183,18 @@ function attachApiEventHandlers() {
         });
     }
     
-    // Auto mode toggle handler
     if (dom.apiAutoToggle) {
         dom.apiAutoToggle.addEventListener('change', () => {
             const isAutoEnabled = dom.apiAutoToggle.checked;
             apiContext.setAutoMode(isAutoEnabled);
             
             if (isAutoEnabled) {
-                // Enable Live button
                 const tableName = dom.apiTableSelect.value;
                 if (tableName) {
                     dom.apiLiveButton.disabled = false;
                 }
                 dom.apiStatusMessage.textContent = 'Auto mode enabled. API is now the input source.';
             } else {
-                // Disable Live button and stop polling
                 dom.apiLiveButton.disabled = true;
                 apiContext.stopLivePolling();
                 updateApiLiveButtonState();
@@ -1267,16 +1203,13 @@ function attachApiEventHandlers() {
         });
     }
     
-    // Live button handler
     if (dom.apiLiveButton) {
         dom.apiLiveButton.addEventListener('click', () => {
             if (apiContext.isLivePollingActive()) {
-                // Stop live polling
                 apiContext.stopLivePolling();
                 updateApiLiveButtonState();
                 dom.apiStatusMessage.textContent = 'Live polling stopped.';
             } else {
-                // Start live polling
                 startLivePolling();
                 updateApiLiveButtonState();
                 dom.apiStatusMessage.textContent = 'Live polling started (every 2-3 seconds).';
@@ -1284,14 +1217,12 @@ function attachApiEventHandlers() {
         });
     }
     
-    // Refresh button handler
     if (dom.apiRefreshButton) {
         dom.apiRefreshButton.addEventListener('click', async () => {
             await handleApiRefresh();
         });
     }
     
-    // Load History button handler
     if (dom.apiLoadHistoryButton) {
         dom.apiLoadHistoryButton.addEventListener('click', async () => {
             await handleApiLoadHistory();
@@ -1299,11 +1230,8 @@ function attachApiEventHandlers() {
     }
 }
 
-// --- NEW: API HELPER FUNCTIONS ---
+// --- API HELPER FUNCTIONS ---
 
-/**
- * Updates the Live button text and style based on polling state
- */
 function updateApiLiveButtonState() {
     if (!dom.apiLiveButton) return;
     
@@ -1318,17 +1246,11 @@ function updateApiLiveButtonState() {
     }
 }
 
-/**
- * Starts live polling (fetches API every 2-3 seconds)
- */
 function startLivePolling() {
-    // Clear any existing interval
     apiContext.stopLivePolling();
     
-    // Initial fetch
     handleApiRefresh();
     
-    // Set up polling (2.5 seconds)
     const intervalId = setInterval(async () => {
         await handleApiRefresh();
     }, 2500);
@@ -1336,9 +1258,6 @@ function startLivePolling() {
     apiContext.setLivePollingInterval(intervalId);
 }
 
-/**
- * Handles a single API refresh (appends at most one new spin)
- */
 async function handleApiRefresh() {
     const provider = dom.apiProviderSelect.value;
     const tableName = dom.apiTableSelect.value;
@@ -1359,15 +1278,13 @@ async function handleApiRefresh() {
             return;
         }
         
-        // Add spin with deduplication
-        const wasAdded = apiContext.addSpin(latestSpin);
+        const wasAdded = apiContext.addSpin(latestSpin.winningNumber);
         
         if (wasAdded) {
-            // Process the new spin through the calculation pipeline
-            await processApiSpin(latestSpin);
-            dom.apiStatusMessage.textContent = `New spin: ${latestSpin}`;
+            await processApiSpin(latestSpin.winningNumber);
+            dom.apiStatusMessage.textContent = `New spin: ${latestSpin.winningNumber}`;
         } else {
-            dom.apiStatusMessage.textContent = `Latest spin: ${latestSpin} (no change)`;
+            dom.apiStatusMessage.textContent = `Latest spin: ${latestSpin.winningNumber} (no change)`;
         }
     } catch (error) {
         dom.apiStatusMessage.textContent = `Error: ${error.message}`;
@@ -1375,9 +1292,6 @@ async function handleApiRefresh() {
     }
 }
 
-/**
- * Loads full history from API (replaces existing history)
- */
 async function handleApiLoadHistory() {
     const provider = dom.apiProviderSelect.value;
     const tableName = dom.apiTableSelect.value;
@@ -1401,7 +1315,6 @@ async function handleApiLoadHistory() {
         const apiResponse = await winspinApi.fetchRouletteData(provider);
         apiContext.setLastApiResponse(apiResponse);
         
-        // FIXED: Changed from getTableSpins to getTableHistory
         const spins = winspinApi.getTableHistory(apiResponse, tableName);
         
         if (spins.length === 0) {
@@ -1409,25 +1322,25 @@ async function handleApiLoadHistory() {
             return;
         }
         
-        // Replace context spins
         apiContext.replaceContextSpins(spins);
         
-        // Process through historical analysis pipeline (similar to handleHistoricalAnalysis)
         await processApiHistoryLoad(spins);
         
         dom.apiStatusMessage.textContent = `Loaded ${spins.length} spins from API.`;
+        
+        // Log API history load
+        addTrainingLogEntry('info', `API History loaded: ${spins.length} spins from ${tableName}`);
+        addTrainingLogEntry('data', `First 5 (oldest): [${spins.slice(-5).reverse().join(', ')}]`);
+        addTrainingLogEntry('data', `Last 5 (newest): [${spins.slice(0, 5).join(', ')}]`);
+        
     } catch (error) {
         dom.apiStatusMessage.textContent = `Error: ${error.message}`;
         console.error('Error loading history:', error);
+        addTrainingLogEntry('error', `API history load failed: ${error.message}`);
     }
 }
 
-/**
- * Processes a single API spin through the calculation pipeline
- * @param {number} spin - The spin number
- */
 async function processApiSpin(spin) {
-    // Get the last two spins from context to use as num1 and num2
     const contextSpins = apiContext.getContextSpins();
     
     if (contextSpins.length < 3) {
@@ -1435,11 +1348,10 @@ async function processApiSpin(spin) {
         return;
     }
     
-    const num1 = contextSpins[contextSpins.length - 3];
-    const num2 = contextSpins[contextSpins.length - 2];
+    const num1 = contextSpins[2];
+    const num2 = contextSpins[1];
     const winningNumber = spin;
     
-    // Create a new history item (similar to handleNewCalculation)
     const newHistoryItem = {
         id: Date.now(),
         num1,
@@ -1457,7 +1369,6 @@ async function processApiSpin(spin) {
     state.history.push(newHistoryItem);
     state.setCurrentPendingCalculationId(newHistoryItem.id);
     
-    // Get recommendation
     const recommendation = await getRecommendationDataForDisplay(num1, num2);
     
     const itemToUpdate = state.history.find(item =>
@@ -1473,37 +1384,25 @@ async function processApiSpin(spin) {
         };
     }
     
-    // Immediately resolve with winning number
     evaluateCalculationStatus(itemToUpdate, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
     
     state.setCurrentPendingCalculationId(null);
     
-    // Update confirmedWinsLog
     const newLog = state.history
         .filter(item => item.winningNumber !== null)
         .sort((a, b) => a.id - b.id)
         .map(item => item.winningNumber);
     state.setConfirmedWinsLog(newLog);
     
-    // Re-label failures
     analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
     
-    // Run analyses
     await analysis.runAllAnalyses(winningNumber);
     renderHistory();
     
-    // Update display
     await updateMainRecommendationDisplay();
 }
 
-/**
- * Processes full API history load through simulation pipeline
- * @param {Array<number>} spins - Array of spins (newest to oldest from API)
- */
 async function processApiHistoryLoad(spins) {
-    // Similar to handleHistoricalAnalysis, but using API spins
-    
-    // Preserve current pending item (if any)
     let currentLivePendingItem = null;
     if (state.currentPendingCalculationId) {
         currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
@@ -1515,14 +1414,11 @@ async function processApiHistoryLoad(spins) {
         }
     }
     
-    // FIXED: Reverse spins array so they're processed oldest→newest (chronologically)
-    // API returns newest→oldest, but simulation needs oldest→newest
+    // API returns newest→oldest, reverse to get oldest→newest for simulation
     const spinsOldestFirst = [...spins].reverse();
     
-    // Run simulation on spins (reusing existing runSimulationOnHistory logic from analysis.js)
     const simulatedHistory = runSimulationOnHistory(spinsOldestFirst);
     
-    // Re-add preserved pending item if it exists
     if (currentLivePendingItem) {
         const newPendingCopy = { ...currentLivePendingItem };
         simulatedHistory.push(newPendingCopy);
@@ -1541,10 +1437,6 @@ async function processApiHistoryLoad(spins) {
     await updateMainRecommendationDisplay();
 }
 
-/**
- * Helper function to run simulation on history (extracted from analysis.js logic)
- * This should ideally be exported from analysis.js, but we'll duplicate the core logic here
- */
 function runSimulationOnHistory(spinsToProcess) {
     const localHistory = [];
     let localConfirmedWinsLog = [];
@@ -1560,7 +1452,6 @@ function runSimulationOnHistory(spinsToProcess) {
         const num2 = spinsToProcess[i - 1];
         const winningNumber = spinsToProcess[i];
         
-        // Apply forget factor
         for (const factorName in localAdaptiveFactorInfluences) {
             localAdaptiveFactorInfluences[factorName] = Math.max(
                 config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
@@ -1605,7 +1496,6 @@ function runSimulationOnHistory(spinsToProcess) {
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
         localHistory.push(newHistoryItem);
         
-        // Update adaptive influences
         if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
             const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
@@ -1636,7 +1526,6 @@ function runSimulationOnHistory(spinsToProcess) {
 // --- UI INITIALIZATION HELPERS ---
 
 function attachMainActionListeners() {
-    // Connect the new functions to the main UI buttons
     document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
     document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
 
@@ -1644,13 +1533,7 @@ function attachMainActionListeners() {
     document.getElementById('swapButton').addEventListener('click', handleSwap);
     document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
     dom.historyList.addEventListener('click', handleHistoryAction);
-    dom.recalculateAnalysisButton.addEventListener('click', () => {
-        console.log("Recalculate All Analyses button clicked.");
-        analysis.runAllAnalyses(); // Recalculate all underlying analyses
-        updateMainRecommendationDisplay(); // Trigger a display update for current inputs
-    });
 
-    // Add Enter key listener for the main inputs
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             console.log("Enter key pressed in number input. Triggering handleNewCalculation.");
@@ -1658,17 +1541,14 @@ function attachMainActionListeners() {
         }
     }));
 
-    // Add Enter key listener for the winning number input
     dom.winningNumberInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             console.log("Enter key pressed in winning number input. Triggering handleSubmitResult.");
             handleSubmitResult();
         }
     });
-    // Optimization buttons are handled by attachOptimizationButtonListeners
 }
 
-// NEW: Exported function to attach optimization button listeners
 export function attachOptimizationButtonListeners() {
     if (dom.startOptimizationButton) {
         dom.startOptimizationButton.addEventListener('click', () => {
@@ -1699,7 +1579,7 @@ export function attachOptimizationButtonListeners() {
                 useLessStrict: state.useLessStrict
             };
 
-            optimizationWorker.postMessage({ // This is the line that was causing ReferenceError before initialization
+            optimizationWorker.postMessage({
                 type: 'start',
                 payload: {
                     history: state.history,
@@ -1723,7 +1603,6 @@ export function attachOptimizationButtonListeners() {
         });
     }
 
-    // Also need to ensure applyBestParamsButton is correctly attached here or elsewhere
     if (dom.applyBestParamsButton) {
         dom.applyBestParamsButton.addEventListener('click', () => {
             console.log("Apply Best Params button clicked.");
@@ -1781,9 +1660,8 @@ export function attachOptimizationButtonListeners() {
 
                 initializeAdvancedSettingsUI();
                 updateOptimizationStatus('Best parameters applied!');
-                analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
+                analysis.handleStrategyChange();
                 hidePatternAlert();
-                // Automatically trigger a display update for current inputs after applying best parameters
                 updateMainRecommendationDisplay();
             }
             console.log("Apply Best Params: Settings applied and UI updated.");
@@ -1810,18 +1688,15 @@ function attachToggleListeners() {
             state.setToggles(newToggleStates);
 
             if (stateKey === 'usePocketDistance') {
-                renderHistory(); // Only rerender history if this specific toggle is changed
+                renderHistory();
             } else {
-                // For most toggles, a strategy change means re-simulating and re-analyzing
-                analysis.handleStrategyChange(); // This will update all analysis panels and pending history item
-                // Redraw roulette wheel with current inputs and last winning
+                analysis.handleStrategyChange();
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
                 const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
                 drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
             }
             hidePatternAlert();
-            // Automatically trigger a display update for current inputs after toggling a strategy
             updateMainRecommendationDisplay();
             console.log(`Toggle '${toggleId}' change processed and UI updated.`);
         });
@@ -1829,41 +1704,47 @@ function attachToggleListeners() {
 }
 
 function attachAdvancedSettingsListeners() {
-    // Presets are removed from here
-
-    // Parameter Management
     dom.resetParametersButton.addEventListener('click', resetAllParameters);
     dom.saveParametersButton.addEventListener('click', saveParametersToFile);
     dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
 
-    // Historical Analysis
-    dom.analyzeHistoricalDataButton.addEventListener('click', analysis.handleHistoricalAnalysis);
-
-    // Video Analysis
-    if (dom.videoUpload) dom.videoUpload.addEventListener('change', handleVideoUpload);
-    if (dom.analyzeVideoButton) dom.analyzeVideoButton.addEventListener('click', startVideoAnalysis);
-    if (dom.clearVideoButton) dom.clearVideoButton.addEventListener('click', clearVideoState);
-
-    // Category Toggle Listeners for sliders are already in initializeAdvancedSettingsUI
     dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true));
     dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true));
 }
 
+function attachTrainingListeners() {
+    // Train AI button handler
+    if (dom.trainAiButton) {
+        dom.trainAiButton.addEventListener('click', () => {
+            analysis.handleTrainFromHistory();
+        });
+    }
+    
+    // Training log toggle
+    if (dom.trainingLogToggle || dom.trainingLogHeader) {
+        const toggleElement = dom.trainingLogToggle || dom.trainingLogHeader;
+        toggleElement.addEventListener('click', toggleTrainingLog);
+    }
+    
+    // Clear training log button
+    if (dom.clearTrainingLogButton) {
+        dom.clearTrainingLogButton.addEventListener('click', () => {
+            clearTrainingLog();
+            addTrainingLogEntry('info', 'Log cleared');
+        });
+    }
+}
+
 function attachGuideAndInfoListeners() {
-    // Guide toggles
-    // Removed: document.getElementById('presetStrategyGuideHeader').addEventListener('click', () => toggleGuide('presetStrategyGuideContent'));
     document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
     document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
     document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
 
-
-    // History Info Dropdown
     if(dom.historyInfoToggle) {
         dom.historyInfoToggle.addEventListener('click', (e) => {
             e.stopPropagation();
-            dom.historyInfoDropdown.classList.toggle('hidden'); // Toggle visibility
+            dom.historyInfoDropdown.classList.toggle('hidden');
         });
-        // Close dropdown if clicked outside
         document.addEventListener('click', (e) => {
             if (!dom.historyInfoToggle.contains(e.target) && !dom.historyInfoDropdown.contains(e.target)) {
                 dom.historyInfoDropdown.classList.add('hidden');
@@ -1876,15 +1757,12 @@ function attachGuideAndInfoListeners() {
 export function initializeUI() {
     const elementIds = [
         'number1', 'number2', 'resultDisplay', 'historyList', 'analysisList', 'boardStateAnalysis',
-        'boardStateConclusion', 'historicalNumbersInput', 'imageUpload', 'imageUploadLabel',
-        'analyzeHistoricalDataButton', 'historicalAnalysisMessage', 'aiModelStatus', 'recalculateAnalysisButton',
+        'boardStateConclusion', 'aiModelStatus',
         'trendConfirmationToggle', 'weightedZoneToggle', 'proximityBoostToggle', 'pocketDistanceToggle',
         'lowestPocketDistanceToggle', 'advancedCalculationsToggle', 'dynamicStrategyToggle',
         'adaptivePlayToggle', 'tableChangeWarningsToggle', 'dueForHitToggle', 'neighbourFocusToggle',
-        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle', 'videoUpload', 'videoUploadLabel',
-        'videoStatus', 'videoPlayer', 'frameCanvas',
+        'lessStrictModeToggle', 'dynamicTerminalNeighbourCountToggle',
         'rouletteWheelContainer', 'rouletteLegend', 'strategyWeightsDisplay', 'winningNumberInput',
-        'videoUploadContainer', 'videoControlsContainer', 'analyzeVideoButton', 'clearVideoButton',
         'historyInfoToggle', 'historyInfoDropdown', 'winCount', 'lossCount', 'optimizationStatus',
         'optimizationResult', 'bestFitnessResult', 'bestParamsResult', 'applyBestParamsButton',
         'startOptimizationButton', 'stopOptimizationButton', 'advancedSettingsHeader',
@@ -1893,9 +1771,12 @@ export function initializeUI() {
         'loadParametersLabel', 'parameterStatusMessage', 'submitResultButton', 'patternAlert',
         'warningParametersSliders',
         'optimizeCoreStrategyToggle', 'optimizeAdaptiveRatesToggle',
-        // NEW: API integration element IDs
+        // API integration elements
         'apiProviderSelect', 'apiTableSelect', 'apiAutoToggle', 'apiLiveButton', 
-        'apiRefreshButton', 'apiLoadHistoryButton', 'apiStatusMessage'
+        'apiRefreshButton', 'apiLoadHistoryButton', 'apiStatusMessage',
+        // Training elements
+        'trainAiButton', 'trainingLogToggle', 'trainingLogHeader', 'trainingLogContent', 
+        'trainingLogList', 'clearTrainingLogButton'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
 
@@ -1903,9 +1784,6 @@ export function initializeUI() {
     attachToggleListeners();
     attachAdvancedSettingsListeners();
     attachGuideAndInfoListeners();
-    // NEW: Attach API event handlers
     attachApiEventHandlers();
-
-    // Optimization button listeners will be attached by main.js after workers are initialized
-    // via ui.attachOptimizationButtonListeners();
+    attachTrainingListeners();
 }
