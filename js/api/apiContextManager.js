@@ -148,6 +148,17 @@ class ApiContextManager {
     }
 
     /**
+     * Clears spin data and stops polling, but preserves provider/table/autoMode settings
+     * Used when clearing history
+     */
+    clearContext() {
+        this.stopLivePolling();
+        this.lastSpin = null;
+        this.lastApiResponse = null;
+        // Note: Does NOT reset provider, table, or autoMode
+    }
+
+    /**
      * Resets the entire context (used when clearing history or disconnecting)
      */
     reset() {
