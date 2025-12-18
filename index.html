@@ -376,6 +376,56 @@
                 </div>
             </div>
 
+            <!-- NEW: API Live Data Integration Card -->
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Live Data Integration</h2>
+                <p class="text-sm text-gray-500">Connect to live roulette tables via Winspin.bet API</p>
+                
+                <div class="space-y-4">
+                    <!-- Provider Selection -->
+                    <div>
+                        <label for="apiProviderSelect" class="text-sm font-medium text-gray-700 block mb-2">Provider</label>
+                        <select id="apiProviderSelect" class="form-input">
+                            <option value="">Select Provider</option>
+                            <option value="Evolution">Evolution</option>
+                            <option value="Pragmatic">Pragmatic Play</option>
+                            <option value="Ezugi">Ezugi</option>
+                            <option value="Playtech">Playtech</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Table Selection -->
+                    <div>
+                        <label for="apiTableSelect" class="text-sm font-medium text-gray-700 block mb-2">Table</label>
+                        <select id="apiTableSelect" class="form-input" disabled>
+                            <option value="">Select Table</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Auto Mode Toggle -->
+                    <div class="pt-2 border-t border-gray-200">
+                        <label class="toggle-label">
+                            <span class="font-medium text-gray-700">Auto Mode (API Input)</span>
+                            <input type="checkbox" id="apiAutoToggle" class="toggle-checkbox" disabled>
+                            <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1">When enabled, API becomes the input source (disables manual entry)</p>
+                    </div>
+                    
+                    <!-- Control Buttons -->
+                    <div class="grid grid-cols-3 gap-3 pt-2">
+                        <button id="apiLiveButton" class="btn btn-primary" disabled>Live</button>
+                        <button id="apiRefreshButton" class="btn btn-secondary" disabled>Refresh</button>
+                        <button id="apiLoadHistoryButton" class="btn btn-secondary" disabled>Load History</button>
+                    </div>
+                    
+                    <!-- Status Message -->
+                    <div id="apiStatusMessage" class="text-sm text-center text-gray-600 min-h-[20px] p-2 bg-gray-50 rounded-md">
+                        Select a provider to begin
+                    </div>
+                </div>
+            </div>
+
             <div class="card p-8 space-y-4" id="historySection">
                 <div class="flex justify-between items-center">
                     <div class="flex items-center gap-4">
