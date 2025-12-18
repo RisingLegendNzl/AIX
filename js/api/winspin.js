@@ -1,9 +1,11 @@
 // js/api/winspin.js - Winspin.bet API Integration Module
 
 const API_BASE_URL = 'https://winspin.bet/api';
+const API_ENDPOINT = `${API_BASE_URL}/get_roulette`;
 
 /**
  * Fetches roulette data from Winspin API for a given provider
+ * Uses single POST endpoint with provider in request body
  * @param {string} provider - Provider name (Evolution, Pragmatic, Ezugi, Playtech)
  * @returns {Promise<Object>} API response data
  */
@@ -12,24 +14,26 @@ export async function fetchRouletteData(provider) {
         throw new Error('Provider is required');
     }
     
-    const providerLower = provider.toLowerCase();
-    const url = `${API_BASE_URL}/${providerLower}`;
-    
-    console.log(`[Winspin API] Fetching data for ${provider} from ${url}`);
+    console.log(`[Winspin API] Fetching data for ${provider} using POST ${API_ENDPOINT}`);
     
     try {
-        const response = await fetch(url, {
-            method: 'GET',
-            mode: 'cors', // Enable CORS
+        const response = await fetch(API_ENDPOINT, {
+            method: 'POST',
+            mode: 'cors',
             headers: {
+                'Content-Type': 'application/json',
                 'Accept': 'application/json',
-            }
+            },
+            body: JSON.stringify({
+                provider: provider // Send provider in body, not URL
+            })
         });
         
         console.log(`[Winspin API] Response status: ${response.status}`);
         
         if (!response.ok) {
-            throw new Error(`API request failed with status ${response.status}: ${response.statusText}`);
+            const errorText = await response.text();
+            throw new Error(`API request failed with status ${response.status}: ${errorText}`);
         }
         
         const data = await response.json();
