@@ -13,8 +13,9 @@ import { calculatePocketDistance } from './shared-logic.js'; // Ensure calculate
 
 /**
  * Asynchronously gets a prediction from the AI worker.
+ * NOW RETURNS THE FULL OBJECT INCLUDING aiExplanation
  * @param {Array} history - The current history to send for prediction.
- * @returns {Promise<object|null>} A promise that resolves with the prediction data or null.
+ * @returns {Promise<object|null>} A promise that resolves with the prediction data (including aiExplanation) or null.
  */
 export function getAiPrediction(history) {
     // Immediately return null if the AI isn't ready, to prevent delays.
@@ -36,6 +37,7 @@ export function getAiPrediction(history) {
             if (event.data.type === 'predictionResult') {
                 clearTimeout(timer); // Cancel the timeout
                 aiWorker.removeEventListener('message', tempListener);
+                // Return the full probabilities object which now includes aiExplanation
                 resolve(event.data.probabilities);
             }
         };
