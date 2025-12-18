@@ -82,7 +82,7 @@ export function extractTableNames(apiResponse) {
  * Gets the latest spin data for a specific table
  * @param {Array} apiResponse - Raw API response (Array of tables)
  * @param {string} tableName - Table name to get data for
- * @returns {Object|null} Spin data {winningNumber, num1, num2} or null
+ * @returns {Object|null} Spin data {winningNumber, num2, num1} or null
  */
 export function getLatestSpin(apiResponse, tableName) {
     if (!apiResponse || !Array.isArray(apiResponse)) {
@@ -92,16 +92,16 @@ export function getLatestSpin(apiResponse, tableName) {
     // Find the table by name directly in the root array
     const tableData = apiResponse.find(t => t.name === tableName);
     
-    if (!tableData || !tableData.history || tableData.history.length < 3) {
+    // API structure: table.data.spins contains the numbers (newest to oldest)
+    if (!tableData || !tableData.data || !Array.isArray(tableData.data.spins) || tableData.data.spins.length < 3) {
         return null;
     }
     
-    // Extract last 3 numbers (newest to oldest)
-    const history = tableData.history;
+    const spins = tableData.data.spins;
     return {
-        winningNumber: history[0],
-        num2: history[1],  // Previous number (more recent)
-        num1: history[2]   // Number before that
+        winningNumber: spins[0],
+        num2: spins[1],  // Previous number
+        num1: spins[2]   // Number before that
     };
 }
 
@@ -120,12 +120,12 @@ export function getTableHistory(apiResponse, tableName, count = 30) {
     // Find the table by name directly in the root array
     const tableData = apiResponse.find(t => t.name === tableName);
     
-    if (!tableData || !tableData.history) {
+    if (!tableData || !tableData.data || !Array.isArray(tableData.data.spins)) {
         return [];
     }
     
-    // Return requested number of spins (newest to oldest)
-    return tableData.history.slice(0, count);
+    // Return requested number of spins (newest to oldest) from data.spins
+    return tableData.data.spins.slice(0, count);
 }
 
 /**
