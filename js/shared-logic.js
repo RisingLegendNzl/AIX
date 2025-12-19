@@ -250,6 +250,15 @@ export function analyzeFactorShift(history, strategyConfig) { // FIXED: Exported
 }
 
 /**
+ * Wraps a group name in a colored span element for visual distinction
+ */
+function wrapGroupName(groupName, groupId) {
+    if (!groupId || !groupName) return groupName;
+    const colorClass = `group-name-${groupId}`;
+    return `<span class="${colorClass}">${groupName}</span>`;
+}
+
+/**
  * Generates a detailed, deterministic explanation for a recommendation
  * This is used when AI explanations are not available or to supplement them
  */
@@ -313,17 +322,17 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
     // Generate headline
     let headline = '';
     if (currentStreak >= 3) {
-        headline = `${bestCandidate.type.displayLabel} on ${currentStreak}-spin winning streak`;
+        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} on ${currentStreak}-spin winning streak`;
     } else if (total >= 5 && hitRate >= 70) {
-        headline = `${bestCandidate.type.displayLabel} hitting ${hitRate.toFixed(0)}% of recent spins`;
+        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} hitting ${hitRate.toFixed(0)}% of recent spins`;
     } else if (confidence === 'high') {
-        headline = `Strong signal for ${bestCandidate.type.displayLabel}`;
+        headline = `Strong signal for ${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)}`;
     } else if (total >= 3 && hitRate >= 50 && confidence === 'medium') {
-        headline = `${bestCandidate.type.displayLabel} shows consistent recent performance`;
+        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} shows consistent recent performance`;
     } else if (confidence === 'low') {
-        headline = `${bestCandidate.type.displayLabel} recommended (mixed signals)`;
+        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} recommended (mixed signals)`;
     } else {
-        headline = `${bestCandidate.type.displayLabel} selected`;
+        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} selected`;
     }
 
     // Generate detailed bullets
@@ -331,11 +340,11 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
     
     // Bullet 1: Score comparison
     if (scoreGapPercent >= 20) {
-        bullets.push(`Scores ${scoreGapPercent.toFixed(0)}% higher than ${runnerUpGroup.type.displayLabel} (clear winner)`);
+        bullets.push(`Scores ${scoreGapPercent.toFixed(0)}% higher than ${wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id)} (clear winner)`);
     } else if (scoreGapPercent >= 10) {
-        bullets.push(`Edges out ${runnerUpGroup.type.displayLabel} by ${scoreGapPercent.toFixed(0)}%`);
+        bullets.push(`Edges out ${wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id)} by ${scoreGapPercent.toFixed(0)}%`);
     } else {
-        bullets.push(`Very close race with ${runnerUpGroup.type.displayLabel} (${scoreGapPercent.toFixed(0)}% margin)`);
+        bullets.push(`Very close race with ${wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id)} (${scoreGapPercent.toFixed(0)}% margin)`);
     }
     
     // Bullet 2: Recent performance
@@ -728,3 +737,4 @@ export function getRecommendation(context) {
         detailedExplanation: detailedExplanation
     };
 }
+
