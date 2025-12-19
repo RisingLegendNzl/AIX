@@ -26,6 +26,7 @@ import {
     updateOptimizationStatus, 
     showOptimizationComplete, 
     showOptimizationStopped, 
+    updateOptimizerDebugPanel,
     updateAiStatus, 
     updateMainRecommendationDisplay, 
     initializeAdvancedSettingsUI, 
@@ -71,7 +72,8 @@ export {
     updateAiStatus, 
     updateMainRecommendationDisplay, 
     initializeAdvancedSettingsUI, 
-    toggleParameterSliders 
+    toggleParameterSliders,
+    updateOptimizerDebugPanel  // NEW
 };
 
 // From ui.events.js
@@ -90,3 +92,4 @@ export function initializeUI() {
     attachApiEventHandlers();
     attachTrainingListeners();
 }
+
