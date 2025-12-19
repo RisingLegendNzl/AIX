@@ -93,6 +93,13 @@ let sharedData = {};
 let isRunning = false;
 let generationCount = 0;
 
+// NEW: Debug tracking
+let debugMetrics = {
+    perGroupStats: {},
+    totalSimulations: 0,
+    currentSeed: null
+};
+
 // ===========================
 // GENETIC ALGORITHM FUNCTIONS
 // ===========================
@@ -202,13 +209,7 @@ function calculateCorrelation(x, y) {
 
 /**
  * ENHANCED FITNESS CALCULATION with composite scoring
- * 
- * Improvements over raw W/L ratio:
- * 1. Adjusted W/L with continuity correction
- * 2. Stability bonus (penalizes variance)
- * 3. Sample size confidence weighting
- * 4. Score calibration quality (high scores should → high hit rates)
- * 5. Multi-window evaluation to prevent overfitting
+ * NOW TRACKS PER-GROUP WINS/LOSSES FOR DEBUG PANEL
  */
 function calculateFitness(individual) {
     if (!individual) {
@@ -275,6 +276,12 @@ function calculateFitness(individual) {
     ];
 
     let windowFitnesses = [];
+    
+    // NEW: Initialize per-group tracking
+    const groupStats = {};
+    config.allPredictionTypes.forEach(type => {
+        groupStats[type.id] = { wins: 0, losses: 0, plays: 0 };
+    });
 
     for (const window of windows) {
         if (!isRunning) return 0;
@@ -404,10 +411,16 @@ function calculateFitness(individual) {
                 recommendationScores.push(simItem.recommendationDetails.finalScore);
                 actualHits.push(isHit ? 1 : 0);
                 
-                if (isHit) {
-                    wins++;
-                } else {
-                    losses++;
+                // NEW: Track per-group stats
+                if (groupStats[simItem.recommendedGroupId]) {
+                    groupStats[simItem.recommendedGroupId].plays++;
+                    if (isHit) {
+                        groupStats[simItem.recommendedGroupId].wins++;
+                        wins++;
+                    } else {
+                        groupStats[simItem.recommendedGroupId].losses++;
+                        losses++;
+                    }
                 }
             }
 
@@ -474,6 +487,10 @@ function calculateFitness(individual) {
         1 / windowFitnesses.length
     );
 
+    // NEW: Update debug metrics with aggregated group stats
+    debugMetrics.perGroupStats = groupStats;
+    debugMetrics.totalSimulations++;
+
     return geometricMean;
 }
 
@@ -489,6 +506,14 @@ async function runEvolution() {
     // Seed is based on history length for repeatability
     const seed = historyData.length * 12345 + 67890;
     seededRandom = mulberry32(seed);
+    debugMetrics.currentSeed = seed;
+    
+    // NEW: Reset debug metrics
+    debugMetrics.totalSimulations = 0;
+    debugMetrics.perGroupStats = {};
+    config.allPredictionTypes.forEach(type => {
+        debugMetrics.perGroupStats[type.id] = { wins: 0, losses: 0, plays: 0 };
+    });
     
     let population = [];
     for (let i = 0; i < currentGaConfig.populationSize; i++) {
@@ -506,6 +531,7 @@ async function runEvolution() {
 
             population.sort((a, b) => b.fitness - a.fitness);
             
+            // NEW: Send debug data with progress
             self.postMessage({
                 type: 'progress',
                 payload: {
@@ -514,7 +540,12 @@ async function runEvolution() {
                     bestFitness: population[0].fitness.toFixed(3),
                     bestIndividual: population[0].individual,
                     processedCount: generationCount * currentGaConfig.populationSize,
-                    populationSize: currentGaConfig.populationSize
+                    populationSize: currentGaConfig.populationSize,
+                    debugMetrics: {
+                        perGroupStats: debugMetrics.perGroupStats,
+                        totalSimulations: debugMetrics.totalSimulations,
+                        currentSeed: debugMetrics.currentSeed
+                    }
                 }
             });
 
@@ -549,7 +580,12 @@ async function runEvolution() {
                     generation: generationCount,
                     bestFitness: population[0].fitness.toFixed(3),
                     bestIndividual: population[0].individual,
-                    togglesUsed: sharedData.toggles
+                    togglesUsed: sharedData.toggles,
+                    debugMetrics: {
+                        perGroupStats: debugMetrics.perGroupStats,
+                        totalSimulations: debugMetrics.totalSimulations,
+                        currentSeed: debugMetrics.currentSeed
+                    }
                 }
             });
         } else {
