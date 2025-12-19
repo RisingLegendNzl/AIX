@@ -249,6 +249,141 @@ export function analyzeFactorShift(history, strategyConfig) { // FIXED: Exported
     return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
 }
 
+/**
+ * Generates a detailed, deterministic explanation for a recommendation
+ * This is used when AI explanations are not available or to supplement them
+ */
+function generateDetailedExplanation(candidates, bestCandidate, context) {
+    const {
+        trendStats, boardStats, lastWinningNumber,
+        currentHistoryForTrend, current_STRATEGY_CONFIG,
+        activePredictionTypes
+    } = context;
+
+    if (!bestCandidate || candidates.length === 0) {
+        return {
+            headline: "Insufficient data for recommendation",
+            bullets: ["Need more history to generate reliable predictions"],
+            confidence: "none",
+            windowSize: 0,
+            topGroup: null,
+            runnerUpGroup: null,
+            scoreGap: 0,
+            recentPerformance: null
+        };
+    }
+
+    // Sort candidates by score to find runner-up
+    const sortedCandidates = [...candidates].sort((a, b) => b.score - a.score);
+    const topGroup = sortedCandidates[0];
+    const runnerUpGroup = sortedCandidates[1] || { type: { displayLabel: 'None' }, score: 0 };
+    const scoreGap = topGroup.score - runnerUpGroup.score;
+
+    // Calculate recent performance for chosen group
+    const recentWindow = Math.min(10, currentHistoryForTrend.length);
+    const recentHistory = currentHistoryForTrend
+        .filter(item => item.winningNumber !== null && item.status !== 'pending')
+        .slice(-recentWindow);
+    
+    let hits = 0;
+    let total = 0;
+    let currentStreak = bestCandidate.details.currentStreak || 0;
+    
+    for (const item of recentHistory) {
+        if (item.typeSuccessStatus && item.typeSuccessStatus[bestCandidate.type.id] !== undefined) {
+            total++;
+            if (item.typeSuccessStatus[bestCandidate.type.id]) {
+                hits++;
+            }
+        }
+    }
+    
+    const hitRate = total > 0 ? (hits / total) * 100 : 0;
+
+    // Determine confidence based on score gap and sample size
+    let confidence = 'low';
+    const scoreGapPercent = runnerUpGroup.score > 0 ? (scoreGap / runnerUpGroup.score) * 100 : 100;
+    
+    if (topGroup.score >= 50 && scoreGapPercent >= 20 && total >= 5) {
+        confidence = 'high';
+    } else if (topGroup.score >= 30 && scoreGapPercent >= 10 && total >= 3) {
+        confidence = 'medium';
+    }
+
+    // Generate headline
+    let headline = '';
+    if (currentStreak >= 3) {
+        headline = `${bestCandidate.type.displayLabel} on ${currentStreak}-spin winning streak`;
+    } else if (total >= 5 && hitRate >= 70) {
+        headline = `${bestCandidate.type.displayLabel} hitting ${hitRate.toFixed(0)}% of recent spins`;
+    } else if (confidence === 'high') {
+        headline = `Strong signal for ${bestCandidate.type.displayLabel}`;
+    } else if (total >= 3 && hitRate >= 50 && confidence === 'medium') {
+        headline = `${bestCandidate.type.displayLabel} shows consistent recent performance`;
+    } else if (confidence === 'low') {
+        headline = `${bestCandidate.type.displayLabel} recommended (mixed signals)`;
+    } else {
+        headline = `${bestCandidate.type.displayLabel} selected`;
+    }
+
+    // Generate detailed bullets
+    const bullets = [];
+    
+    // Bullet 1: Score comparison
+    if (scoreGapPercent >= 20) {
+        bullets.push(`Scores ${scoreGapPercent.toFixed(0)}% higher than ${runnerUpGroup.type.displayLabel} (clear winner)`);
+    } else if (scoreGapPercent >= 10) {
+        bullets.push(`Edges out ${runnerUpGroup.type.displayLabel} by ${scoreGapPercent.toFixed(0)}%`);
+    } else {
+        bullets.push(`Very close race with ${runnerUpGroup.type.displayLabel} (${scoreGapPercent.toFixed(0)}% margin)`);
+    }
+    
+    // Bullet 2: Recent performance
+    if (total >= 5) {
+        if (currentStreak >= 2) {
+            bullets.push(`Currently on ${currentStreak}-spin streak (${hits}/${total} recent hits)`);
+        } else if (hitRate >= 60) {
+            bullets.push(`Strong recent form: ${hits} hits in last ${total} spins (${hitRate.toFixed(0)}%)`);
+        } else if (hitRate >= 40) {
+            bullets.push(`Recent performance: ${hits}/${total} spins (${hitRate.toFixed(0)}%)`);
+        } else {
+            bullets.push(`Recent struggle: ${hits}/${total} hits (${hitRate.toFixed(0)}%) - watch carefully`);
+        }
+    } else if (total > 0) {
+        bullets.push(`Limited recent data: ${hits}/${total} hits - treat cautiously`);
+    } else {
+        bullets.push(`No recent history - prediction based on patterns only`);
+    }
+    
+    // Bullet 3: Pattern signals or driving factors
+    const details = bestCandidate.details;
+    const primaryFactor = details.primaryDrivingFactor || 'Statistical Trends';
+    const factorScore = details.individualScores?.[primaryFactor] || 0;
+    
+    if (factorScore > 0) {
+        bullets.push(`Primary driver: ${primaryFactor} (${factorScore.toFixed(1)} pts)`);
+    } else {
+        bullets.push(`Primary factor: ${primaryFactor}`);
+    }
+
+    return {
+        headline,
+        bullets,
+        confidence,
+        windowSize: recentWindow,
+        topGroup: bestCandidate.type.displayLabel,
+        runnerUpGroup: runnerUpGroup.type.displayLabel,
+        scoreGap: scoreGapPercent.toFixed(1),
+        recentPerformance: {
+            hits,
+            total,
+            hitRate: hitRate.toFixed(1),
+            currentStreak
+        },
+        finalScore: topGroup.score.toFixed(2),
+        primaryFactor: details.primaryDrivingFactor || 'N/A'
+    };
+}
 
 export function getRecommendation(context) {
     const {
@@ -398,7 +533,14 @@ export function getRecommendation(context) {
 
     if (candidates.length === 0) {
         // Returned object now includes 'signal' and 'reason' for history logging
-        return { html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">Not enough data for a recommendation.</span>', bestCandidate: null, details: null, signal: "Wait for Signal", reason: "Not enough data" };
+        return { 
+            html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">Not enough data for a recommendation.</span>', 
+            bestCandidate: null, 
+            details: null, 
+            signal: "Wait for Signal", 
+            reason: "Not enough data",
+            detailedExplanation: null
+        };
     }
 
     candidates.sort((a, b) => b.score - a.score);
@@ -407,7 +549,14 @@ export function getRecommendation(context) {
     // Handle scenario where best candidate has very low or zero score
     if (bestCandidate.score <= 0) {
         // Returned object now includes 'signal' and 'reason' for history logging
-        return { html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong recommendations based on current data.</span>', bestCandidate: null, details: null, signal: "Wait for Signal", reason: "No strong recommendations" };
+        return { 
+            html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong recommendations based on current data.</span>', 
+            bestCandidate: null, 
+            details: null, 
+            signal: "Wait for Signal", 
+            reason: "No strong recommendations",
+            detailedExplanation: null
+        };
     }
 
     if (isForWeightUpdate) {
@@ -523,10 +672,24 @@ export function getRecommendation(context) {
             let tempDetails = { ...bestCandidate.details, signal: signal, reason: reason }; // Clone and add signal/reason for history
             let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore?.toFixed(2) || 'N/A'}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
             
-            return { html: finalHtmlForAvoid, bestCandidate: null, details: tempDetails, signal: signal, reason: reason };
+            return { 
+                html: finalHtmlForAvoid, 
+                bestCandidate: null, 
+                details: tempDetails, 
+                signal: signal, 
+                reason: reason,
+                detailedExplanation: null
+            };
         }
     }
 
+    // Generate detailed explanation (use AI explanation if available, otherwise generate from data)
+    let detailedExplanation;
+    if (bestCandidate.details.aiExplanation && isAiReadyBool) {
+        detailedExplanation = bestCandidate.details.aiExplanation;
+    } else {
+        detailedExplanation = generateDetailedExplanation(candidates, bestCandidate, context);
+    }
 
     let finalHtml = `<strong class="${signalColor}">${signal}:</strong> Play <strong style="color: ${bestCandidate.type.textColor};">${bestCandidate.type.label}</strong><br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
     
@@ -556,5 +719,12 @@ export function getRecommendation(context) {
     }
 
     // Return the signal and reason along with html and bestCandidate/details
-    return { html: finalHtml, bestCandidate: bestCandidate, details: bestCandidate.details, signal: signal, reason: reason };
+    return { 
+        html: finalHtml, 
+        bestCandidate: bestCandidate, 
+        details: bestCandidate.details, 
+        signal: signal, 
+        reason: reason,
+        detailedExplanation: detailedExplanation
+    };
 }
