@@ -220,7 +220,10 @@ export function initializeDomReferences() {
         'apiRefreshButton', 'apiLoadHistoryButton', 'apiStatusMessage',
         // Training elements
         'trainAiButton', 'trainingLogToggle', 'trainingLogHeader', 'trainingLogContent', 
-        'trainingLogList', 'clearTrainingLogButton'
+        'trainingLogList', 'clearTrainingLogButton',
+        // NEW: Optimizer debug panel elements
+        'optimizerDebugToggle', 'optimizerDebugHeader', 'optimizerDebugContent', 'optimizerDebugData'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
 }
+
