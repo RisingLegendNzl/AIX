@@ -335,6 +335,37 @@ export function showOptimizationStopped() {
     toggleParameterSliders(true);
 }
 
+export function updateOptimizerDebugPanel(debugMetrics) {
+    if (!dom.optimizerDebugData || !debugMetrics) return;
+    
+    const { perGroupStats, totalSimulations, currentSeed } = debugMetrics;
+    
+    let html = '';
+    html += `<div class="debug-stat-row"><span class="debug-stat-label">Total Simulations:</span><span class="debug-stat-value">${totalSimulations || 0}</span></div>`;
+    html += `<div class="debug-stat-row"><span class="debug-stat-label">Deterministic Seed:</span><span class="debug-stat-value">${currentSeed || 'N/A'}</span></div>`;
+    html += '<div class="mt-3 mb-2 text-xs font-semibold text-gray-600">Per-Group Stats:</div>';
+    
+    if (perGroupStats && Object.keys(perGroupStats).length > 0) {
+        for (const groupId in perGroupStats) {
+            const stats = perGroupStats[groupId];
+            const type = config.allPredictionTypes.find(t => t.id === groupId);
+            if (!type) continue;
+            
+            const winRate = stats.plays > 0 ? ((stats.wins / stats.plays) * 100).toFixed(1) : '0.0';
+            const groupLabel = type.displayLabel || groupId;
+            
+            html += `<div class="debug-stat-row" style="border-left: 3px solid ${type.textColor || '#666'}">`;
+            html += `<span class="debug-stat-label">${groupLabel}:</span>`;
+            html += `<span class="debug-stat-value">${stats.wins} wins / ${stats.losses} losses (${winRate}%)</span>`;
+            html += `</div>`;
+        }
+    } else {
+        html += '<div class="text-gray-400 text-center py-2 text-sm">No group stats yet</div>';
+    }
+    
+    dom.optimizerDebugData.innerHTML = html;
+}
+
 export function updateAiStatus(message) {
     if (dom.aiModelStatus) dom.aiModelStatus.textContent = message;
 }
@@ -475,6 +506,12 @@ export async function updateMainRecommendationDisplay() {
 
         const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val);
         if (baseNum < 0 || baseNum > 36) return;
+        
+        // NEW: Add indicator if this is the recommended group
+        let groupNameDisplay = type.displayLabel;
+        if (recommendation.bestCandidate && type.id === recommendation.bestCandidate.type.id) {
+            groupNameDisplay += '<span class="recommended-indicator">REC</span>';
+        }
 
         const terminals = config.terminalMapping?.[baseNum] || [];
 
@@ -504,7 +541,7 @@ export async function updateMainRecommendationDisplay() {
 
         fullResultHtml += `
             <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
-                <strong style="color: ${type.textColor || '#1f2937'};">${type.displayLabel} (Base: ${baseNum})</strong>
+                <strong style="color: ${type.textColor || '#1f2937'};">${groupNameDisplay} (Base: ${baseNum})</strong>
                 <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
                 <div class="group-stats">
                     <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
@@ -646,3 +683,4 @@ export function toggleParameterSliders(enable) {
         }
     }
 }
+
