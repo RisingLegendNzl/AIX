@@ -587,11 +587,66 @@ export async function updateMainRecommendationDisplay() {
     const recommendation = await getRecommendationDataForDisplay(num1Val, num2Val);
     console.log("updateMainRecommendationDisplay: Got recommendation data.");
 
-    let fullResultHtml = `
-        <h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>
-        <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
-            ${recommendation.html}
-        </div>
+    // Build detailed recommendation section
+    let recommendationHtml = '<h3 class="text-lg font-bold text-gray-800 mb-2">Recommendation</h3>';
+    
+    if (recommendation.detailedExplanation) {
+        const exp = recommendation.detailedExplanation;
+        const confidenceBadgeColor = exp.confidence === 'high' ? 'bg-green-100 text-green-800' 
+            : exp.confidence === 'medium' ? 'bg-blue-100 text-blue-800'
+            : 'bg-gray-100 text-gray-800';
+        
+        recommendationHtml += `
+            <div class="bg-white border-2 border-gray-200 rounded-lg p-4 mb-4">
+                <div class="mb-3">
+                    <h4 class="text-base font-bold text-gray-900 mb-1">${exp.headline}</h4>
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="text-gray-600">Based on last ${exp.windowSize} spins</span>
+                        <span class="px-2 py-0.5 rounded-full ${confidenceBadgeColor} font-semibold uppercase">${exp.confidence} confidence</span>
+                    </div>
+                </div>
+                
+                <div class="space-y-1.5 mb-3">
+                    ${exp.bullets.map(bullet => `
+                        <div class="flex items-start gap-2">
+                            <span class="text-indigo-500 mt-0.5">•</span>
+                            <span class="text-sm text-gray-700">${bullet}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="pt-3 border-t border-gray-200 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                        <span class="text-gray-500">Primary Factor:</span>
+                        <span class="font-semibold text-gray-800 ml-1">${exp.primaryFactor}</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500">Final Score:</span>
+                        <span class="font-semibold text-gray-800 ml-1">${exp.finalScore}</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500">Runner-up:</span>
+                        <span class="font-semibold text-gray-800 ml-1">${exp.runnerUpGroup} (${exp.scoreGap}% gap)</span>
+                    </div>
+                    ${exp.recentPerformance ? `
+                        <div>
+                            <span class="text-gray-500">Recent:</span>
+                            <span class="font-semibold text-gray-800 ml-1">${exp.recentPerformance.hits}/${exp.recentPerformance.total} (${exp.recentPerformance.hitRate}%)</span>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    } else {
+        // Fallback to basic recommendation HTML
+        recommendationHtml += `
+            <div class="result-display p-4 bg-gray-50 border border-gray-200 rounded-lg mb-4 text-center">
+                ${recommendation.html}
+            </div>
+        `;
+    }
+
+    let fullResultHtml = recommendationHtml + `
         <h3 class="text-lg font-bold text-gray-800 mb-2">Calculation Groups</h3>
         <div class="space-y-2">
     `;
@@ -1471,13 +1526,10 @@ function runSimulationOnHistory(spinsToProcess) {
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
-            currentHistoryForTrend: localHistory,
+            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory,
             activePredictionTypes: state.activePredictionTypes,
-            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
-            allPredictionTypes: config.allPredictionTypes,
-            terminalMapping: config.terminalMapping,
-            rouletteWheel: config.rouletteWheel
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
+            terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
         
         const newHistoryItem = {
