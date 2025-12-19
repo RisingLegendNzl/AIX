@@ -21,6 +21,7 @@ import {
     updateOptimizationStatus, 
     showOptimizationComplete, 
     showOptimizationStopped, 
+    updateOptimizerDebugPanel,
     updateAiStatus, 
     updateMainRecommendationDisplay, 
     initializeAdvancedSettingsUI, 
@@ -662,6 +663,27 @@ export function attachMainActionListeners() {
 }
 
 export function attachOptimizationButtonListeners() {
+    // NEW: Worker handler for optimization progress/completion
+    optimizationWorker.onmessage = function (e) {
+        const { type, payload } = e.data;
+        if (type === 'progress') {
+            const progressHtml = payload.message || 'Optimizing...';
+            updateOptimizationStatus(progressHtml);
+            state.setBestFoundParams(payload);
+            // NEW: Update debug panel
+            if (payload.debugMetrics) {
+                updateOptimizerDebugPanel(payload.debugMetrics);
+            }
+        } else if (type === 'complete') {
+            showOptimizationComplete(payload);
+            state.setBestFoundParams(payload);
+            // NEW: Update debug panel with final data
+            if (payload.debugMetrics) {
+                updateOptimizerDebugPanel(payload.debugMetrics);
+            }
+        }
+    };
+
     if (dom.startOptimizationButton) {
         dom.startOptimizationButton.addEventListener('click', () => {
             console.log("Start Optimization button clicked.");
@@ -777,6 +799,20 @@ export function attachOptimizationButtonListeners() {
                 updateMainRecommendationDisplay();
             }
             console.log("Apply Best Params: Settings applied and UI updated.");
+        });
+    }
+
+    // NEW: Debug panel toggle
+    if (dom.optimizerDebugToggle || dom.optimizerDebugHeader) {
+        const toggleElement = dom.optimizerDebugToggle || dom.optimizerDebugHeader;
+        toggleElement.addEventListener('click', () => {
+            if (dom.optimizerDebugContent) {
+                dom.optimizerDebugContent.classList.toggle('open');
+                if (dom.optimizerDebugToggle) {
+                    const isOpen = dom.optimizerDebugContent.classList.contains('open');
+                    dom.optimizerDebugToggle.textContent = isOpen ? 'Hide Debug ^' : 'Show Debug ▼';
+                }
+            }
         });
     }
 }
@@ -985,3 +1021,4 @@ export function attachApiEventHandlers() {
         });
     }
 }
+
