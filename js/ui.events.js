@@ -34,10 +34,10 @@ import {
 /**
  * Handles the "Calculate" button click.
  */
-export function handleNewCalculation() {
+export function handleNewCalculation(isAutoCall = false) {
     console.log("handleNewCalculation: Function started.");
     
-    if (apiContext.isAutoModeEnabled()) {
+    if (apiContext.isAutoModeEnabled() && isAutoCall !== true) {
         alert('Auto mode is enabled. Disable it to use manual input.');
         return;
     }
@@ -57,7 +57,10 @@ export function handleNewCalculation() {
 
     if (existingPendingItem) {
         console.warn(`handleNewCalculation: An unresolved pending calculation (ID: ${existingPendingItem.id}) already exists. Not creating a new one.`);
-        alert("There's already a pending calculation. Please submit the winning number for that one first, or clear history.");
+        // Only alert if this is a manual attempt, otherwise just log and return to avoid spamming alerts in auto mode
+        if (isAutoCall !== true) {
+            alert("There's already a pending calculation. Please submit the winning number for that one first, or clear history.");
+        }
         updateMainRecommendationDisplay();
         return;
     }
@@ -362,6 +365,17 @@ export function loadParametersFromFile(event) {
 
 // --- API EVENT HANDLERS ---
 
+function autoFillTerminalCalculatorFromHistory(history) {
+    if (!history || history.length < 2) return;
+
+    // history[0] is the latest spin, history[1] is the previous spin
+    dom.number1.value = history[1];
+    dom.number2.value = history[0];
+
+    console.log(`Auto-filling terminal: num1=${dom.number1.value}, num2=${dom.number2.value}`);
+    handleNewCalculation(true);
+}
+
 async function handleApiRefresh() {
     const provider = dom.apiProviderSelect.value;
     const tableName = dom.apiTableSelect.value;
@@ -386,6 +400,11 @@ async function handleApiRefresh() {
         
         if (wasAdded) {
             await processApiSpin(latestSpin.winningNumber);
+            
+            // Auto-fill terminal with new data and trigger calculation
+            const contextSpins = apiContext.getContextSpins();
+            autoFillTerminalCalculatorFromHistory(contextSpins);
+            
             dom.apiStatusMessage.textContent = `New spin: ${latestSpin.winningNumber}`;
         } else {
             dom.apiStatusMessage.textContent = `Latest spin: ${latestSpin.winningNumber} (no change)`;
@@ -429,6 +448,9 @@ async function handleApiLoadHistory() {
         apiContext.replaceContextSpins(spins);
         
         await processApiHistoryLoad(spins);
+        
+        // Auto-fill terminal with the loaded history
+        autoFillTerminalCalculatorFromHistory(apiContext.getContextSpins());
         
         dom.apiStatusMessage.textContent = `Loaded ${spins.length} spins from API.`;
         
