@@ -367,6 +367,55 @@
         .training-log-entry.warning { background-color: #fffbeb; color: #b45309; }
         .training-log-entry.error { background-color: #fef2f2; color: #dc2626; }
         .training-log-entry.data { background-color: #f5f3ff; color: #6d28d9; }
+        
+        /* NEW: Optimizer Debug Panel Styles */
+        .optimizer-debug-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-in-out, padding 0.4s ease-in-out, margin-top 0.4s ease-in-out;
+            padding: 0;
+            margin-top: 0;
+            border-top: 1px solid transparent;
+        }
+        .optimizer-debug-content.open {
+            max-height: 400px;
+            padding: 12px;
+            margin-top: 12px;
+            border-top-color: #e5e7eb;
+            overflow-y: auto;
+        }
+        .debug-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+        .debug-stat-row:nth-child(odd) { background-color: #f9fafb; }
+        .debug-stat-label { font-weight: 600; color: #4b5563; }
+        .debug-stat-value { color: #1f2937; font-family: 'Courier New', monospace; }
+        
+        /* NEW: Group name coloring in recommendation */
+        .group-name-diffMinus { color: #f59e0b; font-weight: 600; }
+        .group-name-diffResult { color: #3b82f6; font-weight: 600; }
+        .group-name-diffPlus { color: #ef4444; font-weight: 600; }
+        .group-name-sumMinus { color: #8b5cf6; font-weight: 600; }
+        .group-name-sumResult { color: #10b981; font-weight: 600; }
+        .group-name-sumPlus { color: #f43f5e; font-weight: 600; }
+        
+        /* NEW: Recommended group indicator */
+        .recommended-indicator {
+            display: inline-block;
+            background-color: #22c55e;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body class="text-gray-800 py-10 px-4">
@@ -550,13 +599,28 @@
                 </div>
             
                 <div id="optimizationStatus" class="text-center text-sm font-medium text-gray-700 mt-2 h-10">
-                    </div>
+                </div>
             
                 <div id="optimizationResult" class="hidden mt-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
                     <h4 class="font-bold text-indigo-800">Optimization Complete!</h4>
-                    <p class="text-sm text-indigo-700">Best W/L Ratio: <strong id="bestFitnessResult"></strong></p>
+                    <p class="text-sm text-indigo-700">Best Fitness: <strong id="bestFitnessResult"></strong></p>
                     <pre id="bestParamsResult" class="text-xs bg-white p-2 rounded-md mt-2 overflow-x-auto"></pre>
                     <button id="applyBestParamsButton" class="w-full btn btn-secondary mt-3">Apply These Settings</button>
+                </div>
+                
+                <!-- NEW: Optimizer Debug Panel Toggle -->
+                <div id="optimizerDebugHeader" class="flex items-center justify-between cursor-pointer pt-2 border-t border-gray-200">
+                    <span class="text-sm font-medium text-gray-600">Debug Info</span>
+                    <button id="optimizerDebugToggle" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">
+                        Show Debug ▼
+                    </button>
+                </div>
+                
+                <!-- NEW: Optimizer Debug Panel Content (collapsed by default) -->
+                <div id="optimizerDebugContent" class="optimizer-debug-content bg-gray-50 rounded-lg">
+                    <div id="optimizerDebugData" class="space-y-2">
+                        <div class="text-gray-400 text-center py-4 text-sm">No debug data yet. Start optimization to see metrics.</div>
+                    </div>
                 </div>
             </div>
 
