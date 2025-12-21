@@ -32,6 +32,16 @@ function loadState() {
     state.setHistory(newHistory);
     state.setConfirmedWinsLog(appState.confirmedWinsLog || []);
 
+    // Load historical maximums
+    if (appState.historicalMaximums) {
+        state.setHistoricalMaximums(appState.historicalMaximums);
+        console.log("main.js: Loaded historical maximums from state");
+    } else {
+        // Initialize empty historical maximums if not present
+        state.setHistoricalMaximums({});
+        console.log("main.js: Initialized empty historical maximums");
+    }
+
     // Load currentPendingCalculationId
     if (appState.currentPendingCalculationId !== undefined) {
         // Validate if the loaded ID actually points to a pending item in the loaded history
@@ -54,6 +64,7 @@ function loadState() {
 
     if (appState.TOGGLES) {
         state.setToggles(appState.TOGGLES);
+        console.log("main.js: Loaded toggles, useAdvancedCalculations =", appState.TOGGLES.useAdvancedCalculations);
     }
     if (appState.strategyStates) state.setStrategyStates(appState.strategyStates);
     if (appState.patternMemory) state.setPatternMemory(appState.patternMemory);
@@ -98,18 +109,5 @@ analysis.initializeAi();
 
 // NEW: Attach optimization button listeners *after* workers are initialized
 ui.attachOptimizationButtonListeners();
-
-// Read initial values directly for startup sequence (mostly for initial wheel draw if inputs are populated)
-const initialNum1 = parseInt(document.getElementById('number1').value, 10);
-const initialNum2 = parseInt(document.getElementById('number2').value, 10);
-const lastWinningOnLoad = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
-
-// This will be handled by updateMainRecommendationDisplay's internal call to drawRouletteWheel.
-// Keeping this as a fallback or for clarity if inputs are empty on load.
-if (!isNaN(initialNum1) && !isNaN(initialNum2)) {
-    ui.drawRouletteWheel(Math.abs(initialNum2 - initialNum1), lastWinningOnLoad);
-} else {
-    ui.drawRouletteWheel(null, lastWinningOnLoad);
-}
 
 console.log("Application initialized using modular structure.");
