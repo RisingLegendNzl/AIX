@@ -26,16 +26,6 @@ export let STRATEGY_CONFIG = {
     aiConfidenceMultiplier: 25,  // Points = mlProbability * multiplier
     minAiPointsForReason: 5,     // Min AI points for 'AI Conf' to appear in reason list
 
-    // NEW: Historical Context Scoring
-    severityMultiplier: 15,      // Points = (current_loss / historical_max_loss) * multiplier
-    maxSeverityPoints: 20,       // Cap on severity score contribution
-    minHistoricalDataPoints: 10, // Minimum spins before using severity scoring
-    defaultHistoricalMax: 30,    // Default maximum non-appearance if no history
-    
-    // NEW: Conditional Probability Scoring
-    conditionalProbMultiplier: 10, // Points = conditional_probability * multiplier
-    minConditionalSampleSize: 5,   // Minimum sample size for conditional probability
-
     // NEW: Adaptive Play Signal Thresholds (used in shared-logic.js)
     // When useAdaptivePlay is ON
     ADAPTIVE_STRONG_PLAY_THRESHOLD: 50, // Score needed for "Strong Play"
@@ -67,7 +57,11 @@ export let STRATEGY_CONFIG = {
 
     // NEW: Pocket Distance Prioritization Multipliers (for useLowestPocketDistance)
     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5, // Multiplier to boost score if distance is 0 or 1
-    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5 // Multiplier to suppress score if distance > 1 but others are low
+    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5, // Multiplier to suppress score if distance is > 1 but others are low
+    
+    // NEW: Conditional Probability Parameters (for situational context from API data)
+    conditionalProbMultiplier: 10,       // Points = conditionalProbability * multiplier
+    minConditionalSampleSize: 5          // Minimum occurrences needed for conditional probability to be considered reliable
 };
 
 // --- Adaptive Learning Rates for Factor Influences ---
@@ -108,14 +102,6 @@ export const DEFAULT_PARAMETERS = {
         aiConfidenceMultiplier: 25,
         minAiPointsForReason: 5,
 
-        // Historical context defaults
-        severityMultiplier: 15,
-        maxSeverityPoints: 20,
-        minHistoricalDataPoints: 10,
-        defaultHistoricalMax: 30,
-        conditionalProbMultiplier: 10,
-        minConditionalSampleSize: 5,
-
         ADAPTIVE_STRONG_PLAY_THRESHOLD: 50,
         ADAPTIVE_PLAY_THRESHOLD: 20,
         LESS_STRICT_STRONG_PLAY_THRESHOLD: 40,
@@ -137,7 +123,11 @@ export const DEFAULT_PARAMETERS = {
 
         // Defaults for new Pocket Distance Prioritization
         LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5,
-        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5
+        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5,
+        
+        // Defaults for conditional probability
+        conditionalProbMultiplier: 10,
+        minConditionalSampleSize: 5
     },
     ADAPTIVE_LEARNING_RATES: {
         SUCCESS: 0.15, 
@@ -190,6 +180,8 @@ export const STRATEGY_PRESETS = {
             WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 40, // Lower dominance for warning
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 2.0, // More aggressive boost
+            conditionalProbMultiplier: 12,
+            minConditionalSampleSize: 4
         },
         ADAPTIVE_LEARNING_RATES: {
             SUCCESS: 0.15,
@@ -225,6 +217,8 @@ export const STRATEGY_PRESETS = {
             WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 60, // Higher dominance needed
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.2, // Moderate boost
+            conditionalProbMultiplier: 8,
+            minConditionalSampleSize: 6
         },
         ADAPTIVE_LEARNING_RATES: {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
@@ -256,7 +250,9 @@ export const STRATEGY_PRESETS = {
             WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 30, // Very low dominance needed
             // Pocket distance for preset
             LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.8, // Aggressive boost
-            HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2
+            HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2,
+            conditionalProbMultiplier: 15,
+            minConditionalSampleSize: 3
         },
         ADAPTIVE_LEARNING_RATES: {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
