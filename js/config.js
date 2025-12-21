@@ -26,6 +26,16 @@ export let STRATEGY_CONFIG = {
     aiConfidenceMultiplier: 25,  // Points = mlProbability * multiplier
     minAiPointsForReason: 5,     // Min AI points for 'AI Conf' to appear in reason list
 
+    // NEW: Historical Context Scoring
+    severityMultiplier: 15,      // Points = (current_loss / historical_max_loss) * multiplier
+    maxSeverityPoints: 20,       // Cap on severity score contribution
+    minHistoricalDataPoints: 10, // Minimum spins before using severity scoring
+    defaultHistoricalMax: 30,    // Default maximum non-appearance if no history
+    
+    // NEW: Conditional Probability Scoring
+    conditionalProbMultiplier: 10, // Points = conditional_probability * multiplier
+    minConditionalSampleSize: 5,   // Minimum sample size for conditional probability
+
     // NEW: Adaptive Play Signal Thresholds (used in shared-logic.js)
     // When useAdaptivePlay is ON
     ADAPTIVE_STRONG_PLAY_THRESHOLD: 50, // Score needed for "Strong Play"
@@ -57,7 +67,7 @@ export let STRATEGY_CONFIG = {
 
     // NEW: Pocket Distance Prioritization Multipliers (for useLowestPocketDistance)
     LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5, // Multiplier to boost score if distance is 0 or 1
-    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5 // Multiplier to suppress score if distance is > 1 but others are low
+    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5 // Multiplier to suppress score if distance > 1 but others are low
 };
 
 // --- Adaptive Learning Rates for Factor Influences ---
@@ -97,6 +107,14 @@ export const DEFAULT_PARAMETERS = {
         neighbourMultiplier: 0.5,
         aiConfidenceMultiplier: 25,
         minAiPointsForReason: 5,
+
+        // Historical context defaults
+        severityMultiplier: 15,
+        maxSeverityPoints: 20,
+        minHistoricalDataPoints: 10,
+        defaultHistoricalMax: 30,
+        conditionalProbMultiplier: 10,
+        minConditionalSampleSize: 5,
 
         ADAPTIVE_STRONG_PLAY_THRESHOLD: 50,
         ADAPTIVE_PLAY_THRESHOLD: 20,
