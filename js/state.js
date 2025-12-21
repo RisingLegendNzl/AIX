@@ -11,9 +11,6 @@ export let activePredictionTypes = [];
 // NEW: Store the ID of the currently pending calculation
 export let currentPendingCalculationId = null;
 
-// NEW: Historical maximum tracking for calculation groups
-export let historicalMaximums = {};
-
 export let strategyStates = {
     weightedZone: { weight: 1.0, name: 'Neighbour Weighting' },
     proximityBoost: { weight: 1.0, name: 'Proximity Boost' }
@@ -55,7 +52,6 @@ export function setActivePredictionTypes(types) { activePredictionTypes = types;
 export function setStrategyStates(states) { strategyStates = states; }
 export function setPatternMemory(memory) { patternMemory = memory; }
 export function setAdaptiveFactorInfluences(influences) { adaptiveFactorInfluences = influences; }
-export function setHistoricalMaximums(maxes) { historicalMaximums = maxes; }
 
 // NEW: Setter for currentPendingCalculationId with logging
 export function setCurrentPendingCalculationId(id) {
@@ -88,7 +84,6 @@ export function saveState() {
         strategyStates,
         patternMemory,
         adaptiveFactorInfluences,
-        historicalMaximums,
         currentPendingCalculationId, // NEW: Save the pending ID
         TOGGLES: {
             useTrendConfirmation, useWeightedZone, useProximityBoost, usePocketDistance, useLowestPocketDistance,
