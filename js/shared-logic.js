@@ -198,6 +198,68 @@ export function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, 
     return analysis;
 }
 
+/**
+ * Analyzes conditional probability: when previous result was closest to group X, how often does group Y hit next?
+ * This provides situational context, not prediction certainty.
+ */
+export function calculateConditionalProbability(history, groupId, activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel, useDynamicTerminalNeighbourCount, minSampleSize) {
+    const validHistory = history.filter(item => item.winningNumber !== null && item.status !== 'pending');
+    
+    if (validHistory.length < 2) {
+        return { probability: 0, sampleSize: 0 };
+    }
+
+    let relevantOccurrences = 0;
+    let groupHitCount = 0;
+
+    // Iterate through history to find when previous spin was closest to this group
+    for (let i = 1; i < validHistory.length; i++) {
+        const previousItem = validHistory[i - 1];
+        const currentItem = validHistory[i];
+        
+        // Find which group the previous spin was closest to
+        let closestGroupId = null;
+        let closestDistance = Infinity;
+        
+        activePredictionTypes.forEach(type => {
+            const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
+            if (!predictionTypeDefinition) return;
+            
+            const baseNum = predictionTypeDefinition.calculateBase(previousItem.num1, previousItem.num2);
+            if (baseNum < 0 || baseNum > 36) return;
+            
+            const terminals = terminalMapping?.[baseNum] || [];
+            const hitZone = getHitZone(baseNum, terminals, previousItem.winningNumber, useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
+            
+            hitZone.forEach(zoneNum => {
+                const dist = calculatePocketDistance(zoneNum, previousItem.winningNumber, rouletteWheel);
+                if (dist < closestDistance) {
+                    closestDistance = dist;
+                    closestGroupId = type.id;
+                }
+            });
+        });
+        
+        // If previous was closest to our group, check if current hit our group
+        if (closestGroupId === groupId) {
+            relevantOccurrences++;
+            
+            if (currentItem.typeSuccessStatus && currentItem.typeSuccessStatus[groupId]) {
+                groupHitCount++;
+            }
+        }
+    }
+    
+    const probability = relevantOccurrences >= minSampleSize && relevantOccurrences > 0 
+        ? groupHitCount / relevantOccurrences 
+        : 0;
+    
+    return { 
+        probability, 
+        sampleSize: relevantOccurrences 
+    };
+}
+
 // Re-defining analyzeFactorShift here for export from shared-logic
 // This function exists in analysis.js but is not exported from shared-logic.
 // So, we need to ensure it's either imported from analysis.js directly into optimizationWorker.js,
@@ -250,136 +312,6 @@ export function analyzeFactorShift(history, strategyConfig) { // FIXED: Exported
 }
 
 /**
- * NEW: Calculate historical context metrics for a calculation group
- */
-export function calculateHistoricalContext(typeId, currentHistory, historicalMaximums, current_STRATEGY_CONFIG, allPredictionTypes) {
-    // Count consecutive non-appearances (losses) from most recent
-    let currentLossStreak = 0;
-    const reversedHistory = [...currentHistory].reverse();
-    
-    for (const item of reversedHistory) {
-        if (item.status === 'pending' || item.winningNumber === null) continue;
-        if (item.typeSuccessStatus && item.typeSuccessStatus[typeId] !== undefined) {
-            if (item.typeSuccessStatus[typeId]) {
-                break; // Hit found, stop counting losses
-            } else {
-                currentLossStreak++;
-            }
-        }
-    }
-    
-    // Get or initialize historical maximum for this type
-    const historicalMax = historicalMaximums[typeId] || current_STRATEGY_CONFIG.defaultHistoricalMax;
-    
-    // Update historical maximum if current streak exceeds it
-    if (currentLossStreak > historicalMax) {
-        historicalMaximums[typeId] = currentLossStreak;
-    }
-    
-    // Calculate severity score (how close to historical maximum)
-    const severityScore = historicalMax > 0 ? (currentLossStreak / historicalMax) : 0;
-    
-    // Calculate total appearances in history
-    const totalAppearances = currentHistory.filter(item => 
-        item.typeSuccessStatus && item.typeSuccessStatus[typeId] === true
-    ).length;
-    
-    return {
-        currentLossStreak,
-        historicalMax,
-        severityScore,
-        totalAppearances,
-        hasEnoughData: currentHistory.length >= current_STRATEGY_CONFIG.minHistoricalDataPoints
-    };
-}
-
-/**
- * NEW: Calculate conditional probability for a calculation group
- * Given that the previous result was closest to a specific group, what's the probability this group hits next?
- */
-export function calculateConditionalProbability(typeId, currentHistory, lastWinningNumber, current_STRATEGY_CONFIG, allPredictionTypes, terminalMapping, rouletteWheel) {
-    if (!lastWinningNumber || currentHistory.length < current_STRATEGY_CONFIG.minConditionalSampleSize) {
-        return { probability: 0, sampleSize: 0, hasEnoughData: false };
-    }
-    
-    // Find which group the last winning number was closest to
-    let closestGroup = null;
-    let minDistance = Infinity;
-    
-    if (currentHistory.length >= 2) {
-        const lastItem = currentHistory[currentHistory.length - 1];
-        if (lastItem.winningNumber !== null && lastItem.num1 !== undefined && lastItem.num2 !== undefined) {
-            allPredictionTypes.forEach(type => {
-                const baseNum = type.calculateBase(lastItem.num1, lastItem.num2);
-                if (baseNum < 0 || baseNum > 36) return;
-                
-                const terminals = terminalMapping[baseNum] || [];
-                const hitZone = getHitZone(baseNum, terminals, lastItem.winningNumber, false, terminalMapping, rouletteWheel);
-                
-                hitZone.forEach(zoneNum => {
-                    const dist = calculatePocketDistance(zoneNum, lastItem.winningNumber, rouletteWheel);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        closestGroup = type.id;
-                    }
-                });
-            });
-        }
-    }
-    
-    if (!closestGroup) {
-        return { probability: 0, sampleSize: 0, hasEnoughData: false };
-    }
-    
-    // Count occurrences where previous was closest to closestGroup and current typeId hit
-    let conditionalHits = 0;
-    let conditionalTotal = 0;
-    
-    for (let i = 1; i < currentHistory.length; i++) {
-        const prevItem = currentHistory[i - 1];
-        const currItem = currentHistory[i];
-        
-        if (prevItem.status === 'pending' || currItem.status === 'pending') continue;
-        if (prevItem.winningNumber === null || currItem.winningNumber === null) continue;
-        
-        // Determine which group prevItem's winning number was closest to
-        let prevClosestGroup = null;
-        let prevMinDistance = Infinity;
-        
-        allPredictionTypes.forEach(type => {
-            const baseNum = type.calculateBase(prevItem.num1, prevItem.num2);
-            if (baseNum < 0 || baseNum > 36) return;
-            
-            const terminals = terminalMapping[baseNum] || [];
-            const hitZone = getHitZone(baseNum, terminals, prevItem.winningNumber, false, terminalMapping, rouletteWheel);
-            
-            hitZone.forEach(zoneNum => {
-                const dist = calculatePocketDistance(zoneNum, prevItem.winningNumber, rouletteWheel);
-                if (dist < prevMinDistance) {
-                    prevMinDistance = dist;
-                    prevClosestGroup = type.id;
-                }
-            });
-        });
-        
-        if (prevClosestGroup === closestGroup) {
-            conditionalTotal++;
-            if (currItem.typeSuccessStatus && currItem.typeSuccessStatus[typeId]) {
-                conditionalHits++;
-            }
-        }
-    }
-    
-    const probability = conditionalTotal > 0 ? (conditionalHits / conditionalTotal) : 0;
-    
-    return {
-        probability,
-        sampleSize: conditionalTotal,
-        hasEnoughData: conditionalTotal >= current_STRATEGY_CONFIG.minConditionalSampleSize
-    };
-}
-
-/**
  * Wraps a group name in a colored span element for visual distinction
  */
 function wrapGroupName(groupName, groupId) {
@@ -402,7 +334,7 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
     if (!bestCandidate || candidates.length === 0) {
         return {
             headline: "Insufficient data for recommendation",
-            bullets: ["Need more history to generate reliable predictions"],
+            bullets: ["Need more history to generate reliable context"],
             confidence: "none",
             windowSize: 0,
             topGroup: null,
@@ -491,7 +423,7 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
     } else if (total > 0) {
         bullets.push(`Limited recent data: ${hits}/${total} hits - treat cautiously`);
     } else {
-        bullets.push(`No recent history - prediction based on patterns only`);
+        bullets.push(`No recent history - context based on patterns only`);
     }
     
     // Bullet 3: Pattern signals or driving factors
@@ -534,11 +466,11 @@ export function getRecommendation(context) {
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
         useTableChangeWarningsBool, rollingPerformance, factorShiftStatus,
         useLowestPocketDistanceBool, 
+        apiContextData = null, // NEW: Optional API data {losses, max} for situational context
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
-        currentHistoryForTrend,
-        historicalMaximums = {}
+        currentHistoryForTrend 
     } = context;
 
     const currentNum1 = inputNum1;
@@ -564,7 +496,7 @@ export function getRecommendation(context) {
             confluenceBonus: 1.0, 
             reason: [],
             individualScores: {},
-            aiExplanation: null
+            aiExplanation: null // NEW: Store AI explanation
         };
 
         const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
@@ -624,30 +556,23 @@ export function getRecommendation(context) {
             if (rawAiPoints > current_STRATEGY_CONFIG.minAiPointsForReason) details.reason.push(`AI Conf`);
         }
 
-        // NEW: 6. Historical Context Score (Severity)
-        const historicalContext = calculateHistoricalContext(type.id, currentHistoryForTrend, historicalMaximums, current_STRATEGY_CONFIG, allPredictionTypes);
-        if (historicalContext.hasEnoughData && historicalContext.severityScore > 0) {
-            const rawSeverityPoints = Math.min(
-                current_STRATEGY_CONFIG.maxSeverityPoints,
-                historicalContext.severityScore * current_STRATEGY_CONFIG.severityMultiplier
-            );
-            rawScore += rawSeverityPoints;
-            details.individualScores['Historical Context'] = rawSeverityPoints;
-            if (rawSeverityPoints > 5) details.reason.push(`Context`);
-            details.historicalSeverityScore = historicalContext.severityScore;
-            details.currentLossStreak = historicalContext.currentLossStreak;
-            details.historicalMax = historicalContext.historicalMax;
-        }
-
-        // NEW: 7. Conditional Probability Score
-        const conditionalProb = calculateConditionalProbability(type.id, currentHistoryForTrend, lastWinningNumber, current_STRATEGY_CONFIG, allPredictionTypes, terminalMapping, rouletteWheel);
-        if (conditionalProb.hasEnoughData && conditionalProb.probability > 0) {
-            const rawConditionalPoints = conditionalProb.probability * current_STRATEGY_CONFIG.conditionalProbMultiplier;
+        // 6. Conditional Probability Score (situational context from history)
+        const conditionalData = calculateConditionalProbability(
+            currentHistoryForTrend, 
+            type.id, 
+            activePredictionTypes, 
+            allPredictionTypes, 
+            terminalMapping, 
+            rouletteWheel, 
+            context.useDynamicTerminalNeighbourCount, 
+            current_STRATEGY_CONFIG.minConditionalSampleSize
+        );
+        
+        if (conditionalData.probability > 0 && conditionalData.sampleSize >= current_STRATEGY_CONFIG.minConditionalSampleSize) {
+            const rawConditionalPoints = conditionalData.probability * current_STRATEGY_CONFIG.conditionalProbMultiplier;
             rawScore += rawConditionalPoints;
-            details.individualScores['Conditional Probability'] = rawConditionalPoints;
-            if (rawConditionalPoints > 3) details.reason.push(`Conditional`);
-            details.conditionalProbability = conditionalProb.probability;
-            details.conditionalSampleSize = conditionalProb.sampleSize;
+            details.individualScores['Conditional Pattern'] = rawConditionalPoints;
+            if (rawConditionalPoints > 1) details.reason.push(`Pattern`);
         }
 
         // --- APPLY ADAPTIVE INFLUENCES ---
@@ -716,11 +641,11 @@ export function getRecommendation(context) {
     if (bestCandidate.score <= 0) {
         // Returned object now includes 'signal' and 'reason' for history logging
         return { 
-            html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong recommendations based on current data.</span>', 
+            html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong context based on current data.</span>', 
             bestCandidate: null, 
             details: null, 
             signal: "Wait for Signal", 
-            reason: "No strong recommendations",
+            reason: "No strong context",
             detailedExplanation: null
         };
     }
