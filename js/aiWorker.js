@@ -396,6 +396,16 @@ async function trainEnsemble(historyData, historicalStreakData) {
 // --- AI EXPLANATION GENERATION (CALCULATION-GROUP-FOCUSED) ---
 
 /**
+ * Wraps a group name in a colored span for visual distinction
+ * FIXED: Added to enable group name coloring in AI explanations
+ */
+function wrapGroupName(groupName, groupId) {
+    if (!groupId || !groupName) return groupName;
+    const colorClass = `group-name-${groupId}`;
+    return `<span class="${colorClass}">${groupName}</span>`;
+}
+
+/**
  * Analyzes recent performance of a specific calculation group
  */
 function analyzeGroupRecentPerformance(groupId, validHistory) {
@@ -453,50 +463,56 @@ function determineConfidence(averagedGroupProbs) {
 
 /**
  * Generates the headline explaining the calculation group recommendation
+ * FIXED: Now uses wrapGroupName for colored group names
  */
 function generateGroupRecommendationHeadline(topGroup, confidence, performance) {
+    const wrappedGroupName = wrapGroupName(topGroup.groupName, topGroup.groupId);
+    
     // Priority 1: Active winning streak
     if (performance.currentStreak >= 3) {
-        return `${topGroup.groupName} on ${performance.currentStreak}-spin winning streak`;
+        return `${wrappedGroupName} on ${performance.currentStreak}-spin winning streak`;
     }
     
     // Priority 2: Exceptional recent performance
     if (performance.total >= 5 && performance.hitRate >= 70) {
-        return `${topGroup.groupName} hitting ${performance.hitRate.toFixed(0)}% of recent spins`;
+        return `${wrappedGroupName} hitting ${performance.hitRate.toFixed(0)}% of recent spins`;
     }
     
     // Priority 3: High confidence from AI
     if (confidence === 'high') {
-        return `AI strongly favors ${topGroup.groupName}`;
+        return `AI strongly favors ${wrappedGroupName}`;
     }
     
     // Priority 4: Moderate performance with decent confidence
     if (performance.total >= 3 && performance.hitRate >= 50 && confidence === 'medium') {
-        return `${topGroup.groupName} shows consistent recent performance`;
+        return `${wrappedGroupName} shows consistent recent performance`;
     }
     
     // Priority 5: Low confidence warning
     if (confidence === 'low') {
-        return `AI suggests ${topGroup.groupName} but signals are mixed`;
+        return `AI suggests ${wrappedGroupName} but signals are mixed`;
     }
     
     // Default: Simple recommendation
-    return `AI recommends ${topGroup.groupName}`;
+    return `AI recommends ${wrappedGroupName}`;
 }
 
 /**
  * Generates explanation bullets for calculation group recommendation
+ * FIXED: Now uses wrapGroupName for colored group names
  */
 function generateGroupRecommendationBullets(topGroup, runnerUpGroup, scoreGap, performance, lastSequence, validHistory) {
     const bullets = [];
     
+    const wrappedRunnerUpName = wrapGroupName(runnerUpGroup.groupName, runnerUpGroup.groupId);
+    
     // --- BULLET 1: Score comparison (why this group beats alternatives) ---
     if (scoreGap >= 0.20) {
-        bullets.push(`Scores ${(scoreGap * 100).toFixed(0)}% higher than ${runnerUpGroup.groupName} (clear winner)`);
+        bullets.push(`Scores ${(scoreGap * 100).toFixed(0)}% higher than ${wrappedRunnerUpName} (clear winner)`);
     } else if (scoreGap >= 0.10) {
-        bullets.push(`Edges out ${runnerUpGroup.groupName} by ${(scoreGap * 100).toFixed(0)}%`);
+        bullets.push(`Edges out ${wrappedRunnerUpName} by ${(scoreGap * 100).toFixed(0)}%`);
     } else {
-        bullets.push(`Very close race with ${runnerUpGroup.groupName} (${(scoreGap * 100).toFixed(0)}% margin)`);
+        bullets.push(`Very close race with ${wrappedRunnerUpName} (${(scoreGap * 100).toFixed(0)}% margin)`);
     }
     
     // --- BULLET 2: Recent historical performance ---
@@ -880,8 +896,7 @@ function isNeighborHitInContext(winningNumber, historySubset, recentHistoryLengt
         if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
         
         // Use calculatePocketDistance (assuming it's available or imported correctly in worker scope)
-        // Since calculatePocketDistance is in shared-logic.js, we need to ensure it's imported or passed.
-        // For now, let's include a local implementation or ensure it's truly global in worker if needed.
+        // Since calculatePocketDistance is in shared-logic.js, we need to ensure it's truly global in worker if needed.
         // Given it's a small pure function, for worker context, a local copy or direct import might be considered.
         // For a clean worker, let's locally define calculatePocketDistance if it's not imported.
         // However, in our architecture, shared-logic.js is not imported into aiWorker.js.
@@ -889,8 +904,6 @@ function isNeighborHitInContext(winningNumber, historySubset, recentHistoryLengt
 
         // Re-implement a lightweight calculatePocketDistance for internal worker use, or ensure it's shared.
         // Let's assume calculatePocketDistance from shared-logic.js is NOT directly available here.
-        // For simplicity, we can pass rouletteWheel and implement this helper locally if needed,
-        // or just use basic array index arithmetic if pocket distance definition is straightforward here.
         // For this worker, direct array operations will be used for simplicity if calculatePocketDistance is not easily imported.
 
         const getPocketDistanceLocal = (num1, num2, wheel) => {
