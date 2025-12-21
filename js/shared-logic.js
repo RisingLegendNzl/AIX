@@ -250,6 +250,136 @@ export function analyzeFactorShift(history, strategyConfig) { // FIXED: Exported
 }
 
 /**
+ * NEW: Calculate historical context metrics for a calculation group
+ */
+export function calculateHistoricalContext(typeId, currentHistory, historicalMaximums, current_STRATEGY_CONFIG, allPredictionTypes) {
+    // Count consecutive non-appearances (losses) from most recent
+    let currentLossStreak = 0;
+    const reversedHistory = [...currentHistory].reverse();
+    
+    for (const item of reversedHistory) {
+        if (item.status === 'pending' || item.winningNumber === null) continue;
+        if (item.typeSuccessStatus && item.typeSuccessStatus[typeId] !== undefined) {
+            if (item.typeSuccessStatus[typeId]) {
+                break; // Hit found, stop counting losses
+            } else {
+                currentLossStreak++;
+            }
+        }
+    }
+    
+    // Get or initialize historical maximum for this type
+    const historicalMax = historicalMaximums[typeId] || current_STRATEGY_CONFIG.defaultHistoricalMax;
+    
+    // Update historical maximum if current streak exceeds it
+    if (currentLossStreak > historicalMax) {
+        historicalMaximums[typeId] = currentLossStreak;
+    }
+    
+    // Calculate severity score (how close to historical maximum)
+    const severityScore = historicalMax > 0 ? (currentLossStreak / historicalMax) : 0;
+    
+    // Calculate total appearances in history
+    const totalAppearances = currentHistory.filter(item => 
+        item.typeSuccessStatus && item.typeSuccessStatus[typeId] === true
+    ).length;
+    
+    return {
+        currentLossStreak,
+        historicalMax,
+        severityScore,
+        totalAppearances,
+        hasEnoughData: currentHistory.length >= current_STRATEGY_CONFIG.minHistoricalDataPoints
+    };
+}
+
+/**
+ * NEW: Calculate conditional probability for a calculation group
+ * Given that the previous result was closest to a specific group, what's the probability this group hits next?
+ */
+export function calculateConditionalProbability(typeId, currentHistory, lastWinningNumber, current_STRATEGY_CONFIG, allPredictionTypes, terminalMapping, rouletteWheel) {
+    if (!lastWinningNumber || currentHistory.length < current_STRATEGY_CONFIG.minConditionalSampleSize) {
+        return { probability: 0, sampleSize: 0, hasEnoughData: false };
+    }
+    
+    // Find which group the last winning number was closest to
+    let closestGroup = null;
+    let minDistance = Infinity;
+    
+    if (currentHistory.length >= 2) {
+        const lastItem = currentHistory[currentHistory.length - 1];
+        if (lastItem.winningNumber !== null && lastItem.num1 !== undefined && lastItem.num2 !== undefined) {
+            allPredictionTypes.forEach(type => {
+                const baseNum = type.calculateBase(lastItem.num1, lastItem.num2);
+                if (baseNum < 0 || baseNum > 36) return;
+                
+                const terminals = terminalMapping[baseNum] || [];
+                const hitZone = getHitZone(baseNum, terminals, lastItem.winningNumber, false, terminalMapping, rouletteWheel);
+                
+                hitZone.forEach(zoneNum => {
+                    const dist = calculatePocketDistance(zoneNum, lastItem.winningNumber, rouletteWheel);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestGroup = type.id;
+                    }
+                });
+            });
+        }
+    }
+    
+    if (!closestGroup) {
+        return { probability: 0, sampleSize: 0, hasEnoughData: false };
+    }
+    
+    // Count occurrences where previous was closest to closestGroup and current typeId hit
+    let conditionalHits = 0;
+    let conditionalTotal = 0;
+    
+    for (let i = 1; i < currentHistory.length; i++) {
+        const prevItem = currentHistory[i - 1];
+        const currItem = currentHistory[i];
+        
+        if (prevItem.status === 'pending' || currItem.status === 'pending') continue;
+        if (prevItem.winningNumber === null || currItem.winningNumber === null) continue;
+        
+        // Determine which group prevItem's winning number was closest to
+        let prevClosestGroup = null;
+        let prevMinDistance = Infinity;
+        
+        allPredictionTypes.forEach(type => {
+            const baseNum = type.calculateBase(prevItem.num1, prevItem.num2);
+            if (baseNum < 0 || baseNum > 36) return;
+            
+            const terminals = terminalMapping[baseNum] || [];
+            const hitZone = getHitZone(baseNum, terminals, prevItem.winningNumber, false, terminalMapping, rouletteWheel);
+            
+            hitZone.forEach(zoneNum => {
+                const dist = calculatePocketDistance(zoneNum, prevItem.winningNumber, rouletteWheel);
+                if (dist < prevMinDistance) {
+                    prevMinDistance = dist;
+                    prevClosestGroup = type.id;
+                }
+            });
+        });
+        
+        if (prevClosestGroup === closestGroup) {
+            conditionalTotal++;
+            if (currItem.typeSuccessStatus && currItem.typeSuccessStatus[typeId]) {
+                conditionalHits++;
+            }
+        }
+    }
+    
+    const probability = conditionalTotal > 0 ? (conditionalHits / conditionalTotal) : 0;
+    
+    return {
+        probability,
+        sampleSize: conditionalTotal,
+        hasEnoughData: conditionalTotal >= current_STRATEGY_CONFIG.minConditionalSampleSize
+    };
+}
+
+/**
  * Wraps a group name in a colored span element for visual distinction
  */
 function wrapGroupName(groupName, groupId) {
@@ -407,7 +537,8 @@ export function getRecommendation(context) {
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
-        currentHistoryForTrend 
+        currentHistoryForTrend,
+        historicalMaximums = {}
     } = context;
 
     const currentNum1 = inputNum1;
@@ -433,7 +564,7 @@ export function getRecommendation(context) {
             confluenceBonus: 1.0, 
             reason: [],
             individualScores: {},
-            aiExplanation: null // NEW: Store AI explanation
+            aiExplanation: null
         };
 
         const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
@@ -491,6 +622,32 @@ export function getRecommendation(context) {
             details.individualScores['High AI Confidence'] = rawAiPoints;
             details.mlBoostApplied = rawAiPoints > 0;
             if (rawAiPoints > current_STRATEGY_CONFIG.minAiPointsForReason) details.reason.push(`AI Conf`);
+        }
+
+        // NEW: 6. Historical Context Score (Severity)
+        const historicalContext = calculateHistoricalContext(type.id, currentHistoryForTrend, historicalMaximums, current_STRATEGY_CONFIG, allPredictionTypes);
+        if (historicalContext.hasEnoughData && historicalContext.severityScore > 0) {
+            const rawSeverityPoints = Math.min(
+                current_STRATEGY_CONFIG.maxSeverityPoints,
+                historicalContext.severityScore * current_STRATEGY_CONFIG.severityMultiplier
+            );
+            rawScore += rawSeverityPoints;
+            details.individualScores['Historical Context'] = rawSeverityPoints;
+            if (rawSeverityPoints > 5) details.reason.push(`Context`);
+            details.historicalSeverityScore = historicalContext.severityScore;
+            details.currentLossStreak = historicalContext.currentLossStreak;
+            details.historicalMax = historicalContext.historicalMax;
+        }
+
+        // NEW: 7. Conditional Probability Score
+        const conditionalProb = calculateConditionalProbability(type.id, currentHistoryForTrend, lastWinningNumber, current_STRATEGY_CONFIG, allPredictionTypes, terminalMapping, rouletteWheel);
+        if (conditionalProb.hasEnoughData && conditionalProb.probability > 0) {
+            const rawConditionalPoints = conditionalProb.probability * current_STRATEGY_CONFIG.conditionalProbMultiplier;
+            rawScore += rawConditionalPoints;
+            details.individualScores['Conditional Probability'] = rawConditionalPoints;
+            if (rawConditionalPoints > 3) details.reason.push(`Conditional`);
+            details.conditionalProbability = conditionalProb.probability;
+            details.conditionalSampleSize = conditionalProb.sampleSize;
         }
 
         // --- APPLY ADAPTIVE INFLUENCES ---
@@ -737,4 +894,3 @@ export function getRecommendation(context) {
         detailedExplanation: detailedExplanation
     };
 }
-
