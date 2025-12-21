@@ -322,7 +322,6 @@ export function showOptimizationComplete(payload) {
     if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Optimization finished!';
     if (dom.optimizationResult) dom.optimizationResult.classList.remove('hidden');
     if (dom.bestFitnessResult) dom.bestFitnessResult.textContent = payload.bestFitness;
-    if (dom.bestParamsResult) dom.bestParamsResult.textContent = JSON.stringify(payload.bestIndividual, null, 2);
     if (dom.startOptimizationButton) dom.startOptimizationButton.disabled = false;
     if (dom.stopOptimizationButton) dom.stopOptimizationButton.disabled = true;
     toggleParameterSliders(true);
@@ -683,4 +682,3 @@ export function toggleParameterSliders(enable) {
         }
     }
 }
-
