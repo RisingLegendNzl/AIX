@@ -44,82 +44,8 @@ export function updateWinLossCounter() {
 }
 
 export function drawRouletteWheel(currentDiff = null, lastWinningNumber = null) {
-    if (!dom.rouletteWheelContainer) return;
-    dom.rouletteWheelContainer.innerHTML = '';
-    const svgWidth = dom.rouletteWheelContainer.clientWidth || 300;
-    const svgHeight = svgWidth;
-    const radius = (svgWidth / 2) * 0.8;
-    const centerX = svgWidth / 2;
-    const centerY = svgHeight / 2;
-    const numberRadius = 15;
-
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("id", "rouletteWheel");
-    svg.setAttribute("width", svgWidth);
-    svg.setAttribute("height", svgHeight);
-    svg.setAttribute("viewBox", `0 0 ${svgWidth} ${svgHeight}`);
-
-    const outerCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    outerCircle.setAttribute("cx", centerX);
-    outerCircle.setAttribute("cy", centerY);
-    outerCircle.setAttribute("r", radius + numberRadius + 5);
-    outerCircle.setAttribute("fill", "none");
-    outerCircle.setAttribute("stroke", "#e2e8f0");
-    outerCircle.setAttribute("stroke-width", "2");
-    svg.appendChild(outerCircle);
-
-    const highlightedNumbers = new Set();
-    const hitZoneClasses = {};
-
-    if (currentDiff !== null && !isNaN(currentDiff)) {
-        const num1 = parseInt(dom.number1.value, 10);
-        const num2 = parseInt(dom.number2.value, 10);
-
-        state.activePredictionTypes.forEach(type => {
-            const baseNum = config.allPredictionTypes.find(t => t.id === type.id).calculateBase(num1, num2);
-            if (baseNum < 0 || baseNum > 36) return;
-            
-            const terminals = config.terminalMapping?.[baseNum] || [];
-            const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, state.useDynamicTerminalNeighbourCount, config.terminalMapping, config.rouletteWheel);
-            hitZone.forEach(num => {
-                highlightedNumbers.add(num);
-                if (!hitZoneClasses[num]) {
-                    hitZoneClasses[num] = `highlight-${type.id}`;
-                }
-            });
-        });
-    }
-
-    config.rouletteWheel.forEach((number, index) => {
-        const angle = (index / config.rouletteWheel.length) * 2 * Math.PI - (Math.PI / 2);
-        const x = centerX + radius * Math.cos(angle);
-        const y = centerY + radius * Math.sin(angle);
-        const numberColor = getRouletteNumberColor(number);
-        let strokeClass = '';
-
-        if (lastWinningNumber !== null && number === lastWinningNumber) {
-            strokeClass = 'highlight-winning';
-        } else if (highlightedNumbers.has(number)) {
-            strokeClass = hitZoneClasses[number];
-        }
-
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.setAttribute("cx", x);
-        circle.setAttribute("cy", y);
-        circle.setAttribute("r", numberRadius);
-        circle.setAttribute("class", `wheel-number-circle ${numberColor} ${strokeClass}`);
-        svg.appendChild(circle);
-
-        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        text.setAttribute("x", x);
-        text.setAttribute("y", y + 3);
-        text.setAttribute("text-anchor", "middle");
-        text.setAttribute("class", "wheel-number-text");
-        text.textContent = number;
-        svg.appendChild(text);
-    });
-
-    dom.rouletteWheelContainer.appendChild(svg);
+    // Roulette wheel visualizer removed
+    return;
 }
 
 export function renderHistory() {
@@ -297,20 +223,8 @@ export function renderStrategyWeights() {
 }
 
 export function updateRouletteLegend() {
-    if (!dom.rouletteLegend) return;
-    dom.rouletteLegend.innerHTML = `
-        <div class="roulette-legend-item"><div class="roulette-legend-color bg-roulette-green"></div> Green (0)</div>
-        <div class="roulette-legend-item"><div class="roulette-legend-color bg-roulette-red"></div> Red Numbers</div>
-        <div class="roulette-legend-item"><div class="roulette-legend-color bg-roulette-black"></div> Black Numbers</div>
-    `;
-    state.activePredictionTypes.forEach(type => {
-        dom.rouletteLegend.innerHTML += `
-            <div class="roulette-legend-item"><div class="roulette-legend-color ${type.colorClass}"></div> ${type.displayLabel}</div>
-        `;
-    });
-    dom.rouletteLegend.innerHTML += `
-        <div class="roulette-legend-item"><div class="roulette-legend-color bg-highlight-winning"></div> Winning Number</div>
-    `;
+    // Roulette legend removed
+    return;
 }
 
 // --- Worker UI Update Functions ---
@@ -318,10 +232,70 @@ export function updateOptimizationStatus(htmlContent) {
     if (dom.optimizationStatus) dom.optimizationStatus.innerHTML = htmlContent;
 }
 
+/**
+ * Calculate human-readable confidence level from fitness score
+ */
+function calculateOptimizerConfidence(fitness) {
+    // fitness is geometric mean of win/loss ratios, typically ranges from ~0.01 to ~5.0
+    // Higher is better
+    if (fitness >= 1.5) {
+        return { level: 'High', description: 'Strong configuration found' };
+    } else if (fitness >= 1.0) {
+        return { level: 'Medium', description: 'Moderate improvement detected' };
+    } else if (fitness >= 0.5) {
+        return { level: 'Low', description: 'Weak signals, mixed results' };
+    } else {
+        return { level: 'Very Low', description: 'No clear winner found' };
+    }
+}
+
+/**
+ * Calculate performance percentile (comparing to baseline of 1.0)
+ */
+function calculatePerformancePercentile(fitness) {
+    // Baseline fitness is 1.0 (break-even)
+    // Calculate how much better this is than baseline
+    const improvement = ((fitness - 1.0) / 1.0) * 100;
+    
+    if (improvement >= 50) {
+        return { percentile: 95, description: 'Top 5%' };
+    } else if (improvement >= 25) {
+        return { percentile: 80, description: 'Top 20%' };
+    } else if (improvement >= 10) {
+        return { percentile: 65, description: 'Above average' };
+    } else if (improvement >= 0) {
+        return { percentile: 50, description: 'Average' };
+    } else {
+        return { percentile: 30, description: 'Below average' };
+    }
+}
+
 export function showOptimizationComplete(payload) {
-    if (dom.optimizationStatus) dom.optimizationStatus.textContent = 'Optimization finished!';
+    const fitness = parseFloat(payload.bestFitness);
+    const confidence = calculateOptimizerConfidence(fitness);
+    const performance = calculatePerformancePercentile(fitness);
+    
+    if (dom.optimizationStatus) {
+        const statusHtml = `
+            <div class="text-green-600 font-semibold">Optimization Complete</div>
+            <div class="text-sm text-gray-600 mt-1">
+                Confidence: <strong>${confidence.level}</strong> - ${confidence.description}
+            </div>
+            <div class="text-sm text-gray-600">
+                Performance: <strong>${performance.description}</strong> (${performance.percentile}th percentile)
+            </div>
+        `;
+        dom.optimizationStatus.innerHTML = statusHtml;
+    }
+    
     if (dom.optimizationResult) dom.optimizationResult.classList.remove('hidden');
-    if (dom.bestFitnessResult) dom.bestFitnessResult.textContent = payload.bestFitness;
+    if (dom.bestFitnessResult) {
+        // Show human-readable output instead of raw fitness
+        dom.bestFitnessResult.innerHTML = `
+            <span class="text-lg font-bold">${confidence.level}</span>
+            <span class="text-sm text-gray-600 ml-2">(${performance.description})</span>
+        `;
+    }
     if (dom.startOptimizationButton) dom.startOptimizationButton.disabled = false;
     if (dom.stopOptimizationButton) dom.stopOptimizationButton.disabled = true;
     toggleParameterSliders(true);
@@ -404,7 +378,8 @@ export async function getRecommendationDataForDisplay(num1Val, num2Val) {
         current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
         activePredictionTypes: state.activePredictionTypes,
         currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
-        allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
+        allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel,
+        historicalMaximums: state.historicalMaximums
     });
     return recommendation;
 }
@@ -425,7 +400,6 @@ export async function updateMainRecommendationDisplay() {
         dom.resultDisplay.innerHTML = `<p class="text-red-600 font-medium text-center">Please enter two valid numbers to see a recommendation.</p>`;
         dom.resultDisplay.classList.remove('hidden');
         hidePatternAlert();
-        drawRouletteWheel(null, lastWinning);
         return;
     }
 
@@ -560,8 +534,7 @@ export async function updateMainRecommendationDisplay() {
         hidePatternAlert();
     }
 
-    drawRouletteWheel(Math.abs(num2Val - num1Val), lastWinning);
-    console.log("updateMainRecommendationDisplay: UI elements rendered and wheel drawn.");
+    console.log("updateMainRecommendationDisplay: UI elements rendered.");
 }
 
 function createSlider(containerId, label, paramObj, paramName) {
