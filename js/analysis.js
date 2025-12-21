@@ -453,7 +453,7 @@ export async function handleTrainFromHistory() {
     // Log order verification
     // confirmedWinsLog should already be oldest→newest (sorted by history item id)
     const first5 = confirmedSpins.slice(0, 5);
-    const last5 = confirmedSpins.slice(-5);
+    const last5 = confirmedSpins.slice(-5).reverse(); // FIXED: Reverse to show newest→oldest
     
     ui.addTrainingLogEntry('data', `First 5 spins (oldest): [${first5.join(', ')}]`);
     ui.addTrainingLogEntry('data', `Last 5 spins (newest): [${last5.join(', ')}]`);
