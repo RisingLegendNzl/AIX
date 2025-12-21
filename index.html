@@ -229,58 +229,6 @@
             text-align: center;
         }
 
-        #rouletteWheelContainer {
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-top: 1rem;
-        }
-        #rouletteWheel {
-            border: 2px solid #e2e8f0;
-            border-radius: 50%;
-            background-color: #f8fafc;
-        }
-        .wheel-number-circle.red { fill: #ef4444; stroke: #b91c1c; }
-        .wheel-number-circle.black { fill: #1f2937; stroke: #111827; }
-        .wheel-number-circle.green { fill: #22c55e; stroke: #16a34a; }
-
-        .wheel-number-text {
-            font-size: 8px;
-            font-weight: 600;
-            fill: white;
-            pointer-events: none;
-        }
-
-        .wheel-number-circle.highlight-diffMinus { stroke: #f59e0b; stroke-width: 3px; }
-        .wheel-number-circle.highlight-diffResult { stroke: #3b82f6; stroke-width: 3px; }
-        .wheel-number-circle.highlight-diffPlus { stroke: #ef4444; stroke-width: 3px; }
-        .wheel-number-circle.highlight-sumMinus { stroke: #8b5cf6; stroke-width: 3px; }
-        .wheel-number-circle.highlight-sumResult { stroke: #10b981; stroke-width: 3px; }
-        .wheel-number-circle.highlight-sumPlus { stroke: #f43f5e; stroke-width: 3px; }
-        .wheel-number-circle.highlight-winning { stroke: #10b981; stroke-width: 4px; }
-
-        .roulette-legend-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.875rem;
-            color: #4b5563;
-        }
-        .roulette-legend-color {
-            width: 16px;
-            height: 16px;
-            border-radius: 4px;
-        }
-        .bg-roulette-red { background-color: #ef4444; }
-        .bg-roulette-black { background-color: #1f2937; }
-        .bg-roulette-green { background-color: #22c55e; }
-        .bg-highlight-diffMinus { background-color: #f59e0b; }
-        .bg-highlight-diffResult { background-color: #3b82f6; }
-        .bg-highlight-diffPlus { background-color: #ef4444; }
-        .bg-highlight-sumMinus { background-color: #8b5cf6; }
-        .bg-highlight-sumResult { background-color: #10b981; }
-        .bg-highlight-sumPlus { background-color: #f43f5e; }
         .text-pink-400 { color: #f472b6; }
 
         .text-purple-700 { color: #7e22ce; }
@@ -576,15 +524,6 @@
         </main>
         
         <aside class="space-y-8">
-            <div class="card p-8">
-                <div id="rouletteWheelSection">
-                    <h2 class="text-xl font-bold text-gray-700">Roulette Wheel Visualizer</h2>
-                    <div id="rouletteWheelContainer"></div>
-                    <div class="mt-4 grid grid-cols-2 gap-2 text-sm" id="rouletteLegend">
-                    </div>
-                </div>
-            </div>
-
             <div class="card p-8 space-y-4">
                 <h2 class="text-xl font-bold text-gray-700">AI Parameter Optimizer</h2>
                 <p class="text-sm text-gray-500">
@@ -598,17 +537,16 @@
                     <button id="stopOptimizationButton" class="w-full btn btn-danger" disabled>Stop Optimization</button>
                 </div>
             
-                <div id="optimizationStatus" class="text-center text-sm font-medium text-gray-700 mt-2 h-10">
+                <div id="optimizationStatus" class="text-center text-sm font-medium text-gray-700 mt-2 min-h-[60px]">
                 </div>
             
                 <div id="optimizationResult" class="hidden mt-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
                     <h4 class="font-bold text-indigo-800">Optimization Complete!</h4>
-                    <p class="text-sm text-indigo-700">Best Fitness: <strong id="bestFitnessResult"></strong></p>
-                    <pre id="bestParamsResult" class="text-xs bg-white p-2 rounded-md mt-2 overflow-x-auto"></pre>
+                    <p class="text-sm text-indigo-700 mt-2">Result: <span id="bestFitnessResult" class="font-semibold"></span></p>
                     <button id="applyBestParamsButton" class="w-full btn btn-secondary mt-3">Apply These Settings</button>
                 </div>
                 
-                <!-- NEW: Optimizer Debug Panel Toggle -->
+                <!-- Optimizer Debug Panel Toggle -->
                 <div id="optimizerDebugHeader" class="flex items-center justify-between cursor-pointer pt-2 border-t border-gray-200">
                     <span class="text-sm font-medium text-gray-600">Debug Info</span>
                     <button id="optimizerDebugToggle" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">
@@ -616,7 +554,7 @@
                     </button>
                 </div>
                 
-                <!-- NEW: Optimizer Debug Panel Content (collapsed by default) -->
+                <!-- Optimizer Debug Panel Content (collapsed by default) -->
                 <div id="optimizerDebugContent" class="optimizer-debug-content bg-gray-50 rounded-lg">
                     <div id="optimizerDebugData" class="space-y-2">
                         <div class="text-gray-400 text-center py-4 text-sm">No debug data yet. Start optimization to see metrics.</div>
