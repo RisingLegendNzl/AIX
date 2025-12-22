@@ -47,25 +47,33 @@ export const parameterMap = {
     // Adaptive Influence Rates
     SUCCESS: { label: 'Adaptive Success Rate', container: 'adaptiveInfluenceSliders' },
     FAILURE: { label: 'Adaptive Failure Rate', container: 'adaptiveInfluenceSliders' },
-    MIN_INFLUENCE: { label: 'Min Adaptive Influence', container: 'adaptiveInfluenceSliders' },
-    MAX_INFLUENCE: { label: 'Max Adaptive Influence', container: 'adaptiveInfluenceSliders' },
-    // Table Change Warning Parameters
-    WARNING_ROLLING_WINDOW_SIZE: { label: 'Warn Window Size', container: 'warningParametersSliders' },
-    WARNING_MIN_PLAYS_FOR_EVAL: { label: 'Warn Min Plays', container: 'warningParametersSliders' },
-    WARNING_LOSS_STREAK_THRESHOLD: { label: 'Warn Loss Streak', container: 'warningParametersSliders' },
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: { label: 'Warn Win Rate %', container: 'warningParametersSliders' },
-    DEFAULT_AVERAGE_WIN_RATE: { label: 'Default Avg Win Rate', container: 'warningParametersSliders' }
+    MIN_INFLUENCE: { label: 'Min Influence', container: 'adaptiveInfluenceSliders' },
+    MAX_INFLUENCE: { label: 'Max Influence', container: 'adaptiveInfluenceSliders' },
+    // Warning Parameters
+    WARNING_ROLLING_WINDOW_SIZE: { label: 'Rolling Window', container: 'warningParametersSliders' },
+    WARNING_MIN_PLAYS_FOR_EVAL: { label: 'Min Plays for Eval', container: 'warningParametersSliders' },
+    WARNING_LOSS_STREAK_THRESHOLD: { label: 'Loss Streak Threshold', container: 'warningParametersSliders' },
+    WARNING_ROLLING_WIN_RATE_THRESHOLD: { label: 'Win Rate Threshold %', container: 'warningParametersSliders' },
+    DEFAULT_AVERAGE_WIN_RATE: { label: 'Default Avg Win Rate %', container: 'warningParametersSliders' }
 };
 
-
 // --- HELPER FUNCTIONS ---
-export function getRouletteNumberColor(n) {
-    if (n === 0) return 'green';
+
+/**
+ * Returns the color class for a roulette number
+ * @param {number} num - Roulette number (0-36)
+ * @returns {string} CSS class name
+ */
+export function getRouletteNumberColor(num) {
     const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
-    if (redNumbers.includes(n)) return 'red';
-    return 'black';
+    if (num === 0) return 'green';
+    return redNumbers.includes(num) ? 'red' : 'black';
 }
 
+/**
+ * Toggle visibility of a guide/content section
+ * @param {string} contentId - ID of the content element to toggle
+ */
 export function toggleGuide(contentId) {
     const content = document.getElementById(contentId);
     if (content) {
@@ -74,7 +82,8 @@ export function toggleGuide(contentId) {
 }
 
 /**
- * Displays a warning message in the dedicated pattern alert section.
+ * Shows a pattern alert message with the given warning text.
+ * @param {string} message - The warning message to display
  */
 export function showPatternAlert(message) {
     if (dom.patternAlert) {
@@ -105,6 +114,58 @@ export function updateApiLiveButtonState(isPollingActive) {
         dom.apiLiveButton.classList.remove('btn-danger');
         dom.apiLiveButton.classList.add('btn-primary');
     }
+}
+
+/**
+ * Updates the historical data indicator in the UI
+ * @param {Object} status - Status object from apiContext.getDataSourceStatus()
+ */
+export function updateHistoricalDataIndicator(status) {
+    if (!dom.historicalDataIndicator) return;
+    
+    let indicatorHtml = '';
+    let indicatorClass = '';
+    
+    if (!status || status.status === 'not_initialized') {
+        indicatorHtml = `
+            <div class="flex items-center text-gray-400">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span class="text-xs">No data loaded</span>
+            </div>
+        `;
+        indicatorClass = 'bg-gray-50 border-gray-200';
+    } else if (status.isApiCalibrated) {
+        indicatorHtml = `
+            <div class="flex items-center text-green-700">
+                <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                </svg>
+                <div>
+                    <span class="text-xs font-semibold">${status.label}</span>
+                    <span class="text-xs text-green-600 block">${status.description}</span>
+                </div>
+            </div>
+        `;
+        indicatorClass = 'bg-green-50 border-green-200';
+    } else {
+        indicatorHtml = `
+            <div class="flex items-center text-amber-700">
+                <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <div>
+                    <span class="text-xs font-semibold">${status.label}</span>
+                    <span class="text-xs text-amber-600 block">${status.description}</span>
+                </div>
+            </div>
+        `;
+        indicatorClass = 'bg-amber-50 border-amber-200';
+    }
+    
+    dom.historicalDataIndicator.innerHTML = indicatorHtml;
+    dom.historicalDataIndicator.className = `historical-data-indicator p-3 rounded-lg border ${indicatorClass}`;
 }
 
 // --- TRAINING LOG FUNCTIONS ---
@@ -218,12 +279,13 @@ export function initializeDomReferences() {
         // API integration elements
         'apiProviderSelect', 'apiTableSelect', 'apiAutoToggle', 'apiLiveButton', 
         'apiRefreshButton', 'apiLoadHistoryButton', 'apiStatusMessage',
+        // NEW: Historical data indicator
+        'historicalDataIndicator',
         // Training elements
         'trainAiButton', 'trainingLogToggle', 'trainingLogHeader', 'trainingLogContent', 
         'trainingLogList', 'clearTrainingLogButton',
-        // NEW: Optimizer debug panel elements
+        // Optimizer debug panel elements
         'optimizerDebugToggle', 'optimizerDebugHeader', 'optimizerDebugContent', 'optimizerDebugData'
     ];
     elementIds.forEach(id => { if(document.getElementById(id)) dom[id] = document.getElementById(id) });
 }
-
