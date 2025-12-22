@@ -74,11 +74,16 @@ class SectorContextManager {
         this.lastUpdated = null;
         this.dataSource = 'defaults'; // 'defaults' | 'api' | 'calculated'
         this.isInitialized = false;
+        
+        // NEW: Track which sectors have API-provided max values vs defaults
+        this.apiProvidedMaxSectors = new Set();
+        this.apiDataTimestamp = null;
     }
 
     /**
      * Initialize or update with API losses data
      * @param {Object} apiLossesData - Losses data from API (current streaks and historical max)
+     * @returns {boolean} True if update was successful
      */
     updateFromApi(apiLossesData) {
         if (!apiLossesData) {
@@ -105,6 +110,9 @@ class SectorContextManager {
                 '19-36': 'high'
             };
 
+            // Reset API-provided tracking
+            this.apiProvidedMaxSectors.clear();
+
             // Process API data
             if (Array.isArray(apiLossesData)) {
                 // Array format: [{name, losses, max}, ...]
@@ -114,10 +122,11 @@ class SectorContextManager {
                         this.currentLossStreaks[internalName] = sector.losses || 0;
                         if (sector.max && sector.max > 0) {
                             this.historicalMax[internalName] = sector.max;
+                            this.apiProvidedMaxSectors.add(internalName);
                         }
                     }
                 });
-                this.dataSource = 'api';
+                this.dataSource = this.apiProvidedMaxSectors.size > 0 ? 'api' : 'calculated';
             } else if (typeof apiLossesData === 'object') {
                 // Object format: {sectorName: {losses, max}, ...}
                 for (const [name, data] of Object.entries(apiLossesData)) {
@@ -126,15 +135,23 @@ class SectorContextManager {
                         this.currentLossStreaks[internalName] = data.losses || data.current || 0;
                         if (data.max && data.max > 0) {
                             this.historicalMax[internalName] = data.max;
+                            this.apiProvidedMaxSectors.add(internalName);
                         }
                     }
                 }
-                this.dataSource = 'api';
+                this.dataSource = this.apiProvidedMaxSectors.size > 0 ? 'api' : 'calculated';
             }
 
             this.lastUpdated = new Date();
+            this.apiDataTimestamp = new Date();
             this.isInitialized = true;
-            console.log('[SectorContext] Updated from API:', this.getSummary());
+            
+            console.log('[SectorContext] Updated from API:', {
+                dataSource: this.dataSource,
+                apiProvidedMaxCount: this.apiProvidedMaxSectors.size,
+                apiProvidedMaxSectors: Array.from(this.apiProvidedMaxSectors)
+            });
+            
             return true;
         } catch (error) {
             console.error('[SectorContext] Error processing API data:', error);
@@ -172,7 +189,10 @@ class SectorContextManager {
             this.currentLossStreaks[sectorId] = streak;
         }
 
-        this.dataSource = this.dataSource === 'api' ? 'api' : 'calculated';
+        // Only change data source if we don't already have API data
+        if (this.dataSource !== 'api') {
+            this.dataSource = 'calculated';
+        }
         this.lastUpdated = new Date();
         this.isInitialized = true;
     }
@@ -180,11 +200,12 @@ class SectorContextManager {
     /**
      * Get severity level for a sector
      * @param {string} sectorId - Sector identifier
-     * @returns {Object} Severity info {ratio, level, description}
+     * @returns {Object} Severity info {ratio, level, description, isApiMax}
      */
     getSectorSeverity(sectorId) {
         const currentLoss = this.currentLossStreaks[sectorId] || 0;
         const maxLoss = this.historicalMax[sectorId] || DEFAULT_HISTORICAL_MAX[sectorId] || 30;
+        const isApiMax = this.apiProvidedMaxSectors.has(sectorId);
 
         const ratio = maxLoss > 0 ? currentLoss / maxLoss : 0;
 
@@ -213,7 +234,8 @@ class SectorContextManager {
             historicalMax: maxLoss,
             ratio: Math.min(ratio, 1.0), // Cap at 1.0
             level,
-            description
+            description,
+            isApiMax  // NEW: Indicates if max value came from API
         };
     }
 
@@ -271,8 +293,9 @@ class SectorContextManager {
 
     /**
      * Calculate aggregate severity score for a group's hit zone
+     * This correlates historical sector data to calculation groups
      * @param {Array<number>} hitZoneNumbers - Numbers in the group's hit zone
-     * @returns {Object} Aggregate severity context
+     * @returns {Object} Aggregate severity context for the calculation group
      */
     calculateGroupSectorContext(hitZoneNumbers) {
         const exposure = this.calculateSectorExposure(hitZoneNumbers);
@@ -283,7 +306,8 @@ class SectorContextManager {
                 aggregateSeverity: 0,
                 dominantSector: null,
                 sectorExposure: {},
-                contextDescription: 'No sector context available (hit zone may only contain 0)'
+                contextDescription: 'No sector context available (hit zone may only contain 0)',
+                hasApiData: false
             };
         }
 
@@ -292,11 +316,17 @@ class SectorContextManager {
         let weightedSeverity = 0;
         let dominantSector = null;
         let maxExposure = 0;
+        let hasAnyApiData = false;
 
         for (const [sectorId, data] of Object.entries(exposure)) {
             const weight = data.ratio;
             weightedSeverity += data.severity.ratio * weight;
             totalWeight += weight;
+            
+            // Track if any sector has API-provided max
+            if (data.severity.isApiMax) {
+                hasAnyApiData = true;
+            }
 
             if (data.ratio > maxExposure) {
                 maxExposure = data.ratio;
@@ -332,13 +362,14 @@ class SectorContextManager {
             sectorExposure: exposure,
             contextDescription,
             dataSource: this.dataSource,
-            lastUpdated: this.lastUpdated
+            lastUpdated: this.lastUpdated,
+            hasApiData: hasAnyApiData  // NEW: Indicates if group uses API-provided max values
         };
     }
 
     /**
      * Get confidence modifier based on sector context
-     * Returns a multiplier (0.8 to 1.1) for group confidence adjustment
+     * Returns a multiplier (0.85 to 1.0) for group confidence adjustment
      * 
      * IMPORTANT: This is a CONTEXTUAL modifier, not a boost.
      * Extreme sectors reduce confidence (more uncertainty), not increase it.
@@ -369,13 +400,17 @@ class SectorContextManager {
 
     /**
      * Get summary of current sector state
-     * @returns {Object} Summary object
+     * @returns {Object} Summary object with data source information
      */
     getSummary() {
         const summary = {
             isInitialized: this.isInitialized,
             dataSource: this.dataSource,
             lastUpdated: this.lastUpdated,
+            apiDataTimestamp: this.apiDataTimestamp,
+            apiProvidedMaxCount: this.apiProvidedMaxSectors.size,
+            totalSectors: Object.keys(SECTOR_DEFINITIONS).length,
+            hasFullApiData: this.apiProvidedMaxSectors.size === Object.keys(SECTOR_DEFINITIONS).length,
             sectors: {}
         };
 
@@ -384,6 +419,65 @@ class SectorContextManager {
         }
 
         return summary;
+    }
+
+    /**
+     * Get data source status for UI display
+     * @returns {Object} Status object with user-friendly descriptions
+     */
+    getDataSourceStatus() {
+        const apiCount = this.apiProvidedMaxSectors.size;
+        const totalCount = Object.keys(SECTOR_DEFINITIONS).length;
+        
+        if (!this.isInitialized) {
+            return {
+                status: 'not_initialized',
+                label: 'Not Connected',
+                description: 'No sector data loaded',
+                isApiCalibrated: false,
+                confidence: 'low'
+            };
+        }
+        
+        if (this.dataSource === 'api' && apiCount === totalCount) {
+            return {
+                status: 'full_api',
+                label: '5+ Year Data Active',
+                description: `Historical max data from API for all ${totalCount} sectors`,
+                isApiCalibrated: true,
+                confidence: 'high',
+                timestamp: this.apiDataTimestamp
+            };
+        }
+        
+        if (this.dataSource === 'api' && apiCount > 0) {
+            return {
+                status: 'partial_api',
+                label: 'Partial API Data',
+                description: `API data for ${apiCount}/${totalCount} sectors, defaults for rest`,
+                isApiCalibrated: true,
+                confidence: 'medium',
+                timestamp: this.apiDataTimestamp
+            };
+        }
+        
+        if (this.dataSource === 'calculated') {
+            return {
+                status: 'session_only',
+                label: 'Session Data Only',
+                description: 'Using current session streaks with default historical bounds',
+                isApiCalibrated: false,
+                confidence: 'low'
+            };
+        }
+        
+        return {
+            status: 'defaults',
+            label: 'Using Defaults',
+            description: 'Using conservative default values',
+            isApiCalibrated: false,
+            confidence: 'low'
+        };
     }
 
     /**
@@ -397,21 +491,24 @@ class SectorContextManager {
                 headline: 'No historical sector context',
                 description: 'Sector analysis unavailable for this configuration.',
                 details: [],
-                disclaimer: null
+                disclaimer: null,
+                isApiCalibrated: false
             };
         }
 
         const details = [];
+        const dataStatus = this.getDataSourceStatus();
 
         // Add dominant sector info
         if (groupContext.dominantSector) {
             const dom = groupContext.dominantSector;
+            const maxSource = dom.severity.isApiMax ? '(API)' : '(default)';
             details.push(
                 `Primary sector exposure: ${dom.name} (${(dom.exposure * 100).toFixed(0)}% of hit zone)`
             );
             details.push(
                 `${dom.name} status: ${dom.severity.currentLoss} spins since last hit ` +
-                `(${dom.severity.description}, historical max: ${dom.severity.historicalMax})`
+                `(${dom.severity.description}, historical max: ${dom.severity.historicalMax} ${maxSource})`
             );
         }
 
@@ -424,12 +521,14 @@ class SectorContextManager {
 
         return {
             headline: groupContext.contextDescription,
-            description: this.dataSource === 'api'
-                ? 'Based on 5+ years of historical sector data'
-                : 'Based on current session data',
+            description: dataStatus.isApiCalibrated
+                ? 'Calibrated with 5+ years of historical sector data'
+                : 'Using session data with default historical bounds',
             details,
             disclaimer: 'Historical patterns provide context only, not prediction. Each spin is independent.',
-            confidenceModifier: this.getConfidenceModifier(groupContext)
+            confidenceModifier: this.getConfidenceModifier(groupContext),
+            isApiCalibrated: dataStatus.isApiCalibrated,
+            dataSourceLabel: dataStatus.label
         };
     }
 
@@ -442,6 +541,8 @@ class SectorContextManager {
         this.lastUpdated = null;
         this.dataSource = 'defaults';
         this.isInitialized = false;
+        this.apiProvidedMaxSectors.clear();
+        this.apiDataTimestamp = null;
     }
 }
 
