@@ -261,11 +261,7 @@ export function calculateConditionalProbability(history, groupId, activePredicti
 }
 
 // Re-defining analyzeFactorShift here for export from shared-logic
-// This function exists in analysis.js but is not exported from shared-logic.
-// So, we need to ensure it's either imported from analysis.js directly into optimizationWorker.js,
-// or exported from here if it's meant to be a shared utility.
-// Given the current import structure (optimizationWorker imports * as shared), it needs to be exported from here.
-export function analyzeFactorShift(history, strategyConfig) { // FIXED: Exported analyzeFactorShift
+export function analyzeFactorShift(history, strategyConfig) {
     let factorShiftDetected = false;
     let reason = '';
 
@@ -323,12 +319,13 @@ function wrapGroupName(groupName, groupId) {
 /**
  * Generates a detailed, deterministic explanation for a recommendation
  * This is used when AI explanations are not available or to supplement them
+ * NOW INCLUDES SECTOR CONTEXT when available
  */
 function generateDetailedExplanation(candidates, bestCandidate, context) {
     const {
         trendStats, boardStats, lastWinningNumber,
         currentHistoryForTrend, current_STRATEGY_CONFIG,
-        activePredictionTypes
+        activePredictionTypes, sectorContextData
     } = context;
 
     if (!bestCandidate || candidates.length === 0) {
@@ -340,7 +337,8 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             topGroup: null,
             runnerUpGroup: null,
             scoreGap: 0,
-            recentPerformance: null
+            recentPerformance: null,
+            sectorContext: null
         };
     }
 
@@ -379,6 +377,26 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
         confidence = 'high';
     } else if (topGroup.score >= 30 && scoreGapPercent >= 10 && total >= 3) {
         confidence = 'medium';
+    }
+
+    // Adjust confidence based on sector context (if available)
+    let sectorContextInfo = null;
+    if (sectorContextData && sectorContextData.hasContext) {
+        const sectorModifier = sectorContextData.confidenceModifier || 1.0;
+        
+        // Sector stress REDUCES confidence (more uncertainty)
+        if (sectorModifier < 0.95 && confidence === 'high') {
+            confidence = 'medium';
+        } else if (sectorModifier < 0.90 && confidence === 'medium') {
+            confidence = 'low';
+        }
+        
+        sectorContextInfo = {
+            description: sectorContextData.contextDescription,
+            modifier: sectorModifier,
+            dominantSector: sectorContextData.dominantSector,
+            dataSource: sectorContextData.dataSource
+        };
     }
 
     // Generate headline
@@ -426,15 +444,22 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
         bullets.push(`No recent history - context based on patterns only`);
     }
     
-    // Bullet 3: Pattern signals or driving factors
-    const details = bestCandidate.details;
-    const primaryFactor = details.primaryDrivingFactor || 'Statistical Trends';
-    const factorScore = details.individualScores?.[primaryFactor] || 0;
-    
-    if (factorScore > 0) {
-        bullets.push(`Primary driver: ${primaryFactor} (${factorScore.toFixed(1)} pts)`);
+    // Bullet 3: Sector context or pattern signals
+    if (sectorContextInfo && sectorContextInfo.dominantSector) {
+        const dom = sectorContextInfo.dominantSector;
+        const severityDesc = dom.severity?.description || 'within typical range';
+        bullets.push(`Sector context: ${dom.name} exposure (${severityDesc})`);
     } else {
-        bullets.push(`Primary factor: ${primaryFactor}`);
+        // Fallback to driving factors
+        const details = bestCandidate.details;
+        const primaryFactor = details.primaryDrivingFactor || 'Statistical Trends';
+        const factorScore = details.individualScores?.[primaryFactor] || 0;
+        
+        if (factorScore > 0) {
+            bullets.push(`Primary driver: ${primaryFactor} (${factorScore.toFixed(1)} pts)`);
+        } else {
+            bullets.push(`Primary factor: ${primaryFactor}`);
+        }
     }
 
     return {
@@ -452,7 +477,8 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             currentStreak
         },
         finalScore: topGroup.score.toFixed(2),
-        primaryFactor: details.primaryDrivingFactor || 'N/A'
+        primaryFactor: bestCandidate.details.primaryDrivingFactor || 'N/A',
+        sectorContext: sectorContextInfo
     };
 }
 
@@ -466,7 +492,7 @@ export function getRecommendation(context) {
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
         useTableChangeWarningsBool, rollingPerformance, factorShiftStatus,
         useLowestPocketDistanceBool, 
-        apiContextData = null, // NEW: Optional API data {losses, max} for situational context
+        sectorContextProvider = null, // NEW: Optional sector context provider
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
@@ -496,7 +522,9 @@ export function getRecommendation(context) {
             confluenceBonus: 1.0, 
             reason: [],
             individualScores: {},
-            aiExplanation: null // NEW: Store AI explanation
+            aiExplanation: null,
+            sectorContext: null, // NEW: Sector context for this group
+            sectorConfidenceModifier: 1.0 // NEW: Sector-based confidence modifier
         };
 
         const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
@@ -506,6 +534,19 @@ export function getRecommendation(context) {
 
         const terminals = terminalMapping?.[baseNum] || [];
         const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
+
+        // --- NEW: Calculate sector context for this group's hit zone ---
+        if (sectorContextProvider && typeof sectorContextProvider.getGroupSectorContext === 'function') {
+            try {
+                const groupSectorContext = sectorContextProvider.getGroupSectorContext(hitZone);
+                if (groupSectorContext && groupSectorContext.hasContext) {
+                    details.sectorContext = groupSectorContext;
+                    details.sectorConfidenceModifier = sectorContextProvider.getSectorConfidenceModifier(groupSectorContext);
+                }
+            } catch (error) {
+                console.warn('Error getting sector context for group:', type.id, error);
+            }
+        }
 
         // --- Calculate Raw Score Components ---
         let rawScore = 0;
@@ -578,7 +619,7 @@ export function getRecommendation(context) {
         // --- APPLY ADAPTIVE INFLUENCES ---
         let finalCalculatedScore = 0;
         let mostInfluentialFactor = "N/A";
-        let highestInfluencedScore = -Infinity; // Initialize with negative infinity
+        let highestInfluencedScore = -Infinity;
 
         for (const factorName in currentAdaptiveInfluences) {
             const influence = currentAdaptiveInfluences[factorName];
@@ -596,15 +637,28 @@ export function getRecommendation(context) {
         if (mostInfluentialFactor === "N/A" && details.reason.length > 0) {
             mostInfluentialFactor = details.reason[0];
         } else if (mostInfluentialFactor === "N/A") {
-            mostInfluentialFactor = "Statistical Trends"; // Default if no specific factor dominated
+            mostInfluentialFactor = "Statistical Trends";
+        }
+
+        // --- NEW: Apply sector context as confidence modifier ---
+        // This is a CONTEXTUAL modifier - extreme sectors REDUCE confidence
+        // We apply it as a multiplier to the final score
+        if (details.sectorContext && details.sectorConfidenceModifier < 1.0) {
+            // Only apply if it would reduce the score (never boost based on sector)
+            finalCalculatedScore *= details.sectorConfidenceModifier;
+            
+            // Add to reason if significant
+            if (details.sectorConfidenceModifier < 0.95) {
+                details.reason.push('Sector stress');
+            }
         }
 
         details.finalScore = finalCalculatedScore;
-        details.baseScore = rawHitRatePoints + rawStreakPoints; // Re-calculate baseScore with actual points
+        details.baseScore = rawHitRatePoints + rawStreakPoints;
         details.primaryDrivingFactor = mostInfluentialFactor;
         details.adaptiveInfluenceUsed = currentAdaptiveInfluences[mostInfluentialFactor] || 1.0;
 
-        // NEW: Store AI explanation if available
+        // Store AI explanation if available
         if (aiPredictionData && aiPredictionData.aiExplanation) {
             details.aiExplanation = aiPredictionData.aiExplanation;
         }
@@ -623,7 +677,6 @@ export function getRecommendation(context) {
     }).filter(c => c && !isNaN(c.score));
 
     if (candidates.length === 0) {
-        // Returned object now includes 'signal' and 'reason' for history logging
         return { 
             html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">Not enough data for a recommendation.</span>', 
             bestCandidate: null, 
@@ -639,7 +692,6 @@ export function getRecommendation(context) {
 
     // Handle scenario where best candidate has very low or zero score
     if (bestCandidate.score <= 0) {
-        // Returned object now includes 'signal' and 'reason' for history logging
         return { 
             html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong context based on current data.</span>', 
             bestCandidate: null, 
@@ -656,14 +708,13 @@ export function getRecommendation(context) {
 
     let signal = "Wait";
     let signalColor = "text-gray-500";
-    let reason = "(Low Confidence)"; // Default reason for 'Wait'
+    let reason = "(Low Confidence)";
 
     const effectiveStrategyConfig = current_STRATEGY_CONFIG;
 
     // --- REFINED PLAY SIGNAL LOGIC ---
     if (useAdaptivePlayBool) {
         if (useLessStrictBool) {
-            // Less Strict Mode: Lower thresholds or special conditions for high confidence
             if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_STRONG_PLAY_THRESHOLD ||
                 (bestCandidate.details.hitRate >= effectiveStrategyConfig.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && bestCandidate.details.currentStreak >= effectiveStrategyConfig.LESS_STRICT_MIN_STREAK)) {
                 signal = "Strong Play";
@@ -679,7 +730,6 @@ export function getRecommendation(context) {
                 reason = `(Low Confidence)`;
             }
         } else {
-            // Standard Adaptive Play Logic
             if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_STRONG_PLAY_THRESHOLD) {
                 signal = "Strong Play";
                 signalColor = "text-green-600";
@@ -695,7 +745,6 @@ export function getRecommendation(context) {
             }
         }
     } else {
-        // Fallback to simpler logic if Adaptive Play is off (similar to original, but uses new scores)
         if (bestCandidate.score > effectiveStrategyConfig.SIMPLE_PLAY_THRESHOLD) {
             signal = "Play";
             signalColor = "text-purple-700";
@@ -708,18 +757,14 @@ export function getRecommendation(context) {
     }
 
     // --- Trend Confirmation Override (IF TOGGLED AND APPLICABLE) ---
-    // This override always happens AFTER adaptive play signals have been determined.
     if (useTrendConfirmationBool) {
         const successfulPlaysInHistory = currentHistoryForTrend.filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendedGroupId && item.recommendationDetails && item.recommendationDetails.finalScore > 0).length;
         
-        // If there's an established trend (at least one previous successful play based on an actual "Play" signal)
-        // AND the best candidate's group does NOT match the last successful state
         if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length > 0 && !trendStats.lastSuccessState.includes(bestCandidate.type.id)) {
             signal = 'Wait for Signal';
             signalColor = "text-gray-500";
             reason = `(Waiting for ${bestCandidate.type.label} trend confirmation)`;
         } else if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length === 0) {
-            // If there are successful plays but no lastSuccessState (e.g., initial plays after clear history), still wait for trend to establish
             signal = 'Wait for Signal';
             signalColor = "text-gray-500";
             reason = `(No established trend to confirm)`;
@@ -731,24 +776,20 @@ export function getRecommendation(context) {
     }
 
     // --- TABLE CHANGE WARNING OVERRIDE (IF TOGGLED AND APPLICABLE) ---
-    // This is the highest priority override. If a warning is active, it advises to avoid.
     if (useTableChangeWarningsBool && rollingPerformance && rollingPerformance.totalPlaysInWindow >= effectiveStrategyConfig.WARNING_MIN_PLAYS_FOR_EVAL) {
         let tableChangeDetected = false;
         let warningReason = '';
 
-        // Check for consecutive losses
         if (rollingPerformance.consecutiveLosses >= effectiveStrategyConfig.WARNING_LOSS_STREAK_THRESHOLD) {
             tableChangeDetected = true;
             warningReason = `Consecutive Losses: ${rollingPerformance.consecutiveLosses}`;
         }
         
-        // Check for low rolling win rate (only if not already warned by consecutive losses)
         if (!tableChangeDetected && rollingPerformance.rollingWinRate < effectiveStrategyConfig.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
             tableChangeDetected = true;
             warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
         }
 
-        // Check for Primary Factor Shift
         if (!tableChangeDetected && factorShiftStatus && factorShiftStatus.factorShiftDetected) {
             tableChangeDetected = true;
             warningReason = `Factor Shift: ${factorShiftStatus.reason}`;
@@ -758,9 +799,7 @@ export function getRecommendation(context) {
             signal = 'Avoid Play';
             signalColor = "text-red-700";
             reason = `(Table Change Warning: ${warningReason})`;
-            // For 'Avoid Play', bestCandidate should be null as no recommendation to bet is given
-            // The HTML generation needs to use 'details' from the original bestCandidate, but return null for bestCandidate itself.
-            let tempDetails = { ...bestCandidate.details, signal: signal, reason: reason }; // Clone and add signal/reason for history
+            let tempDetails = { ...bestCandidate.details, signal: signal, reason: reason };
             let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore?.toFixed(2) || 'N/A'}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
             
             return { 
@@ -775,16 +814,40 @@ export function getRecommendation(context) {
     }
 
     // Generate detailed explanation (use AI explanation if available, otherwise generate from data)
+    // NEW: Include sector context in explanation generation
     let detailedExplanation;
     if (bestCandidate.details.aiExplanation && isAiReadyBool) {
         detailedExplanation = bestCandidate.details.aiExplanation;
+        // Supplement with sector context if available
+        if (bestCandidate.details.sectorContext) {
+            detailedExplanation.sectorContext = {
+                description: bestCandidate.details.sectorContext.contextDescription,
+                modifier: bestCandidate.details.sectorConfidenceModifier,
+                dominantSector: bestCandidate.details.sectorContext.dominantSector,
+                dataSource: bestCandidate.details.sectorContext.dataSource
+            };
+        }
     } else {
-        detailedExplanation = generateDetailedExplanation(candidates, bestCandidate, context);
+        // Build sector context data for explanation
+        let sectorContextData = null;
+        if (bestCandidate.details.sectorContext) {
+            sectorContextData = {
+                hasContext: true,
+                contextDescription: bestCandidate.details.sectorContext.contextDescription,
+                confidenceModifier: bestCandidate.details.sectorConfidenceModifier,
+                dominantSector: bestCandidate.details.sectorContext.dominantSector,
+                dataSource: bestCandidate.details.sectorContext.dataSource
+            };
+        }
+        
+        detailedExplanation = generateDetailedExplanation(candidates, bestCandidate, {
+            ...context,
+            sectorContextData
+        });
     }
 
     let finalHtml = `<strong class="${signalColor}">${signal}:</strong> Play <strong style="color: ${bestCandidate.type.textColor};">${bestCandidate.type.label}</strong><br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
     
-    // If the final signal is "Wait" or "Avoid" (after all overrides), simplify the HTML output
     if (signal.includes('Wait') || signal.includes('Avoid')) {
         finalHtml = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
     }
@@ -795,7 +858,6 @@ export function getRecommendation(context) {
         if (fullPredictionType) {
             const baseNum = fullPredictionType.calculateBase(currentNum1, currentNum2);
             const terminals = terminalMapping?.[baseNum] || [];
-            // Use context.useDynamicTerminalNeighbourCount
             const hotNumbers = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel)
                 .map(num => ({num, score: neighbourScores[num]?.success || 0 }))
                 .filter(n => n.score > 0)
@@ -809,7 +871,6 @@ export function getRecommendation(context) {
         }
     }
 
-    // Return the signal and reason along with html and bestCandidate/details
     return { 
         html: finalHtml, 
         bestCandidate: bestCandidate, 
