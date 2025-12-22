@@ -20,11 +20,11 @@ export default async function handler(req, res) {
 
     try {
         // Forward the request body (provider, max, losses, spins)
-        // FIXED: Enforce sensible defaults to ensure spins are always returned
+        // UPDATED: Support fetching losses data for sector context
         const { 
             provider, 
             max = 30,           // Default: request 30 spins
-            losses = false,     // Default: don't filter by losses
+            losses = false,     // Default: don't filter by losses (set to true to get sector data)
             spins = true        // Default: always request spins
         } = req.body;
 
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
         console.log('[Vercel API] Proxying request to RapidAPI for provider:', provider, 
                     'with params:', { max, losses, spins });
 
-        // Make request to RapidAPI with enforced defaults
+        // Make request to RapidAPI
         const response = await fetch(RAPIDAPI_ENDPOINT, {
             method: 'POST',
             headers: {
