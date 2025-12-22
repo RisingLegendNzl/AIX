@@ -57,7 +57,6 @@ export function handleNewCalculation(isAutoCall = false) {
 
     if (existingPendingItem) {
         console.warn(`handleNewCalculation: An unresolved pending calculation (ID: ${existingPendingItem.id}) already exists. Not creating a new one.`);
-        // Only alert if this is a manual attempt, otherwise just log and return to avoid spamming alerts in auto mode
         if (isAutoCall !== true) {
             alert("There's already a pending calculation. Please submit the winning number for that one first, or clear history.");
         }
@@ -266,7 +265,6 @@ export function handleClearHistory() {
     hidePatternAlert();
     updateMainRecommendationDisplay();
     
-    // Log the clear action
     addTrainingLogEntry('info', 'History cleared. AI model reset.');
     
     console.log("handleClearHistory: History cleared and UI updated.");
@@ -386,8 +384,16 @@ async function handleApiRefresh() {
     }
     
     try {
-        const apiResponse = await winspinApi.fetchRouletteData(provider);
+        // Fetch with losses data for sector context
+        const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
         apiContext.setLastApiResponse(apiResponse);
+        
+        // Update sector context from losses data
+        const sectorLosses = winspinApi.getSectorLosses(apiResponse, tableName);
+        if (sectorLosses) {
+            apiContext.updateSectorContext(sectorLosses);
+            console.log('[API Refresh] Sector context updated:', sectorLosses.dataQuality);
+        }
         
         const latestSpin = winspinApi.getLatestSpin(apiResponse, tableName);
         
@@ -405,7 +411,11 @@ async function handleApiRefresh() {
             const contextSpins = apiContext.getContextSpins();
             autoFillTerminalCalculatorFromHistory(contextSpins);
             
-            dom.apiStatusMessage.textContent = `New spin: ${latestSpin.winningNumber}`;
+            let statusMsg = `New spin: ${latestSpin.winningNumber}`;
+            if (apiContext.hasSectorData()) {
+                statusMsg += ' (with sector context)';
+            }
+            dom.apiStatusMessage.textContent = statusMsg;
         } else {
             dom.apiStatusMessage.textContent = `Latest spin: ${latestSpin.winningNumber} (no change)`;
         }
@@ -433,10 +443,27 @@ async function handleApiLoadHistory() {
     }
     
     try {
-        dom.apiStatusMessage.textContent = 'Loading history...';
+        dom.apiStatusMessage.textContent = 'Loading history with sector data...';
         
-        const apiResponse = await winspinApi.fetchRouletteData(provider);
+        // Fetch with losses data for sector context
+        const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
         apiContext.setLastApiResponse(apiResponse);
+        
+        // Update sector context from losses data
+        const sectorLosses = winspinApi.getSectorLosses(apiResponse, tableName);
+        if (sectorLosses) {
+            const success = apiContext.updateSectorContext(sectorLosses);
+            if (success) {
+                addTrainingLogEntry('info', `Sector context loaded (${sectorLosses.dataQuality})`);
+                if (sectorLosses.hasHistoricalMax) {
+                    addTrainingLogEntry('success', 'Historical max data (5+ years) available for calibration');
+                } else {
+                    addTrainingLogEntry('warning', 'Historical max data not available - using session data only');
+                }
+            }
+        } else {
+            addTrainingLogEntry('warning', 'No sector losses data in API response');
+        }
         
         const spins = winspinApi.getTableHistory(apiResponse, tableName);
         
@@ -452,12 +479,30 @@ async function handleApiLoadHistory() {
         // Auto-fill terminal with the loaded history
         autoFillTerminalCalculatorFromHistory(apiContext.getContextSpins());
         
-        dom.apiStatusMessage.textContent = `Loaded ${spins.length} spins from API.`;
+        let statusMsg = `Loaded ${spins.length} spins from API`;
+        if (apiContext.hasSectorData()) {
+            statusMsg += ' with historical sector context';
+        }
+        dom.apiStatusMessage.textContent = statusMsg;
         
         // Log API history load
         addTrainingLogEntry('info', `API History loaded: ${spins.length} spins from ${tableName}`);
         addTrainingLogEntry('data', `First 5 (oldest): [${spins.slice(-5).reverse().join(', ')}]`);
         addTrainingLogEntry('data', `Last 5 (newest): [${spins.slice(0, 5).join(', ')}]`);
+        
+        // Log sector context summary
+        if (apiContext.hasSectorData()) {
+            const summary = apiContext.getSectorSummary();
+            const elevatedSectors = Object.entries(summary.sectors)
+                .filter(([, data]) => data.ratio >= 0.5)
+                .map(([id, data]) => `${data.sectorName}: ${data.currentLoss}/${data.historicalMax}`);
+            
+            if (elevatedSectors.length > 0) {
+                addTrainingLogEntry('data', `Elevated sectors: ${elevatedSectors.join(', ')}`);
+            } else {
+                addTrainingLogEntry('data', 'All sectors within typical historical range');
+            }
+        }
         
     } catch (error) {
         dom.apiStatusMessage.textContent = `Error: ${error.message}`;
@@ -589,6 +634,9 @@ function runSimulationOnHistory(spinsToProcess) {
         const boardStats = getBoardStateStats(localHistory, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
         const neighbourScores = runSharedNeighbourAnalysis(localHistory, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
         
+        // Get sector context provider if available
+        const sectorContextProvider = apiContext.hasSectorData() ? apiContext : null;
+        
         const recommendation = getRecommendation({
             trendStats, boardStats, neighbourScores, inputNum1: num1, inputNum2: num2,
             isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: localAdaptiveFactorInfluences,
@@ -596,6 +644,7 @@ function runSimulationOnHistory(spinsToProcess) {
             useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
             useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
+            sectorContextProvider: sectorContextProvider, // NEW: Pass sector context to simulation
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
             current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory,
             activePredictionTypes: state.activePredictionTypes,
@@ -685,21 +734,19 @@ export function attachMainActionListeners() {
 }
 
 export function attachOptimizationButtonListeners() {
-    // NEW: Worker handler for optimization progress/completion
+    // Worker handler for optimization progress/completion
     optimizationWorker.onmessage = function (e) {
         const { type, payload } = e.data;
         if (type === 'progress') {
             const progressHtml = payload.message || 'Optimizing...';
             updateOptimizationStatus(progressHtml);
             state.setBestFoundParams(payload);
-            // NEW: Update debug panel
             if (payload.debugMetrics) {
                 updateOptimizerDebugPanel(payload.debugMetrics);
             }
         } else if (type === 'complete') {
             showOptimizationComplete(payload);
             state.setBestFoundParams(payload);
-            // NEW: Update debug panel with final data
             if (payload.debugMetrics) {
                 updateOptimizerDebugPanel(payload.debugMetrics);
             }
@@ -825,7 +872,7 @@ export function attachOptimizationButtonListeners() {
         });
     }
 
-    // NEW: Debug panel toggle
+    // Debug panel toggle
     if (dom.optimizerDebugToggle || dom.optimizerDebugHeader) {
         const toggleElement = dom.optimizerDebugToggle || dom.optimizerDebugHeader;
         toggleElement.addEventListener('click', () => {
