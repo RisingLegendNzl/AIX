@@ -1,6 +1,8 @@
 // js/api/apiContextManager.js - API Context Manager
 // Manages API state, polling intervals, and deduplication
 
+import { sectorContext } from './sectorContext.js';
+
 class ApiContextManager {
     constructor() {
         this.currentProvider = null;
@@ -11,7 +13,8 @@ class ApiContextManager {
         this.lastApiResponse = null;
         this.pollingIntervalMs = 2500; // 2.5 seconds
         this.autoModeEnabled = false;
-        this.contextSpins = []; // NEW: Store spin history for current context
+        this.contextSpins = []; // Store spin history for current context
+        this.sectorDataAvailable = false; // Track if sector data is available
     }
 
     /**
@@ -66,7 +69,9 @@ class ApiContextManager {
         if (this.currentProvider !== provider || this.currentTable !== table) {
             this.stopLivePolling();
             this.lastSpin = null; // Reset last spin for new context
-            this.contextSpins = []; // NEW: Clear spins for new context
+            this.contextSpins = []; // Clear spins for new context
+            this.sectorDataAvailable = false;
+            sectorContext.reset(); // Reset sector context for new table
         }
         
         this.currentProvider = provider;
@@ -171,6 +176,10 @@ class ApiContextManager {
         
         // Add to beginning (newest first)
         this.contextSpins.unshift(spin);
+        
+        // Update sector context from spin history
+        sectorContext.calculateFromSpinHistory(this.contextSpins);
+        
         return true;
     }
 
@@ -180,6 +189,9 @@ class ApiContextManager {
      */
     replaceContextSpins(spins) {
         this.contextSpins = [...spins]; // Create a copy to avoid external mutation
+        
+        // Update sector context from new spin history
+        sectorContext.calculateFromSpinHistory(this.contextSpins);
     }
 
     /**
@@ -191,6 +203,82 @@ class ApiContextManager {
     }
 
     /**
+     * Updates sector context from API losses data
+     * @param {Object} lossesData - Sector losses data from API
+     * @returns {boolean} True if update was successful
+     */
+    updateSectorContext(lossesData) {
+        if (!lossesData || !lossesData.sectors) {
+            console.log('[ApiContext] No sector losses data to update');
+            return false;
+        }
+        
+        // Convert normalized format to sectorContext format
+        const apiData = [];
+        for (const [name, data] of Object.entries(lossesData.sectors)) {
+            apiData.push({
+                name,
+                losses: data.current,
+                max: data.max
+            });
+        }
+        
+        const success = sectorContext.updateFromApi(apiData);
+        this.sectorDataAvailable = success && lossesData.hasHistoricalMax;
+        
+        console.log('[ApiContext] Sector context updated:', {
+            success,
+            hasHistoricalMax: lossesData.hasHistoricalMax,
+            dataQuality: lossesData.dataQuality
+        });
+        
+        return success;
+    }
+
+    /**
+     * Checks if sector data with historical max is available
+     * @returns {boolean} True if full sector data is available
+     */
+    hasSectorData() {
+        return this.sectorDataAvailable && sectorContext.isInitialized;
+    }
+
+    /**
+     * Gets sector context for a group's hit zone
+     * @param {Array<number>} hitZoneNumbers - Numbers in the group's hit zone
+     * @returns {Object} Sector context for the group
+     */
+    getGroupSectorContext(hitZoneNumbers) {
+        return sectorContext.calculateGroupSectorContext(hitZoneNumbers);
+    }
+
+    /**
+     * Gets sector context explanation for UI display
+     * @param {Object} groupContext - Context from getGroupSectorContext
+     * @returns {Object} Explanation object for UI
+     */
+    getSectorExplanation(groupContext) {
+        return sectorContext.generateExplanation(groupContext);
+    }
+
+    /**
+     * Gets sector confidence modifier for group scoring
+     * @param {Object} groupContext - Context from getGroupSectorContext
+     * @returns {number} Confidence multiplier (0.85 to 1.0)
+     */
+    getSectorConfidenceModifier(groupContext) {
+        return sectorContext.getConfidenceModifier(groupContext);
+    }
+
+    /**
+     * Gets full sector summary for debugging/display
+     * @returns {Object} Sector summary
+     */
+    getSectorSummary() {
+        return sectorContext.getSummary();
+    }
+
+    /**
      * Clears spin data and stops polling, but preserves provider/table/autoMode settings
      * Used when clearing history
      */
@@ -198,7 +286,9 @@ class ApiContextManager {
         this.stopLivePolling();
         this.lastSpin = null;
         this.lastApiResponse = null;
-        this.contextSpins = []; // NEW: Clear spins
+        this.contextSpins = [];
+        this.sectorDataAvailable = false;
+        sectorContext.reset();
         // Note: Does NOT reset provider, table, or autoMode
     }
 
@@ -211,8 +301,10 @@ class ApiContextManager {
         this.currentTable = null;
         this.lastSpin = null;
         this.lastApiResponse = null;
-        this.autoModeEnabled = false; // Reset auto mode
-        this.contextSpins = []; // NEW: Clear spins
+        this.autoModeEnabled = false;
+        this.contextSpins = [];
+        this.sectorDataAvailable = false;
+        sectorContext.reset();
     }
 }
 
