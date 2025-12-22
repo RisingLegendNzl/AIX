@@ -5,14 +5,19 @@ const API_ENDPOINT = '/api/winspin'; // Vercel serverless function
 /**
  * Fetches roulette data via Vercel serverless API for a given provider
  * @param {string} provider - Provider name (Evolution, Pragmatic, Ezugi, Playtech)
+ * @param {Object} options - Optional parameters
+ * @param {boolean} options.includeLosses - Whether to include sector losses data (default: false)
  * @returns {Promise<Array>} API response data (Array of table objects)
  */
-export async function fetchRouletteData(provider) {
+export async function fetchRouletteData(provider, options = {}) {
     if (!provider) {
         throw new Error('Provider is required');
     }
     
-    console.log(`[Winspin API] Fetching data for ${provider} via ${API_ENDPOINT}`);
+    const { includeLosses = false } = options;
+    
+    console.log(`[Winspin API] Fetching data for ${provider} via ${API_ENDPOINT}`, 
+                { includeLosses });
     
     try {
         const response = await fetch(API_ENDPOINT, {
@@ -23,9 +28,9 @@ export async function fetchRouletteData(provider) {
             },
             body: JSON.stringify({
                 provider: provider,
-                spins: true,  // FIXED: Always request spins
-                max: 30,      // FIXED: Request up to 30 spins
-                losses: false // FIXED: Don't filter by losses
+                spins: true,          // Always request spins
+                max: 30,              // Request up to 30 spins
+                losses: includeLosses // Request sector losses data when enabled
             })
         });
         
@@ -54,6 +59,15 @@ export async function fetchRouletteData(provider) {
         
         throw error;
     }
+}
+
+/**
+ * Fetches roulette data WITH sector losses for historical context
+ * @param {string} provider - Provider name
+ * @returns {Promise<Array>} API response data including losses
+ */
+export async function fetchRouletteDataWithLosses(provider) {
+    return fetchRouletteData(provider, { includeLosses: true });
 }
 
 /**
@@ -129,6 +143,96 @@ export function getTableHistory(apiResponse, tableName, count = 30) {
     
     // Return requested number of spins (newest to oldest) from data.spins
     return tableData.data.spins.slice(0, count);
+}
+
+/**
+ * Extracts sector losses data from API response for a specific table
+ * Returns historical max and current loss streaks for betting sectors
+ * @param {Array} apiResponse - Raw API response (Array of tables)
+ * @param {string} tableName - Table name to get losses for
+ * @returns {Object|null} Sector losses data or null if unavailable
+ */
+export function getSectorLosses(apiResponse, tableName) {
+    if (!apiResponse || !Array.isArray(apiResponse)) {
+        return null;
+    }
+    
+    const tableData = apiResponse.find(t => t.name === tableName);
+    
+    if (!tableData || !tableData.data) {
+        return null;
+    }
+    
+    // Check for losses data in the response
+    // API may return losses in different formats
+    const lossesData = tableData.data.losses || tableData.losses;
+    
+    if (!lossesData) {
+        console.log('[Winspin API] No losses data in response for table:', tableName);
+        return null;
+    }
+    
+    console.log('[Winspin API] Found sector losses data:', lossesData);
+    
+    // Normalize the losses data format
+    return normalizeSectorLosses(lossesData);
+}
+
+/**
+ * Normalizes sector losses data from various API formats
+ * @param {Object|Array} lossesData - Raw losses data from API
+ * @returns {Object} Normalized sector data
+ */
+function normalizeSectorLosses(lossesData) {
+    const normalized = {
+        sectors: {},
+        hasHistoricalMax: false,
+        dataQuality: 'unknown'
+    };
+    
+    try {
+        if (Array.isArray(lossesData)) {
+            // Array format: [{name: "Red", losses: 5, max: 25}, ...]
+            lossesData.forEach(sector => {
+                if (sector.name) {
+                    normalized.sectors[sector.name] = {
+                        current: sector.losses || sector.current || 0,
+                        max: sector.max || sector.historical_max || null
+                    };
+                    if (sector.max || sector.historical_max) {
+                        normalized.hasHistoricalMax = true;
+                    }
+                }
+            });
+            normalized.dataQuality = normalized.hasHistoricalMax ? 'full' : 'current_only';
+        } else if (typeof lossesData === 'object') {
+            // Object format: {Red: {losses: 5, max: 25}, ...} or {Red: 5, ...}
+            for (const [name, data] of Object.entries(lossesData)) {
+                if (typeof data === 'number') {
+                    // Simple format: {Red: 5, Black: 3, ...}
+                    normalized.sectors[name] = {
+                        current: data,
+                        max: null
+                    };
+                } else if (typeof data === 'object') {
+                    // Full format: {Red: {losses: 5, max: 25}, ...}
+                    normalized.sectors[name] = {
+                        current: data.losses || data.current || 0,
+                        max: data.max || data.historical_max || null
+                    };
+                    if (data.max || data.historical_max) {
+                        normalized.hasHistoricalMax = true;
+                    }
+                }
+            }
+            normalized.dataQuality = normalized.hasHistoricalMax ? 'full' : 'current_only';
+        }
+    } catch (error) {
+        console.error('[Winspin API] Error normalizing sector losses:', error);
+        normalized.dataQuality = 'error';
+    }
+    
+    return normalized;
 }
 
 /**
