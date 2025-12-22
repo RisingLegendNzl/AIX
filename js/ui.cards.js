@@ -5,6 +5,7 @@ import { getHitZone, calculateTrendStats, getBoardStateStats, calculatePocketDis
 import * as config from './config.js';
 import * as state from './state.js';
 import * as analysis from './analysis.js';
+import { apiContext } from './api/apiContextManager.js';
 import { dom, getRouletteNumberColor, parameterDefinitions, parameterMap, showPatternAlert, hidePatternAlert } from './ui.helpers.js';
 
 // --- UI RENDERING & MANIPULATION ---
@@ -236,8 +237,6 @@ export function updateOptimizationStatus(htmlContent) {
  * Calculate human-readable confidence level from fitness score
  */
 function calculateOptimizerConfidence(fitness) {
-    // fitness is geometric mean of win/loss ratios, typically ranges from ~0.01 to ~5.0
-    // Higher is better
     if (fitness >= 1.5) {
         return { level: 'High', description: 'Strong configuration found' };
     } else if (fitness >= 1.0) {
@@ -253,8 +252,6 @@ function calculateOptimizerConfidence(fitness) {
  * Calculate performance percentile (comparing to baseline of 1.0)
  */
 function calculatePerformancePercentile(fitness) {
-    // Baseline fitness is 1.0 (break-even)
-    // Calculate how much better this is than baseline
     const improvement = ((fitness - 1.0) / 1.0) * 100;
     
     if (improvement >= 50) {
@@ -290,7 +287,6 @@ export function showOptimizationComplete(payload) {
     
     if (dom.optimizationResult) dom.optimizationResult.classList.remove('hidden');
     if (dom.bestFitnessResult) {
-        // Show human-readable output instead of raw fitness
         dom.bestFitnessResult.innerHTML = `
             <span class="text-lg font-bold">${confidence.level}</span>
             <span class="text-sm text-gray-600 ml-2">(${performance.description})</span>
@@ -344,6 +340,58 @@ export function updateAiStatus(message) {
 }
 
 /**
+ * Generates HTML for sector context display
+ * @param {Object} sectorContext - Sector context from recommendation
+ * @returns {string} HTML string for sector context section
+ */
+function generateSectorContextHtml(sectorContext) {
+    if (!sectorContext) {
+        return '';
+    }
+
+    const dataSourceLabel = sectorContext.dataSource === 'api' 
+        ? 'Based on 5+ years of historical data'
+        : 'Based on current session data';
+
+    let severityBadge = '';
+    if (sectorContext.modifier < 0.90) {
+        severityBadge = '<span class="px-2 py-0.5 rounded text-xs font-semibold bg-yellow-100 text-yellow-800">Elevated Variance</span>';
+    } else if (sectorContext.modifier < 0.95) {
+        severityBadge = '<span class="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800">Minor Stress</span>';
+    }
+
+    let dominantSectorHtml = '';
+    if (sectorContext.dominantSector) {
+        const dom = sectorContext.dominantSector;
+        const severityDesc = dom.severity?.description || 'within typical range';
+        dominantSectorHtml = `
+            <div class="text-xs text-gray-600 mt-1">
+                <strong>Primary Sector:</strong> ${dom.name} (${severityDesc})
+            </div>
+        `;
+    }
+
+    return `
+        <div class="sector-context-section mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-semibold text-slate-600 uppercase tracking-wide">Sector Context</span>
+                ${severityBadge}
+            </div>
+            <p class="text-sm text-gray-700">${sectorContext.description || 'Sectors within typical historical range'}</p>
+            ${dominantSectorHtml}
+            <div class="mt-2 pt-2 border-t border-slate-200">
+                <p class="text-xs text-gray-500 italic">
+                    <svg class="inline-block w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    ${dataSourceLabel}. Historical patterns provide context only, not prediction.
+                </p>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * Retrieves all necessary data and calculates a recommendation object.
  */
 export async function getRecommendationDataForDisplay(num1Val, num2Val) {
@@ -357,6 +405,9 @@ export async function getRecommendationDataForDisplay(num1Val, num2Val) {
     updateAiStatus('AI Model: Getting prediction...');
     const aiPredictionData = await analysis.getAiPrediction(state.history);
     updateAiStatus(state.isAiReady ? 'AI Model: Ready!' : `AI Model: Need ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
+
+    // Get sector context provider if available
+    const sectorContextProvider = apiContext.hasSectorData() ? apiContext : null;
 
     const recommendation = getRecommendation({
         trendStats, boardStats, neighbourScores, inputNum1: num1Val, inputNum2: num2Val,
@@ -375,6 +426,7 @@ export async function getRecommendationDataForDisplay(num1Val, num2Val) {
         useLowestPocketDistanceBool: state.useLowestPocketDistance,
         isCurrentRepeat: analysis.isRepeatNumber(lastWinning, state.history),
         isCurrentNeighborHit: analysis.isNeighborHit(lastWinning, state.history),
+        sectorContextProvider: sectorContextProvider, // NEW: Pass sector context provider
         current_STRATEGY_CONFIG: config.STRATEGY_CONFIG, current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
         activePredictionTypes: state.activePredictionTypes,
         currentHistoryForTrend: state.history, useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
@@ -415,6 +467,9 @@ export async function updateMainRecommendationDisplay() {
             : exp.confidence === 'medium' ? 'bg-blue-100 text-blue-800'
             : 'bg-gray-100 text-gray-800';
         
+        // Check if sector context is available
+        const sectorContextHtml = exp.sectorContext ? generateSectorContextHtml(exp.sectorContext) : '';
+        
         recommendationHtml += `
             <div class="bg-white border-2 border-gray-200 rounded-lg p-4 mb-4">
                 <div class="mb-3">
@@ -454,6 +509,8 @@ export async function updateMainRecommendationDisplay() {
                         </div>
                     ` : ''}
                 </div>
+                
+                ${sectorContextHtml}
             </div>
         `;
     } else {
@@ -480,7 +537,7 @@ export async function updateMainRecommendationDisplay() {
         const baseNum = predictionTypeDefinition.calculateBase(num1Val, num2Val);
         if (baseNum < 0 || baseNum > 36) return;
         
-        // NEW: Add indicator if this is the recommended group
+        // Add indicator if this is the recommended group
         let groupNameDisplay = type.displayLabel;
         if (recommendation.bestCandidate && type.id === recommendation.bestCandidate.type.id) {
             groupNameDisplay += '<span class="recommended-indicator">REC</span>';
@@ -512,10 +569,25 @@ export async function updateMainRecommendationDisplay() {
             }
         }
 
+        // Check for sector context for this group
+        let groupSectorHtml = '';
+        if (recommendation.bestCandidate && 
+            type.id === recommendation.bestCandidate.type.id && 
+            recommendation.bestCandidate.details?.sectorContext?.hasContext) {
+            const sc = recommendation.bestCandidate.details.sectorContext;
+            if (sc.dominantSector) {
+                const severityLevel = sc.dominantSector.severity?.level || 'normal';
+                const severityColor = severityLevel === 'extreme' || severityLevel === 'high' 
+                    ? 'text-yellow-600' 
+                    : 'text-gray-500';
+                groupSectorHtml = `<span class="${severityColor} text-xs ml-2">Sector: ${sc.dominantSector.severity?.description || 'normal'}</span>`;
+            }
+        }
+
         fullResultHtml += `
             <div class="p-3 rounded-lg border" style="border-color: ${type.textColor || '#e2e8f0'};">
                 <strong style="color: ${type.textColor || '#1f2937'};">${groupNameDisplay} (Base: ${baseNum})</strong>
-                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}</p>
+                <p class="text-sm text-gray-600">Terminals: ${terminals.join(', ') || 'None'}${confirmedByHtml}${groupSectorHtml}</p>
                 <div class="group-stats">
                     <span>Hit Rate: <strong>${hitRate.toFixed(1)}%</strong></span>
                     ${pocketDistanceHtml}
@@ -525,6 +597,19 @@ export async function updateMainRecommendationDisplay() {
     });
 
     fullResultHtml += '</div>';
+    
+    // Add historical data indicator if sector data is available
+    if (apiContext.hasSectorData()) {
+        fullResultHtml += `
+            <div class="mt-4 p-2 bg-indigo-50 border border-indigo-200 rounded-lg text-xs text-indigo-700 flex items-center">
+                <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                </svg>
+                <span>Historical sector data (5+ years) is being used to calibrate confidence. This provides context, not prediction.</span>
+            </div>
+        `;
+    }
+    
     dom.resultDisplay.innerHTML = fullResultHtml;
     dom.resultDisplay.classList.remove('hidden');
 
