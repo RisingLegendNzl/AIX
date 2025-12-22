@@ -453,7 +453,7 @@ export async function handleTrainFromHistory() {
     // Log order verification
     // confirmedWinsLog should already be oldest→newest (sorted by history item id)
     const first5 = confirmedSpins.slice(0, 5);
-    const last5 = confirmedSpins.slice(-5).reverse(); // FIXED: Reverse to show newest→oldest
+    const last5 = confirmedSpins.slice(-5).reverse();
     
     ui.addTrainingLogEntry('data', `First 5 spins (oldest): [${first5.join(', ')}]`);
     ui.addTrainingLogEntry('data', `Last 5 spins (newest): [${last5.join(', ')}]`);
@@ -487,6 +487,9 @@ export async function handleTrainFromHistory() {
             state.setCurrentPendingCalculationId(null);
         }
     }
+
+    // CRITICAL: Ensure activePredictionTypes reflects current useAdvancedCalculations setting before simulation
+    updateActivePredictionTypes();
 
     // The confirmedSpins are already in chronological order (oldest→newest)
     // Run simulation on them
@@ -564,6 +567,9 @@ export async function handleStrategyChange() {
     }
 
     const currentWinningNumbers = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
+
+    // CRITICAL: Ensure activePredictionTypes reflects current useAdvancedCalculations setting before simulation
+    updateActivePredictionTypes();
 
     let simulatedHistory = [];
     if (currentWinningNumbers.length >= 3) {
