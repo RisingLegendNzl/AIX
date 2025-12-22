@@ -15,6 +15,10 @@ class ApiContextManager {
         this.autoModeEnabled = false;
         this.contextSpins = []; // Store spin history for current context
         this.sectorDataAvailable = false; // Track if sector data is available
+        
+        // NEW: Track data quality information
+        this.lastDataQuality = null;
+        this.historicalMaxReceived = false;
     }
 
     /**
@@ -63,33 +67,26 @@ class ApiContextManager {
     /**
      * Sets the current provider and table context
      * Stops any active polling when context changes
+     * @param {string} provider - Provider name
+     * @param {string} table - Table name
      */
     setContext(provider, table) {
-        // If context is changing, stop polling
         if (this.currentProvider !== provider || this.currentTable !== table) {
             this.stopLivePolling();
-            this.lastSpin = null; // Reset last spin for new context
-            this.contextSpins = []; // Clear spins for new context
+            this.lastSpin = null;
+            this.contextSpins = [];
             this.sectorDataAvailable = false;
-            sectorContext.reset(); // Reset sector context for new table
+            this.historicalMaxReceived = false;
+            this.lastDataQuality = null;
+            sectorContext.reset();
         }
-        
         this.currentProvider = provider;
         this.currentTable = table;
     }
 
     /**
-     * Gets the current context identifier (provider:table)
-     */
-    getContextId() {
-        if (!this.currentProvider || !this.currentTable) {
-            return null;
-        }
-        return `${this.currentProvider}:${this.currentTable}`;
-    }
-
-    /**
      * Stores the last API response for reference
+     * @param {Array} response - API response data
      */
     setLastApiResponse(response) {
         this.lastApiResponse = response;
@@ -97,54 +94,21 @@ class ApiContextManager {
 
     /**
      * Gets the last API response
+     * @returns {Array|null} Last API response or null
      */
     getLastApiResponse() {
         return this.lastApiResponse;
     }
 
     /**
-     * Updates the last known spin data (for deduplication)
+     * Starts live polling mode
      */
-    setLastSpin(spinData) {
-        this.lastSpin = spinData;
-    }
-
-    /**
-     * Gets the last known spin data
-     */
-    getLastSpin() {
-        return this.lastSpin;
-    }
-
-    /**
-     * Checks if currently in live polling mode
-     */
-    isPolling() {
-        return this.isLivePolling;
-    }
-
-    /**
-     * Starts live polling with a callback function
-     * @param {Function} callback - Function to call on each poll interval
-     */
-    startLivePolling(callback) {
-        if (this.isLivePolling) {
-            return; // Already polling
-        }
-
+    startLivePolling() {
         this.isLivePolling = true;
-        
-        // Execute immediately once
-        callback();
-        
-        // Then start interval
-        this.pollingInterval = setInterval(() => {
-            callback();
-        }, this.pollingIntervalMs);
     }
 
     /**
-     * Stops live polling
+     * Stops live polling mode
      */
     stopLivePolling() {
         this.isLivePolling = false;
@@ -155,8 +119,8 @@ class ApiContextManager {
     }
 
     /**
-     * Sets the polling interval ID (for external interval management)
-     * @param {number} intervalId - The interval ID to store
+     * Sets the polling interval reference
+     * @param {number} intervalId - Interval ID from setInterval
      */
     setLivePollingInterval(intervalId) {
         this.pollingInterval = intervalId;
@@ -164,38 +128,44 @@ class ApiContextManager {
     }
 
     /**
-     * Adds a single spin to the context history with deduplication
-     * @param {number} spin - The spin number to add
-     * @returns {boolean} True if spin was added (new), false if duplicate
+     * Adds a new spin to context history
+     * @param {number} spin - The spin number
+     * @returns {boolean} True if spin was added (not duplicate)
      */
     addSpin(spin) {
-        // Check if this spin is already the most recent one
+        // Check for duplicate
         if (this.contextSpins.length > 0 && this.contextSpins[0] === spin) {
-            return false; // Duplicate
+            return false;
         }
         
-        // Add to beginning (newest first)
+        // Add to front (newest first)
         this.contextSpins.unshift(spin);
         
-        // Update sector context from spin history
+        // Keep max 50 spins
+        if (this.contextSpins.length > 50) {
+            this.contextSpins.pop();
+        }
+        
+        // Update sector streaks from spin history
         sectorContext.calculateFromSpinHistory(this.contextSpins);
         
         return true;
     }
 
     /**
-     * Replaces the entire context spin history with a new array
-     * @param {Array<number>} spins - Array of spins (newest to oldest)
+     * Replaces all context spins (used when loading history)
+     * @param {Array<number>} spins - Array of spins (newest first)
      */
     replaceContextSpins(spins) {
-        this.contextSpins = [...spins]; // Create a copy to avoid external mutation
+        this.contextSpins = spins.slice(0, 50);
+        this.lastSpin = spins[0] || null;
         
-        // Update sector context from new spin history
+        // Update sector streaks from new spin history
         sectorContext.calculateFromSpinHistory(this.contextSpins);
     }
 
     /**
-     * Gets the current context spin history
+     * Gets current context spin history
      * @returns {Array<number>} Array of spins (newest to oldest)
      */
     getContextSpins() {
@@ -213,6 +183,10 @@ class ApiContextManager {
             return false;
         }
         
+        // Store data quality info
+        this.lastDataQuality = lossesData.dataQuality;
+        this.historicalMaxReceived = lossesData.hasHistoricalMax;
+        
         // Convert normalized format to sectorContext format
         const apiData = [];
         for (const [name, data] of Object.entries(lossesData.sectors)) {
@@ -224,12 +198,13 @@ class ApiContextManager {
         }
         
         const success = sectorContext.updateFromApi(apiData);
-        this.sectorDataAvailable = success && lossesData.hasHistoricalMax;
+        this.sectorDataAvailable = success;
         
         console.log('[ApiContext] Sector context updated:', {
             success,
             hasHistoricalMax: lossesData.hasHistoricalMax,
-            dataQuality: lossesData.dataQuality
+            dataQuality: lossesData.dataQuality,
+            apiMaxValuesReceived: lossesData.apiMaxValuesReceived || []
         });
         
         return success;
@@ -237,10 +212,26 @@ class ApiContextManager {
 
     /**
      * Checks if sector data with historical max is available
-     * @returns {boolean} True if full sector data is available
+     * @returns {boolean} True if full sector data with API-provided max is available
      */
     hasSectorData() {
         return this.sectorDataAvailable && sectorContext.isInitialized;
+    }
+
+    /**
+     * Checks if 5+ year historical max data was received from API
+     * @returns {boolean} True if API provided historical max values
+     */
+    hasHistoricalMaxData() {
+        return this.historicalMaxReceived && sectorContext.dataSource === 'api';
+    }
+
+    /**
+     * Gets the current data source status for UI display
+     * @returns {Object} Status object with label, description, and calibration state
+     */
+    getDataSourceStatus() {
+        return sectorContext.getDataSourceStatus();
     }
 
     /**
@@ -272,7 +263,7 @@ class ApiContextManager {
 
     /**
      * Gets full sector summary for debugging/display
-     * @returns {Object} Sector summary
+     * @returns {Object} Sector summary with all details
      */
     getSectorSummary() {
         return sectorContext.getSummary();
@@ -288,6 +279,8 @@ class ApiContextManager {
         this.lastApiResponse = null;
         this.contextSpins = [];
         this.sectorDataAvailable = false;
+        this.historicalMaxReceived = false;
+        this.lastDataQuality = null;
         sectorContext.reset();
         // Note: Does NOT reset provider, table, or autoMode
     }
@@ -304,6 +297,8 @@ class ApiContextManager {
         this.autoModeEnabled = false;
         this.contextSpins = [];
         this.sectorDataAvailable = false;
+        this.historicalMaxReceived = false;
+        this.lastDataQuality = null;
         sectorContext.reset();
     }
 }
