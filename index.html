@@ -316,7 +316,7 @@
         .training-log-entry.error { background-color: #fef2f2; color: #dc2626; }
         .training-log-entry.data { background-color: #f5f3ff; color: #6d28d9; }
         
-        /* NEW: Optimizer Debug Panel Styles */
+        /* Optimizer Debug Panel Styles */
         .optimizer-debug-content {
             max-height: 0;
             overflow: hidden;
@@ -344,7 +344,7 @@
         .debug-stat-label { font-weight: 600; color: #4b5563; }
         .debug-stat-value { color: #1f2937; font-family: 'Courier New', monospace; }
         
-        /* NEW: Group name coloring in recommendation */
+        /* Group name coloring in recommendation */
         .group-name-diffMinus { color: #f59e0b; font-weight: 600; }
         .group-name-diffResult { color: #3b82f6; font-weight: 600; }
         .group-name-diffPlus { color: #ef4444; font-weight: 600; }
@@ -352,7 +352,7 @@
         .group-name-sumResult { color: #10b981; font-weight: 600; }
         .group-name-sumPlus { color: #f43f5e; font-weight: 600; }
         
-        /* NEW: Recommended group indicator */
+        /* Recommended group indicator */
         .recommended-indicator {
             display: inline-block;
             background-color: #22c55e;
@@ -363,6 +363,19 @@
             border-radius: 4px;
             margin-left: 6px;
             vertical-align: middle;
+        }
+
+        /* Historical Data Indicator Styles */
+        .historical-data-indicator {
+            transition: all 0.3s ease;
+        }
+        .historical-data-indicator.api-calibrated {
+            background-color: #f0fdf4;
+            border-color: #86efac;
+        }
+        .historical-data-indicator.session-only {
+            background-color: #fffbeb;
+            border-color: #fcd34d;
         }
     </style>
 </head>
@@ -485,6 +498,16 @@
                     <!-- Status Message -->
                     <div id="apiStatusMessage" class="text-sm text-center text-gray-600 min-h-[20px] p-2 bg-gray-50 rounded-md">
                         Select a provider to begin
+                    </div>
+                    
+                    <!-- Historical Data Source Indicator -->
+                    <div id="historicalDataIndicator" class="historical-data-indicator p-3 rounded-lg border bg-gray-50 border-gray-200">
+                        <div class="flex items-center text-gray-400">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <span class="text-xs">Historical data: Not loaded</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -661,13 +684,13 @@
                             </div>
                             <div>
                                 <h4 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h4>
-                                <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0. Otherwise, it will use the standard terminal neighbour count (3 or 1).</p>
+                                <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0.</p>
                             </div>
                         </div>
                 </div>
                 <div class="pt-2 divide-y divide-gray-200">
                     <label class="toggle-label">
-                        <span class="font-medium text-gray-700">Dynamic Best Strategy</span>
+                        <span class="font-medium text-gray-700">Use Dynamic Best Strategy</span>
                         <input type="checkbox" id="dynamicStrategyToggle" class="toggle-checkbox">
                         <div class="toggle-switch"><div class="toggle-knob"></div></div>
                     </label>
