@@ -812,6 +812,7 @@ export function attachOptimizationButtonListeners() {
                 if (toggles) {
                     state.setToggles(toggles);
                     updateAllTogglesUI();
+                    analysis.updateActivePredictionTypes();
                 }
 
                 initializeAdvancedSettingsUI();
@@ -853,9 +854,28 @@ export function attachToggleListeners() {
     for (const [toggleId, stateKey] of Object.entries(toggles)) {
         dom[toggleId].addEventListener('change', () => {
             console.log(`Toggle '${toggleId}' changed.`);
-            const newToggleStates = { ...state };
+            const newToggleStates = { 
+                useTrendConfirmation: state.useTrendConfirmation,
+                useWeightedZone: state.useWeightedZone,
+                useProximityBoost: state.useProximityBoost,
+                usePocketDistance: state.usePocketDistance,
+                useLowestPocketDistance: state.useLowestPocketDistance,
+                useAdvancedCalculations: state.useAdvancedCalculations,
+                useDynamicStrategy: state.useDynamicStrategy,
+                useAdaptivePlay: state.useAdaptivePlay,
+                useTableChangeWarnings: state.useTableChangeWarnings,
+                useDueForHit: state.useDueForHit,
+                useNeighbourFocus: state.useNeighbourFocus,
+                useLessStrict: state.useLessStrict,
+                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount
+            };
             newToggleStates[stateKey] = dom[toggleId].checked;
             state.setToggles(newToggleStates);
+            state.saveState();
+
+            if (stateKey === 'useAdvancedCalculations') {
+                analysis.updateActivePredictionTypes();
+            }
 
             if (stateKey === 'usePocketDistance') {
                 renderHistory();
@@ -1043,4 +1063,3 @@ export function attachApiEventHandlers() {
         });
     }
 }
-
