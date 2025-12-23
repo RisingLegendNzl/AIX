@@ -6,7 +6,7 @@ const API_ENDPOINT = '/api/winspin'; // Vercel serverless function
  * Fetches roulette data via Vercel serverless API for a given provider
  * @param {string} provider - Provider name (Evolution, Pragmatic, Ezugi, Playtech)
  * @param {Object} options - Optional parameters
- * @param {boolean} options.includeLosses - Whether to include sector losses data (default: false)
+ * @param {boolean} options.includeLosses - Whether to include losses data (default: false)
  * @param {boolean} options.includeHistoricalMax - Whether to include 5+ year historical max data (default: false)
  * @param {number} options.spinCount - Number of spins to request (default: 30)
  * @returns {Promise<Array>} API response data (Array of table objects)
@@ -79,8 +79,8 @@ export async function fetchRouletteData(provider, options = {}) {
 }
 
 /**
- * Fetches roulette data WITH sector losses AND historical max data
- * This is the preferred method for full sector context with 5+ year data
+ * Fetches roulette data WITH losses AND historical max data
+ * This is the preferred method for full context with 5+ year data
  * @param {string} provider - Provider name
  * @returns {Promise<Array>} API response data including losses and historical max
  */
@@ -197,19 +197,92 @@ export function getSectorLosses(apiResponse, tableName) {
         return null;
     }
     
-    // Check for losses data in the response
-    // API may return losses in different formats depending on request parameters
+    // Check for sector losses data in the response
+    // API may return sector losses in different formats depending on request parameters
     const lossesData = tableData.data.losses || tableData.losses;
     
-    if (!lossesData) {
-        console.log('[Winspin API] No losses data in response for table:', tableName);
+    // If losses is an object with sector names (Red, Black, etc.), it's sector data
+    if (lossesData && typeof lossesData === 'object' && !Array.isArray(lossesData)) {
+        // Check if it looks like sector data (has sector names as keys)
+        const sectorNames = ['Red', 'Black', '1st 12', '2nd 12', '3rd 12', 'Low', 'High', 'Even', 'Odd'];
+        const hasSecorKeys = Object.keys(lossesData).some(key => sectorNames.includes(key));
+        if (hasSecorKeys) {
+            console.log('[Winspin API] Found sector losses data:', lossesData);
+            return normalizeSectorLosses(lossesData);
+        }
+    }
+    
+    // If array format, check first element structure
+    if (Array.isArray(lossesData) && lossesData.length > 0) {
+        const first = lossesData[0];
+        if (first.name && typeof first.name === 'string') {
+            // Has name property - could be sector data
+            console.log('[Winspin API] Found array sector losses data:', lossesData);
+            return normalizeSectorLosses(lossesData);
+        }
+    }
+    
+    console.log('[Winspin API] No sector losses data in response for table:', tableName);
+    return null;
+}
+
+/**
+ * Extracts individual number losses data from API response for a specific table
+ * Returns historical max and current loss streaks for each number (0-36)
+ * This is the key method for number-level streak data
+ * @param {Array} apiResponse - Raw API response (Array of tables)
+ * @param {string} tableName - Table name to get losses for
+ * @returns {Object|null} Number losses data or null if unavailable
+ */
+export function getNumberLosses(apiResponse, tableName) {
+    if (!apiResponse || !Array.isArray(apiResponse)) {
         return null;
     }
     
-    console.log('[Winspin API] Found sector losses data:', lossesData);
+    const tableData = apiResponse.find(t => t.name === tableName);
     
-    // Normalize the losses data format
-    return normalizeSectorLosses(lossesData);
+    if (!tableData || !tableData.data) {
+        return null;
+    }
+    
+    // Check for number-level losses data
+    // The API may provide this in several formats:
+    // 1. data.numberLosses - explicit number losses object
+    // 2. data.numbers - array of number objects with losses
+    // 3. data.losses where keys are numbers (0-36)
+    
+    let numberLossesData = null;
+    
+    // Check for explicit numberLosses field
+    if (tableData.data.numberLosses) {
+        numberLossesData = tableData.data.numberLosses;
+        console.log('[Winspin API] Found explicit numberLosses data');
+    }
+    // Check for numbers array
+    else if (Array.isArray(tableData.data.numbers)) {
+        numberLossesData = tableData.data.numbers;
+        console.log('[Winspin API] Found numbers array data');
+    }
+    // Check if losses data has numeric keys (0-36)
+    else if (tableData.data.losses && typeof tableData.data.losses === 'object') {
+        const lossesKeys = Object.keys(tableData.data.losses);
+        const hasNumericKeys = lossesKeys.some(key => {
+            const num = parseInt(key, 10);
+            return !isNaN(num) && num >= 0 && num <= 36;
+        });
+        
+        if (hasNumericKeys) {
+            numberLossesData = tableData.data.losses;
+            console.log('[Winspin API] Found number losses in losses object');
+        }
+    }
+    
+    if (!numberLossesData) {
+        console.log('[Winspin API] No number losses data in response for table:', tableName);
+        return null;
+    }
+    
+    return normalizeNumberLosses(numberLossesData);
 }
 
 /**
@@ -281,6 +354,86 @@ function normalizeSectorLosses(lossesData) {
         
     } catch (error) {
         console.error('[Winspin API] Error normalizing sector losses:', error);
+        normalized.dataQuality = 'error';
+    }
+    
+    return normalized;
+}
+
+/**
+ * Normalizes number-level losses data from various API formats
+ * Handles both array and object formats, tracks whether historical max is present
+ * @param {Object|Array} lossesData - Raw number losses data from API
+ * @returns {Object} Normalized number data with hasHistoricalMax flag
+ */
+function normalizeNumberLosses(lossesData) {
+    const normalized = {
+        numbers: {},
+        hasHistoricalMax: false,
+        dataQuality: 'unknown',
+        apiMaxValuesReceived: [] // Track which numbers have API-provided max values
+    };
+    
+    try {
+        if (Array.isArray(lossesData)) {
+            // Array format: [{number: 0, losses: 5, max: 250}, {number: 1, losses: 3, max: 280}, ...]
+            lossesData.forEach(entry => {
+                const num = entry.number !== undefined ? parseInt(entry.number, 10) : null;
+                if (num !== null && num >= 0 && num <= 36) {
+                    const maxValue = entry.max || entry.historical_max || null;
+                    normalized.numbers[num] = {
+                        current: entry.losses || entry.current || 0,
+                        max: maxValue,
+                        isApiMax: maxValue !== null && maxValue > 0
+                    };
+                    if (maxValue !== null && maxValue > 0) {
+                        normalized.hasHistoricalMax = true;
+                        normalized.apiMaxValuesReceived.push(num);
+                    }
+                }
+            });
+            normalized.dataQuality = normalized.hasHistoricalMax ? 'full' : 'current_only';
+        } else if (typeof lossesData === 'object') {
+            // Object format: {0: {losses: 5, max: 250}, 1: {losses: 3, max: 280}, ...}
+            // Or simple format: {0: 5, 1: 3, ...}
+            for (const [key, data] of Object.entries(lossesData)) {
+                const num = parseInt(key, 10);
+                if (!isNaN(num) && num >= 0 && num <= 36) {
+                    if (typeof data === 'number') {
+                        // Simple format: just losses count
+                        normalized.numbers[num] = {
+                            current: data,
+                            max: null,
+                            isApiMax: false
+                        };
+                    } else if (typeof data === 'object') {
+                        // Full format with losses and max
+                        const maxValue = data.max || data.historical_max || null;
+                        normalized.numbers[num] = {
+                            current: data.losses || data.current || 0,
+                            max: maxValue,
+                            isApiMax: maxValue !== null && maxValue > 0
+                        };
+                        if (maxValue !== null && maxValue > 0) {
+                            normalized.hasHistoricalMax = true;
+                            normalized.apiMaxValuesReceived.push(num);
+                        }
+                    }
+                }
+            }
+            normalized.dataQuality = normalized.hasHistoricalMax ? 'full' : 'current_only';
+        }
+        
+        // Log diagnostic info about what we received
+        if (normalized.hasHistoricalMax) {
+            console.log('[Winspin API] Historical max data received for numbers:', 
+                        normalized.apiMaxValuesReceived.length, 'numbers');
+        } else {
+            console.log('[Winspin API] No historical max data for numbers in response');
+        }
+        
+    } catch (error) {
+        console.error('[Winspin API] Error normalizing number losses:', error);
         normalized.dataQuality = 'error';
     }
     
