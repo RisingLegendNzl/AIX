@@ -1,7 +1,8 @@
 // js/api/apiContextManager.js - API Context Manager
-// Manages API state, polling intervals, and deduplication
+// Manages API state, polling intervals, deduplication, and context data
 
 import { sectorContext } from './sectorContext.js';
+import { numberContext } from './numberContext.js';
 
 class ApiContextManager {
     constructor() {
@@ -13,12 +14,14 @@ class ApiContextManager {
         this.lastApiResponse = null;
         this.pollingIntervalMs = 2500; // 2.5 seconds
         this.autoModeEnabled = false;
-        this.contextSpins = []; // Store spin history for current context
+        this.contextSpins = []; // Store spin history for current context (newest first)
         this.sectorDataAvailable = false; // Track if sector data is available
+        this.numberDataAvailable = false; // Track if number-level data is available
         
-        // NEW: Track data quality information
+        // Track data quality information
         this.lastDataQuality = null;
         this.historicalMaxReceived = false;
+        this.numberHistoricalMaxReceived = false;
     }
 
     /**
@@ -65,71 +68,79 @@ class ApiContextManager {
     }
 
     /**
-     * Sets the current provider and table context
-     * Stops any active polling when context changes
+     * Sets provider and table for context
      * @param {string} provider - Provider name
      * @param {string} table - Table name
      */
     setContext(provider, table) {
+        // If changing provider/table, reset context
         if (this.currentProvider !== provider || this.currentTable !== table) {
-            this.stopLivePolling();
-            this.lastSpin = null;
             this.contextSpins = [];
             this.sectorDataAvailable = false;
-            this.historicalMaxReceived = false;
-            this.lastDataQuality = null;
+            this.numberDataAvailable = false;
             sectorContext.reset();
+            numberContext.reset();
         }
         this.currentProvider = provider;
         this.currentTable = table;
     }
 
     /**
+     * Gets a unique context identifier
+     * @returns {string|null} Context ID or null if no context set
+     */
+    getContextId() {
+        if (!this.currentProvider || !this.currentTable) {
+            return null;
+        }
+        return `${this.currentProvider}:${this.currentTable}`;
+    }
+
+    /**
      * Stores the last API response for reference
-     * @param {Array} response - API response data
+     * @param {Object} response - API response data
      */
     setLastApiResponse(response) {
         this.lastApiResponse = response;
     }
 
     /**
-     * Gets the last API response
-     * @returns {Array|null} Last API response or null
+     * Gets the last stored API response
+     * @returns {Object|null} Last API response or null
      */
     getLastApiResponse() {
         return this.lastApiResponse;
     }
 
     /**
-     * Starts live polling mode
+     * Starts live polling
+     * @param {Function} callback - Function to call on each poll interval
      */
-    startLivePolling() {
+    startLivePolling(callback) {
+        if (this.isLivePolling) {
+            return; // Already polling
+        }
+        
         this.isLivePolling = true;
+        this.pollingInterval = setInterval(callback, this.pollingIntervalMs);
+        console.log('[ApiContext] Live polling started');
     }
 
     /**
-     * Stops live polling mode
+     * Stops live polling
      */
     stopLivePolling() {
-        this.isLivePolling = false;
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
         }
+        this.isLivePolling = false;
+        console.log('[ApiContext] Live polling stopped');
     }
 
     /**
-     * Sets the polling interval reference
-     * @param {number} intervalId - Interval ID from setInterval
-     */
-    setLivePollingInterval(intervalId) {
-        this.pollingInterval = intervalId;
-        this.isLivePolling = true;
-    }
-
-    /**
-     * Adds a new spin to context history
-     * @param {number} spin - The spin number
+     * Adds a new spin to context (deduplicates)
+     * @param {number} spin - Spin number to add
      * @returns {boolean} True if spin was added (not duplicate)
      */
     addSpin(spin) {
@@ -149,6 +160,9 @@ class ApiContextManager {
         // Update sector streaks from spin history
         sectorContext.calculateFromSpinHistory(this.contextSpins);
         
+        // Update number streaks from spin history
+        numberContext.calculateFromSpinHistory(this.contextSpins);
+        
         return true;
     }
 
@@ -162,6 +176,9 @@ class ApiContextManager {
         
         // Update sector streaks from new spin history
         sectorContext.calculateFromSpinHistory(this.contextSpins);
+        
+        // Update number streaks from new spin history
+        numberContext.calculateFromSpinHistory(this.contextSpins);
     }
 
     /**
@@ -211,6 +228,42 @@ class ApiContextManager {
     }
 
     /**
+     * Updates number-level context from API losses data
+     * @param {Object} numberLossesData - Number losses data from API
+     * @returns {boolean} True if update was successful
+     */
+    updateNumberContext(numberLossesData) {
+        if (!numberLossesData || !numberLossesData.numbers) {
+            console.log('[ApiContext] No number losses data to update');
+            return false;
+        }
+        
+        // Store data quality info
+        this.numberHistoricalMaxReceived = numberLossesData.hasHistoricalMax;
+        
+        // Convert normalized format to numberContext format
+        const apiData = {};
+        for (const [num, data] of Object.entries(numberLossesData.numbers)) {
+            apiData[num] = {
+                losses: data.current,
+                max: data.max
+            };
+        }
+        
+        const success = numberContext.updateFromApi(apiData);
+        this.numberDataAvailable = success;
+        
+        console.log('[ApiContext] Number context updated:', {
+            success,
+            hasHistoricalMax: numberLossesData.hasHistoricalMax,
+            dataQuality: numberLossesData.dataQuality,
+            numbersReceived: Object.keys(numberLossesData.numbers).length
+        });
+        
+        return success;
+    }
+
+    /**
      * Checks if sector data with historical max is available
      * @returns {boolean} True if full sector data with API-provided max is available
      */
@@ -219,11 +272,37 @@ class ApiContextManager {
     }
 
     /**
-     * Checks if 5+ year historical max data was received from API
-     * @returns {boolean} True if API provided historical max values
+     * Checks if number-level data with historical max is available
+     * @returns {boolean} True if full number data with API-provided max is available
+     */
+    hasNumberData() {
+        return this.numberDataAvailable && numberContext.isInitialized;
+    }
+
+    /**
+     * Checks if any context data is available (sector or number)
+     * This is key for allowing analysis without full data
+     * @returns {boolean} True if any context data is available
+     */
+    hasAnyContextData() {
+        return this.hasSectorData() || this.hasNumberData() || 
+               sectorContext.isInitialized || numberContext.isInitialized;
+    }
+
+    /**
+     * Checks if 5+ year historical max data was received from API (sector)
+     * @returns {boolean} True if API provided historical max values for sectors
      */
     hasHistoricalMaxData() {
         return this.historicalMaxReceived && sectorContext.dataSource === 'api';
+    }
+
+    /**
+     * Checks if 5+ year historical max data was received from API (number-level)
+     * @returns {boolean} True if API provided historical max values for numbers
+     */
+    hasNumberHistoricalMaxData() {
+        return this.numberHistoricalMaxReceived && numberContext.dataSource === 'api';
     }
 
     /**
@@ -231,6 +310,10 @@ class ApiContextManager {
      * @returns {Object} Status object with label, description, and calibration state
      */
     getDataSourceStatus() {
+        // Prefer number-level data status if available
+        if (this.hasNumberData()) {
+            return numberContext.getDataSourceStatus();
+        }
         return sectorContext.getDataSourceStatus();
     }
 
@@ -244,6 +327,41 @@ class ApiContextManager {
     }
 
     /**
+     * Gets number-level context for a group's hit zone
+     * This is the key method for number-level streak aggregation to groups
+     * @param {Array<number>} hitZoneNumbers - Numbers in the group's hit zone
+     * @returns {Object} Number context for the group
+     */
+    getGroupNumberContext(hitZoneNumbers) {
+        return numberContext.calculateGroupContext(hitZoneNumbers);
+    }
+
+    /**
+     * Gets combined context for a calculation group
+     * Aggregates both sector and number-level data
+     * @param {Array<number>} hitZoneNumbers - Numbers in the group's hit zone
+     * @returns {Object} Combined context for the group
+     */
+    getGroupContext(hitZoneNumbers) {
+        const sectorCtx = this.getGroupSectorContext(hitZoneNumbers);
+        const numberCtx = this.getGroupNumberContext(hitZoneNumbers);
+        
+        return {
+            sector: sectorCtx,
+            number: numberCtx,
+            // Use number-level data if available, otherwise fall back to sector
+            hasContext: numberCtx.hasContext || sectorCtx.hasContext,
+            primarySource: numberCtx.hasContext && numberCtx.hasApiData ? 'number' : 
+                          (sectorCtx.hasContext && sectorCtx.hasApiData ? 'sector' : 'calculated'),
+            // Aggregate severity (prefer number-level as it's more granular)
+            aggregateSeverity: numberCtx.hasContext ? numberCtx.aggregateSeverity : 
+                              (sectorCtx.hasContext ? sectorCtx.aggregateSeverity : 0),
+            contextDescription: numberCtx.hasContext ? numberCtx.contextDescription : 
+                               (sectorCtx.hasContext ? sectorCtx.contextDescription : 'No context available')
+        };
+    }
+
+    /**
      * Gets sector context explanation for UI display
      * @param {Object} groupContext - Context from getGroupSectorContext
      * @returns {Object} Explanation object for UI
@@ -253,55 +371,122 @@ class ApiContextManager {
     }
 
     /**
-     * Gets sector confidence modifier for group scoring
-     * @param {Object} groupContext - Context from getGroupSectorContext
-     * @returns {number} Confidence multiplier (0.85 to 1.0)
+     * Gets number context explanation for UI display
+     * @param {Object} groupContext - Context from getGroupNumberContext
+     * @returns {Object} Explanation object for UI
+     */
+    getNumberExplanation(groupContext) {
+        return numberContext.generateExplanation(groupContext);
+    }
+
+    /**
+     * Gets the confidence modifier from sector context
+     * @param {Object} groupContext - Sector context object
+     * @returns {number} Confidence modifier (0.85 to 1.0)
      */
     getSectorConfidenceModifier(groupContext) {
         return sectorContext.getConfidenceModifier(groupContext);
     }
 
     /**
-     * Gets full sector summary for debugging/display
-     * @returns {Object} Sector summary with all details
+     * Gets the confidence modifier from number context
+     * @param {Object} groupContext - Number context object
+     * @returns {number} Confidence modifier (0.85 to 1.0)
+     */
+    getNumberConfidenceModifier(groupContext) {
+        return numberContext.getConfidenceModifier(groupContext);
+    }
+
+    /**
+     * Gets the best available confidence modifier
+     * Prefers number-level if available
+     * @param {Array<number>} hitZoneNumbers - Numbers in the group's hit zone
+     * @returns {number} Confidence modifier (0.85 to 1.0)
+     */
+    getConfidenceModifier(hitZoneNumbers) {
+        if (this.hasNumberData()) {
+            const ctx = this.getGroupNumberContext(hitZoneNumbers);
+            return this.getNumberConfidenceModifier(ctx);
+        }
+        if (this.hasSectorData()) {
+            const ctx = this.getGroupSectorContext(hitZoneNumbers);
+            return this.getSectorConfidenceModifier(ctx);
+        }
+        return 1.0; // No modification if no data
+    }
+
+    /**
+     * Gets sector summary for all sectors
+     * @returns {Object} Summary of all sector data
      */
     getSectorSummary() {
-        return sectorContext.getSummary();
+        const summary = {
+            dataSource: sectorContext.dataSource,
+            isInitialized: sectorContext.isInitialized,
+            sectors: {}
+        };
+        
+        // Get severity for each sector
+        const sectorIds = ['red', 'black', 'dozen1', 'dozen2', 'dozen3', 
+                          'column1', 'column2', 'column3', 'low', 'high', 'even', 'odd'];
+        
+        for (const sectorId of sectorIds) {
+            const severity = sectorContext.getSectorSeverity(sectorId);
+            summary.sectors[sectorId] = severity;
+        }
+        
+        return summary;
     }
 
     /**
-     * Clears spin data and stops polling, but preserves provider/table/autoMode settings
-     * Used when clearing history
+     * Gets number summary for all numbers
+     * @returns {Object} Summary of all number data
+     */
+    getNumberSummary() {
+        return numberContext.getSummary();
+    }
+
+    /**
+     * Clears context spins and losses data but preserves provider/table settings
+     * Use this when clearing history but wanting to maintain the current context source
      */
     clearContext() {
-        this.stopLivePolling();
+        this.contextSpins = [];
         this.lastSpin = null;
         this.lastApiResponse = null;
-        this.contextSpins = [];
         this.sectorDataAvailable = false;
-        this.historicalMaxReceived = false;
+        this.numberDataAvailable = false;
         this.lastDataQuality = null;
+        this.historicalMaxReceived = false;
+        this.numberHistoricalMaxReceived = false;
         sectorContext.reset();
-        // Note: Does NOT reset provider, table, or autoMode
+        numberContext.reset();
+        // Note: currentProvider and currentTable are preserved
+        // Note: autoModeEnabled and polling state are preserved
     }
 
     /**
-     * Resets the entire context (used when clearing history or disconnecting)
+     * Resets all context data including provider/table settings
      */
     reset() {
-        this.stopLivePolling();
+        this.clearContext();
         this.currentProvider = null;
         this.currentTable = null;
-        this.lastSpin = null;
-        this.lastApiResponse = null;
+        this.stopLivePolling();
         this.autoModeEnabled = false;
-        this.contextSpins = [];
-        this.sectorDataAvailable = false;
-        this.historicalMaxReceived = false;
-        this.lastDataQuality = null;
-        sectorContext.reset();
+    }
+
+    /**
+     * Gets current polling state
+     * @returns {boolean} True if currently polling
+     */
+    isPolling() {
+        return this.isLivePolling;
     }
 }
 
 // Export singleton instance
 export const apiContext = new ApiContextManager();
+
+// Export class for testing
+export { ApiContextManager };
