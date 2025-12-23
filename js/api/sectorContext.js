@@ -75,7 +75,7 @@ class SectorContextManager {
         this.dataSource = 'defaults'; // 'defaults' | 'api' | 'calculated'
         this.isInitialized = false;
         
-        // NEW: Track which sectors have API-provided max values vs defaults
+        // Track which sectors have API-provided max values vs defaults
         this.apiProvidedMaxSectors = new Set();
         this.apiDataTimestamp = null;
     }
@@ -235,7 +235,7 @@ class SectorContextManager {
             ratio: Math.min(ratio, 1.0), // Cap at 1.0
             level,
             description,
-            isApiMax  // NEW: Indicates if max value came from API
+            isApiMax
         };
     }
 
@@ -363,7 +363,7 @@ class SectorContextManager {
             contextDescription,
             dataSource: this.dataSource,
             lastUpdated: this.lastUpdated,
-            hasApiData: hasAnyApiData  // NEW: Indicates if group uses API-provided max values
+            hasApiData: hasAnyApiData
         };
     }
 
@@ -373,77 +373,44 @@ class SectorContextManager {
      * 
      * IMPORTANT: This is a CONTEXTUAL modifier, not a boost.
      * Extreme sectors reduce confidence (more uncertainty), not increase it.
+     * This avoids gambler's fallacy implications.
+     * 
      * @param {Object} groupContext - Context from calculateGroupSectorContext
-     * @returns {number} Confidence multiplier
+     * @returns {number} Confidence modifier (0.85 to 1.0)
      */
     getConfidenceModifier(groupContext) {
-        if (!groupContext.hasContext) {
-            return 1.0; // No modification
+        if (!groupContext || !groupContext.hasContext) {
+            return 1.0; // No modification if no context
         }
 
         const severity = groupContext.aggregateSeverity;
 
-        // Higher severity = MORE uncertainty = LOWER confidence
-        // This is intentionally conservative - extreme conditions mean less predictability
-        if (severity < SEVERITY_THRESHOLDS.NORMAL) {
-            return 1.0; // Normal conditions, no change
-        } else if (severity < SEVERITY_THRESHOLDS.MILD) {
-            return 0.98; // Slight uncertainty
-        } else if (severity < SEVERITY_THRESHOLDS.ELEVATED) {
-            return 0.95; // Moderate uncertainty
-        } else if (severity < SEVERITY_THRESHOLDS.HIGH) {
-            return 0.90; // Increased uncertainty
-        } else {
-            return 0.85; // High uncertainty in extreme conditions
+        // Higher severity = more uncertainty = lower confidence modifier
+        // This is intentionally conservative
+        if (severity >= SEVERITY_THRESHOLDS.EXTREME) {
+            return 0.85; // Near historical extreme - high uncertainty
+        } else if (severity >= SEVERITY_THRESHOLDS.HIGH) {
+            return 0.90;
+        } else if (severity >= SEVERITY_THRESHOLDS.ELEVATED) {
+            return 0.95;
         }
-    }
-
-    /**
-     * Get summary of current sector state
-     * @returns {Object} Summary object with data source information
-     */
-    getSummary() {
-        const summary = {
-            isInitialized: this.isInitialized,
-            dataSource: this.dataSource,
-            lastUpdated: this.lastUpdated,
-            apiDataTimestamp: this.apiDataTimestamp,
-            apiProvidedMaxCount: this.apiProvidedMaxSectors.size,
-            totalSectors: Object.keys(SECTOR_DEFINITIONS).length,
-            hasFullApiData: this.apiProvidedMaxSectors.size === Object.keys(SECTOR_DEFINITIONS).length,
-            sectors: {}
-        };
-
-        for (const sectorId in SECTOR_DEFINITIONS) {
-            summary.sectors[sectorId] = this.getSectorSeverity(sectorId);
-        }
-
-        return summary;
+        
+        return 1.0; // Normal conditions - no modification
     }
 
     /**
      * Get data source status for UI display
-     * @returns {Object} Status object with user-friendly descriptions
+     * @returns {Object} Status object with label, description, and calibration state
      */
     getDataSourceStatus() {
-        const apiCount = this.apiProvidedMaxSectors.size;
         const totalCount = Object.keys(SECTOR_DEFINITIONS).length;
-        
-        if (!this.isInitialized) {
-            return {
-                status: 'not_initialized',
-                label: 'Not Connected',
-                description: 'No sector data loaded',
-                isApiCalibrated: false,
-                confidence: 'low'
-            };
-        }
-        
+        const apiCount = this.apiProvidedMaxSectors.size;
+
         if (this.dataSource === 'api' && apiCount === totalCount) {
             return {
                 status: 'full_api',
-                label: '5+ Year Data Active',
-                description: `Historical max data from API for all ${totalCount} sectors`,
+                label: 'Full API Data (5+ Years)',
+                description: 'Historical max data for all 12 sectors from 5+ year API',
                 isApiCalibrated: true,
                 confidence: 'high',
                 timestamp: this.apiDataTimestamp
