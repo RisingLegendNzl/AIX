@@ -254,57 +254,89 @@ export function calculateConditionalProbability(history, groupId, activePredicti
         ? groupHitCount / relevantOccurrences 
         : 0;
     
-    return { 
-        probability, 
-        sampleSize: relevantOccurrences 
+    return { probability, sampleSize: relevantOccurrences };
+}
+
+/**
+ * Calculates rolling performance for table change warnings
+ */
+export function calculateRollingPerformance(history, windowSize, minPlays) {
+    const confirmedItems = history
+        .filter(item => item.winningNumber !== null && item.recommendedGroupId && item.recommendationDetails?.finalScore > 0)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, windowSize);
+    
+    if (confirmedItems.length < minPlays) {
+        return { sufficientData: false, plays: confirmedItems.length, wins: 0, losses: 0, winRate: 0 };
+    }
+    
+    let wins = 0;
+    let losses = 0;
+    let currentLossStreak = 0;
+    
+    for (const item of confirmedItems) {
+        const wasHit = item.hitTypes && item.hitTypes.includes(item.recommendedGroupId);
+        if (wasHit) {
+            wins++;
+            currentLossStreak = 0;
+        } else {
+            losses++;
+            currentLossStreak++;
+        }
+    }
+    
+    return {
+        sufficientData: true,
+        plays: confirmedItems.length,
+        wins,
+        losses,
+        winRate: confirmedItems.length > 0 ? (wins / confirmedItems.length * 100) : 0,
+        currentLossStreak
     };
 }
 
-// Re-defining analyzeFactorShift here for export from shared-logic
-export function analyzeFactorShift(history, strategyConfig) {
-    let factorShiftDetected = false;
-    let reason = '';
-
-    const relevantSuccessfulPlays = [...history]
-        .filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.primaryDrivingFactor !== "N/A")
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE); // Get only the recent successful plays
-
-    if (relevantSuccessfulPlays.length < strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE) {
-        return { factorShiftDetected: false, reason: 'Not enough successful plays to detect factor shift.' };
-    }
-
-    const factorCounts = {};
-    relevantSuccessfulPlays.forEach(item => {
-        const factor = item.recommendationDetails.primaryDrivingFactor;
-        factorCounts[factor] = (factorCounts[factor] || 0) + 1;
-    });
-
-    const totalFactorsConsidered = relevantSuccessfulPlays.length;
-    let dominantFactor = null;
-    let dominantFactorPercentage = 0;
-    let diversityScore = 0; // Higher diversity means more spread out factors
-
-    Object.keys(factorCounts).forEach(factor => {
-        const percentage = (factorCounts[factor] / totalFactorsConsidered) * 100;
-        if (percentage > dominantFactorPercentage) {
-            dominantFactorPercentage = percentage;
-            dominantFactor = factor;
-        }
-        diversityScore += Math.pow(factorCounts[factor] / totalFactorsConsidered, 2);
-    });
-
-    if (dominantFactorPercentage < strategyConfig.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT) {
-        factorShiftDetected = true;
-        reason = `No single dominant primary factor (${dominantFactorPercentage.toFixed(1)}%) in recent successful plays.`;
-    }
-
-    if (!factorShiftDetected && diversityScore < (1 - strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD)) {
-        factorShiftDetected = true;
-        reason = `High diversity of primary factors in recent successful plays.`;
+/**
+ * Analyzes if the primary driving factors have been shifting
+ */
+export function analyzeFactorShift(history, windowSize, diversityThreshold, minDominancePercent) {
+    const recentSuccessfulItems = history
+        .filter(item => item.status === 'success' && item.recommendationDetails?.primaryDrivingFactor)
+        .sort((a, b) => b.id - a.id)
+        .slice(0, windowSize);
+    
+    if (recentSuccessfulItems.length < 3) {
+        return { sufficientData: false, isShifting: false, dominantFactor: null, factorDistribution: {} };
     }
     
-    return { factorShiftDetected, reason: factorShiftDetected ? reason : '' };
+    const factorCounts = {};
+    for (const item of recentSuccessfulItems) {
+        const factor = item.recommendationDetails.primaryDrivingFactor;
+        factorCounts[factor] = (factorCounts[factor] || 0) + 1;
+    }
+    
+    let dominantFactor = null;
+    let maxCount = 0;
+    for (const [factor, count] of Object.entries(factorCounts)) {
+        if (count > maxCount) {
+            maxCount = count;
+            dominantFactor = factor;
+        }
+    }
+    
+    const dominancePercent = (maxCount / recentSuccessfulItems.length) * 100;
+    const uniqueFactors = Object.keys(factorCounts).length;
+    const diversityRatio = uniqueFactors / recentSuccessfulItems.length;
+    
+    const isShifting = diversityRatio >= diversityThreshold || dominancePercent < minDominancePercent;
+    
+    return {
+        sufficientData: true,
+        isShifting,
+        dominantFactor,
+        factorDistribution: factorCounts,
+        diversityRatio,
+        dominancePercent
+    };
 }
 
 /**
@@ -319,13 +351,13 @@ function wrapGroupName(groupName, groupId) {
 /**
  * Generates a detailed, deterministic explanation for a recommendation
  * This is used when AI explanations are not available or to supplement them
- * NOW INCLUDES SECTOR CONTEXT when available
+ * NOW INCLUDES NUMBER AND SECTOR CONTEXT when available
  */
 function generateDetailedExplanation(candidates, bestCandidate, context) {
     const {
         trendStats, boardStats, lastWinningNumber,
         currentHistoryForTrend, current_STRATEGY_CONFIG,
-        activePredictionTypes, sectorContextData
+        activePredictionTypes, contextProvider
     } = context;
 
     if (!bestCandidate || candidates.length === 0) {
@@ -338,7 +370,8 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             runnerUpGroup: null,
             scoreGap: 0,
             recentPerformance: null,
-            sectorContext: null
+            sectorContext: null,
+            numberContext: null
         };
     }
 
@@ -371,94 +404,83 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
 
     // Determine confidence based on score gap and sample size
     let confidence = 'low';
-    const scoreGapPercent = runnerUpGroup.score > 0 ? (scoreGap / runnerUpGroup.score) * 100 : 100;
+    const scoreGapPercent = runnerUpGroup.score > 0 ? ((scoreGap / runnerUpGroup.score) * 100) : (topGroup.score > 0 ? 100 : 0);
     
-    if (topGroup.score >= 50 && scoreGapPercent >= 20 && total >= 5) {
+    if (scoreGapPercent >= 30 && total >= 5 && hitRate >= 40) {
         confidence = 'high';
-    } else if (topGroup.score >= 30 && scoreGapPercent >= 10 && total >= 3) {
+    } else if (scoreGapPercent >= 15 && total >= 3 && hitRate >= 30) {
         confidence = 'medium';
     }
 
-    // Adjust confidence based on sector context (if available)
-    let sectorContextInfo = null;
-    if (sectorContextData && sectorContextData.hasContext) {
-        const sectorModifier = sectorContextData.confidenceModifier || 1.0;
-        
-        // Sector stress REDUCES confidence (more uncertainty)
-        if (sectorModifier < 0.95 && confidence === 'high') {
-            confidence = 'medium';
-        } else if (sectorModifier < 0.90 && confidence === 'medium') {
-            confidence = 'low';
-        }
-        
-        sectorContextInfo = {
-            description: sectorContextData.contextDescription,
-            modifier: sectorModifier,
-            dominantSector: sectorContextData.dominantSector,
-            dataSource: sectorContextData.dataSource
-        };
-    }
-
     // Generate headline
-    let headline = '';
+    const wrappedGroupName = wrapGroupName(topGroup.type.displayLabel, topGroup.type.id);
+    let headline;
     if (currentStreak >= 3) {
-        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} on ${currentStreak}-spin winning streak`;
-    } else if (total >= 5 && hitRate >= 70) {
-        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} hitting ${hitRate.toFixed(0)}% of recent spins`;
-    } else if (confidence === 'high') {
-        headline = `Strong signal for ${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)}`;
-    } else if (total >= 3 && hitRate >= 50 && confidence === 'medium') {
-        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} shows consistent recent performance`;
-    } else if (confidence === 'low') {
-        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} recommended (mixed signals)`;
+        headline = `${wrappedGroupName} on ${currentStreak}-spin streak`;
+    } else if (hitRate >= 60 && total >= 5) {
+        headline = `${wrappedGroupName} hitting strong (${hitRate.toFixed(0)}%)`;
+    } else if (scoreGapPercent >= 50) {
+        headline = `${wrappedGroupName} leads with clear margin`;
     } else {
-        headline = `${wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id)} selected`;
+        headline = `${wrappedGroupName} recommended`;
     }
 
-    // Generate detailed bullets
+    // Generate contextual bullets
     const bullets = [];
     
-    // Bullet 1: Score comparison
-    if (scoreGapPercent >= 20) {
-        bullets.push(`Scores ${scoreGapPercent.toFixed(0)}% higher than ${wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id)} (clear winner)`);
-    } else if (scoreGapPercent >= 10) {
-        bullets.push(`Edges out ${wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id)} by ${scoreGapPercent.toFixed(0)}%`);
-    } else {
-        bullets.push(`Very close race with ${wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id)} (${scoreGapPercent.toFixed(0)}% margin)`);
+    if (currentStreak >= 2) {
+        bullets.push(`Currently on ${currentStreak}-spin winning streak`);
     }
     
-    // Bullet 2: Recent performance
-    if (total >= 5) {
-        if (currentStreak >= 2) {
-            bullets.push(`Currently on ${currentStreak}-spin streak (${hits}/${total} recent hits)`);
-        } else if (hitRate >= 60) {
-            bullets.push(`Strong recent form: ${hits} hits in last ${total} spins (${hitRate.toFixed(0)}%)`);
-        } else if (hitRate >= 40) {
-            bullets.push(`Recent performance: ${hits}/${total} spins (${hitRate.toFixed(0)}%)`);
-        } else {
-            bullets.push(`Recent struggle: ${hits}/${total} hits (${hitRate.toFixed(0)}%) - watch carefully`);
-        }
-    } else if (total > 0) {
-        bullets.push(`Limited recent data: ${hits}/${total} hits - treat cautiously`);
-    } else {
-        bullets.push(`No recent history - context based on patterns only`);
+    if (total >= 3) {
+        bullets.push(`Recent hit rate: ${hitRate.toFixed(0)}% (${hits}/${total} spins)`);
     }
-    
-    // Bullet 3: Sector context or pattern signals
-    if (sectorContextInfo && sectorContextInfo.dominantSector) {
-        const dom = sectorContextInfo.dominantSector;
-        const severityDesc = dom.severity?.description || 'within typical range';
-        bullets.push(`Sector context: ${dom.name} exposure (${severityDesc})`);
-    } else {
-        // Fallback to driving factors
-        const details = bestCandidate.details;
-        const primaryFactor = details.primaryDrivingFactor || 'Statistical Trends';
-        const factorScore = details.individualScores?.[primaryFactor] || 0;
+
+    const primaryFactor = bestCandidate.details.primaryDrivingFactor;
+    if (primaryFactor && primaryFactor !== 'N/A') {
+        const factorScore = bestCandidate.details.individualScores?.[primaryFactor] || 0;
         
         if (factorScore > 0) {
             bullets.push(`Primary driver: ${primaryFactor} (${factorScore.toFixed(1)} pts)`);
         } else {
             bullets.push(`Primary factor: ${primaryFactor}`);
+        }
+    }
+
+    // Add number context info if available
+    let numberContextInfo = null;
+    if (bestCandidate.details.numberContext && bestCandidate.details.numberContext.hasContext) {
+        const numCtx = bestCandidate.details.numberContext;
+        numberContextInfo = {
+            description: numCtx.contextDescription,
+            avgLossStreak: numCtx.avgLossStreak,
+            elevatedCount: numCtx.elevatedNumbers?.length || 0,
+            hasApiData: numCtx.hasApiData
+        };
+        
+        if (numCtx.elevatedNumbers && numCtx.elevatedNumbers.length > 0) {
+            const elevatedList = numCtx.elevatedNumbers.slice(0, 3).map(e => e.number).join(', ');
+            bullets.push(`Extended numbers in zone: ${elevatedList}`);
+        }
+    }
+
+    // Add sector context info if available (fallback if no number context)
+    let sectorContextInfo = null;
+    if (bestCandidate.details.sectorContext && bestCandidate.details.sectorContext.hasContext) {
+        const sectorCtx = bestCandidate.details.sectorContext;
+        sectorContextInfo = {
+            dominantSector: sectorCtx.dominantSector?.name || null,
+            dominantSectorLevel: sectorCtx.dominantSector?.severity?.level || 'normal',
+            aggregateSeverity: sectorCtx.aggregateSeverity,
+            hasApiData: sectorCtx.hasApiData
+        };
+        
+        // Only add sector bullet if we did not already add number context info
+        if (!numberContextInfo && sectorCtx.dominantSector) {
+            const severity = sectorCtx.dominantSector.severity;
+            if (severity && severity.level !== 'normal') {
+                bullets.push(`Sector note: ${severity.description}`);
+            }
         }
     }
 
@@ -478,7 +500,8 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
         },
         finalScore: topGroup.score.toFixed(2),
         primaryFactor: bestCandidate.details.primaryDrivingFactor || 'N/A',
-        sectorContext: sectorContextInfo
+        sectorContext: sectorContextInfo,
+        numberContext: numberContextInfo
     };
 }
 
@@ -492,15 +515,21 @@ export function getRecommendation(context) {
         isAiReadyBool, useTrendConfirmationBool, useAdaptivePlayBool, useLessStrictBool,
         useTableChangeWarningsBool, rollingPerformance, factorShiftStatus,
         useLowestPocketDistanceBool, 
-        sectorContextProvider = null, // NEW: Optional sector context provider
+        sectorContextProvider = null, // Optional sector context provider
+        numberContextProvider = null, // Optional number context provider (usually same as sector)
         current_STRATEGY_CONFIG,
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
-        currentHistoryForTrend 
+        currentHistoryForTrend,
+        useDynamicTerminalNeighbourCount
     } = context;
 
     const currentNum1 = inputNum1;
     const currentNum2 = inputNum2;
+
+    // Determine which context provider to use
+    // The apiContext manager now provides both sector and number context
+    const contextProvider = numberContextProvider || sectorContextProvider;
 
     let candidates = activePredictionTypes.map(type => {
         const details = {
@@ -523,8 +552,9 @@ export function getRecommendation(context) {
             reason: [],
             individualScores: {},
             aiExplanation: null,
-            sectorContext: null, // NEW: Sector context for this group
-            sectorConfidenceModifier: 1.0 // NEW: Sector-based confidence modifier
+            sectorContext: null,
+            numberContext: null,
+            contextConfidenceModifier: 1.0
         };
 
         const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
@@ -533,18 +563,39 @@ export function getRecommendation(context) {
         if (baseNum < 0 || baseNum > 36) return null;
 
         const terminals = terminalMapping?.[baseNum] || [];
-        const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
+        const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
 
-        // --- NEW: Calculate sector context for this group's hit zone ---
-        if (sectorContextProvider && typeof sectorContextProvider.getGroupSectorContext === 'function') {
+        // --- Calculate context for this group's hit zone ---
+        // Try number-level context first (more granular), then fall back to sector context
+        if (contextProvider) {
             try {
-                const groupSectorContext = sectorContextProvider.getGroupSectorContext(hitZone);
-                if (groupSectorContext && groupSectorContext.hasContext) {
-                    details.sectorContext = groupSectorContext;
-                    details.sectorConfidenceModifier = sectorContextProvider.getSectorConfidenceModifier(groupSectorContext);
+                // Get number-level context if available
+                if (typeof contextProvider.getGroupNumberContext === 'function') {
+                    const groupNumberContext = contextProvider.getGroupNumberContext(hitZone);
+                    if (groupNumberContext && groupNumberContext.hasContext) {
+                        details.numberContext = groupNumberContext;
+                        details.contextConfidenceModifier = contextProvider.getNumberConfidenceModifier 
+                            ? contextProvider.getNumberConfidenceModifier(groupNumberContext)
+                            : 1.0;
+                    }
+                }
+                
+                // Also get sector context for additional info
+                if (typeof contextProvider.getGroupSectorContext === 'function') {
+                    const groupSectorContext = contextProvider.getGroupSectorContext(hitZone);
+                    if (groupSectorContext && groupSectorContext.hasContext) {
+                        details.sectorContext = groupSectorContext;
+                        
+                        // If we did not get number context, use sector context modifier
+                        if (!details.numberContext) {
+                            details.contextConfidenceModifier = contextProvider.getSectorConfidenceModifier 
+                                ? contextProvider.getSectorConfidenceModifier(groupSectorContext)
+                                : 1.0;
+                        }
+                    }
                 }
             } catch (error) {
-                console.warn('Error getting sector context for group:', type.id, error);
+                console.warn('Error getting context for group:', type.id, error);
             }
         }
 
@@ -597,59 +648,53 @@ export function getRecommendation(context) {
             if (rawAiPoints > current_STRATEGY_CONFIG.minAiPointsForReason) details.reason.push(`AI Conf`);
         }
 
-        // 6. Conditional Probability Score (situational context from history)
-        const conditionalData = calculateConditionalProbability(
-            currentHistoryForTrend, 
-            type.id, 
-            activePredictionTypes, 
-            allPredictionTypes, 
-            terminalMapping, 
-            rouletteWheel, 
-            context.useDynamicTerminalNeighbourCount, 
-            current_STRATEGY_CONFIG.minConditionalSampleSize
-        );
-        
-        if (conditionalData.probability > 0 && conditionalData.sampleSize >= current_STRATEGY_CONFIG.minConditionalSampleSize) {
-            const rawConditionalPoints = conditionalData.probability * current_STRATEGY_CONFIG.conditionalProbMultiplier;
-            rawScore += rawConditionalPoints;
-            details.individualScores['Conditional Pattern'] = rawConditionalPoints;
-            if (rawConditionalPoints > 1) details.reason.push(`Pattern`);
-        }
-
-        // --- APPLY ADAPTIVE INFLUENCES ---
-        let finalCalculatedScore = 0;
-        let mostInfluentialFactor = "N/A";
-        let highestInfluencedScore = -Infinity;
-
-        for (const factorName in currentAdaptiveInfluences) {
-            const influence = currentAdaptiveInfluences[factorName];
-            let factorScore = details.individualScores[factorName] || 0;
-
-            const influencedScore = factorScore * influence;
-            finalCalculatedScore += influencedScore;
-
-            if (influencedScore > highestInfluencedScore) {
-                highestInfluencedScore = influencedScore;
-                mostInfluentialFactor = factorName;
+        // 6. Conditional Probability Score (from API data)
+        if (currentHistoryForTrend && currentHistoryForTrend.length > 0) {
+            const condProb = calculateConditionalProbability(
+                currentHistoryForTrend, type.id, activePredictionTypes, allPredictionTypes,
+                terminalMapping, rouletteWheel, useDynamicTerminalNeighbourCount,
+                current_STRATEGY_CONFIG.minConditionalSampleSize
+            );
+            if (condProb.probability > 0 && condProb.sampleSize >= current_STRATEGY_CONFIG.minConditionalSampleSize) {
+                const condProbPoints = condProb.probability * current_STRATEGY_CONFIG.conditionalProbMultiplier;
+                rawScore += condProbPoints;
+                details.individualScores['Statistical Trends'] = condProbPoints;
+                if (condProbPoints > 1) details.reason.push('Stats');
             }
         }
 
-        if (mostInfluentialFactor === "N/A" && details.reason.length > 0) {
-            mostInfluentialFactor = details.reason[0];
-        } else if (mostInfluentialFactor === "N/A") {
-            mostInfluentialFactor = "Statistical Trends";
+        // --- Adaptive Influence ---
+        let maxInfluenceApplied = 0;
+        let mostInfluentialFactor = "N/A";
+        for (const [factorName, points] of Object.entries(details.individualScores)) {
+            const influence = currentAdaptiveInfluences[factorName] || 1.0;
+            const influencedPoints = points * influence;
+            if (influencedPoints > maxInfluenceApplied) {
+                maxInfluenceApplied = influencedPoints;
+                mostInfluentialFactor = factorName;
+            }
         }
-
-        // --- NEW: Apply sector context as confidence modifier ---
-        // This is a CONTEXTUAL modifier - extreme sectors REDUCE confidence
-        // We apply it as a multiplier to the final score
-        if (details.sectorContext && details.sectorConfidenceModifier < 1.0) {
-            // Only apply if it would reduce the score (never boost based on sector)
-            finalCalculatedScore *= details.sectorConfidenceModifier;
+        
+        // --- Final Score Calculation ---
+        let finalCalculatedScore = rawScore;
+        
+        // Apply lowest pocket distance boost/suppression
+        if (useLowestPocketDistanceBool && lastWinningNumber !== null && details.predictiveDistance !== Infinity) {
+            if (details.predictiveDistance <= 1) {
+                finalCalculatedScore *= current_STRATEGY_CONFIG.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER;
+                details.aiLowPocketBoostApplied = true;
+                details.reason.push('PD');
+            }
+        }
+        
+        // Apply context confidence modifier (number-level or sector-level)
+        // This is a REDUCTION for high-stress environments, not a boost
+        if (details.contextConfidenceModifier < 1.0) {
+            finalCalculatedScore *= details.contextConfidenceModifier;
             
             // Add to reason if significant
-            if (details.sectorConfidenceModifier < 0.95) {
-                details.reason.push('Sector stress');
+            if (details.contextConfidenceModifier < 0.95) {
+                details.reason.push('Context stress');
             }
         }
 
@@ -697,186 +742,118 @@ export function getRecommendation(context) {
             bestCandidate: null, 
             details: null, 
             signal: "Wait for Signal", 
-            reason: "No strong context",
+            reason: "No clear signal",
             detailedExplanation: null
         };
     }
 
-    if (isForWeightUpdate) {
-        return { bestCandidate };
-    }
+    // Generate detailed explanation
+    const detailedExplanation = generateDetailedExplanation(candidates, bestCandidate, {
+        trendStats, boardStats, lastWinningNumber,
+        currentHistoryForTrend: currentHistoryForTrend || [],
+        current_STRATEGY_CONFIG,
+        activePredictionTypes,
+        contextProvider
+    });
 
+    // --- Determine Signal based on Adaptive Play ---
     let signal = "Wait";
-    let signalColor = "text-gray-500";
-    let reason = "(Low Confidence)";
+    let reason = bestCandidate.details.reason.join(', ') || 'General patterns';
+    let scoreLevel = '';
 
-    const effectiveStrategyConfig = current_STRATEGY_CONFIG;
+    const finalScore = bestCandidate.score;
 
-    // --- REFINED PLAY SIGNAL LOGIC ---
-    if (useAdaptivePlayBool) {
-        if (useLessStrictBool) {
-            if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_STRONG_PLAY_THRESHOLD ||
-                (bestCandidate.details.hitRate >= effectiveStrategyConfig.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && bestCandidate.details.currentStreak >= effectiveStrategyConfig.LESS_STRICT_MIN_STREAK)) {
-                signal = "Strong Play";
-                signalColor = "text-green-600";
-                reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
-            } else if (bestCandidate.score >= effectiveStrategyConfig.LESS_STRICT_PLAY_THRESHOLD) {
-                signal = "Play";
-                signalColor = "text-purple-700";
-                reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
-            } else {
-                signal = "Wait for Signal";
-                signalColor = "text-gray-500";
-                reason = `(Low Confidence)`;
-            }
-        } else {
-            if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_STRONG_PLAY_THRESHOLD) {
-                signal = "Strong Play";
-                signalColor = "text-green-600";
-                reason = `(High Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
-            } else if (bestCandidate.score >= effectiveStrategyConfig.ADAPTIVE_PLAY_THRESHOLD) {
-                signal = "Play";
-                signalColor = "text-purple-700";
-                reason = `(Moderate Confidence: ${bestCandidate.details?.primaryDrivingFactor || 'Unknown'})`;
-            } else {
-                signal = "Wait for Signal";
-                signalColor = "text-gray-500";
-                reason = `(Low Confidence)`;
-            }
-        }
-    } else {
-        if (bestCandidate.score > effectiveStrategyConfig.SIMPLE_PLAY_THRESHOLD) {
-            signal = "Play";
-            signalColor = "text-purple-700";
-            reason = `(${bestCandidate.details?.primaryDrivingFactor || 'Unknown Reason'})`;
-        } else {
-            signal = "Wait for Signal";
-            signalColor = "text-gray-500";
-            reason = `(Low Confidence)`;
-        }
-    }
-
-    // --- Trend Confirmation Override (IF TOGGLED AND APPLICABLE) ---
-    if (useTrendConfirmationBool) {
-        const successfulPlaysInHistory = currentHistoryForTrend.filter(item => item.status === 'success' && item.winningNumber !== null && item.recommendedGroupId && item.recommendationDetails && item.recommendationDetails.finalScore > 0).length;
-        
-        if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length > 0 && !trendStats.lastSuccessState.includes(bestCandidate.type.id)) {
-            signal = 'Wait for Signal';
-            signalColor = "text-gray-500";
-            reason = `(Waiting for ${bestCandidate.type.label} trend confirmation)`;
-        } else if (successfulPlaysInHistory > 0 && trendStats.lastSuccessState.length === 0) {
-            signal = 'Wait for Signal';
-            signalColor = "text-gray-500";
-            reason = `(No established trend to confirm)`;
-        } else if (successfulPlaysInHistory < effectiveStrategyConfig.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
-             signal = 'Wait for Signal';
-             signalColor = "text-gray-500";
-             reason = `(Not enough trend history)`;
-        }
-    }
-
-    // --- TABLE CHANGE WARNING OVERRIDE (IF TOGGLED AND APPLICABLE) ---
-    if (useTableChangeWarningsBool && rollingPerformance && rollingPerformance.totalPlaysInWindow >= effectiveStrategyConfig.WARNING_MIN_PLAYS_FOR_EVAL) {
-        let tableChangeDetected = false;
-        let warningReason = '';
-
-        if (rollingPerformance.consecutiveLosses >= effectiveStrategyConfig.WARNING_LOSS_STREAK_THRESHOLD) {
-            tableChangeDetected = true;
-            warningReason = `Consecutive Losses: ${rollingPerformance.consecutiveLosses}`;
-        }
-        
-        if (!tableChangeDetected && rollingPerformance.rollingWinRate < effectiveStrategyConfig.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
-            tableChangeDetected = true;
-            warningReason = `Low Rolling Win Rate: ${rollingPerformance.rollingWinRate.toFixed(1)}%`;
-        }
-
-        if (!tableChangeDetected && factorShiftStatus && factorShiftStatus.factorShiftDetected) {
-            tableChangeDetected = true;
-            warningReason = `Factor Shift: ${factorShiftStatus.reason}`;
-        }
-
-        if (tableChangeDetected) {
-            signal = 'Avoid Play';
-            signalColor = "text-red-700";
-            reason = `(Table Change Warning: ${warningReason})`;
-            let tempDetails = { ...bestCandidate.details, signal: signal, reason: reason };
-            let finalHtmlForAvoid = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${tempDetails.finalScore?.toFixed(2) || 'N/A'}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
+    // Table change warning logic
+    if (useTableChangeWarningsBool && rollingPerformance?.sufficientData) {
+        if (rollingPerformance.currentLossStreak >= current_STRATEGY_CONFIG.WARNING_LOSS_STREAK_THRESHOLD ||
+            rollingPerformance.winRate < current_STRATEGY_CONFIG.WARNING_ROLLING_WIN_RATE_THRESHOLD) {
+            signal = "Avoid Play";
+            reason = `(Table Change Warning: ${rollingPerformance.currentLossStreak} recent losses, ${rollingPerformance.winRate.toFixed(0)}% win rate)`;
             
             return { 
-                html: finalHtmlForAvoid, 
-                bestCandidate: null, 
-                details: tempDetails, 
-                signal: signal, 
-                reason: reason,
-                detailedExplanation: null
+                html: `<span class="text-red-500 font-bold">${signal}</span><br><span class="text-xs text-red-400">${reason}</span>`,
+                bestCandidate, 
+                details: bestCandidate.details, 
+                signal, 
+                reason,
+                detailedExplanation
             };
         }
     }
 
-    // Generate detailed explanation (use AI explanation if available, otherwise generate from data)
-    // NEW: Include sector context in explanation generation
-    let detailedExplanation;
-    if (bestCandidate.details.aiExplanation && isAiReadyBool) {
-        detailedExplanation = bestCandidate.details.aiExplanation;
-        // Supplement with sector context if available
-        if (bestCandidate.details.sectorContext) {
-            detailedExplanation.sectorContext = {
-                description: bestCandidate.details.sectorContext.contextDescription,
-                modifier: bestCandidate.details.sectorConfidenceModifier,
-                dominantSector: bestCandidate.details.sectorContext.dominantSector,
-                dataSource: bestCandidate.details.sectorContext.dataSource
-            };
+    if (useAdaptivePlayBool) {
+        const strongThreshold = useLessStrictBool ? current_STRATEGY_CONFIG.LESS_STRICT_STRONG_PLAY_THRESHOLD : current_STRATEGY_CONFIG.ADAPTIVE_STRONG_PLAY_THRESHOLD;
+        const playThreshold = useLessStrictBool ? current_STRATEGY_CONFIG.LESS_STRICT_PLAY_THRESHOLD : current_STRATEGY_CONFIG.ADAPTIVE_PLAY_THRESHOLD;
+
+        if (finalScore >= strongThreshold) {
+            signal = "Strong Play";
+            scoreLevel = 'high';
+        } else if (finalScore >= playThreshold) {
+            signal = "Play";
+            scoreLevel = 'medium';
+        } else {
+            signal = "Wait";
+            scoreLevel = 'low';
         }
-    } else {
-        // Build sector context data for explanation
-        let sectorContextData = null;
-        if (bestCandidate.details.sectorContext) {
-            sectorContextData = {
-                hasContext: true,
-                contextDescription: bestCandidate.details.sectorContext.contextDescription,
-                confidenceModifier: bestCandidate.details.sectorConfidenceModifier,
-                dominantSector: bestCandidate.details.sectorContext.dominantSector,
-                dataSource: bestCandidate.details.sectorContext.dataSource
-            };
-        }
-        
-        detailedExplanation = generateDetailedExplanation(candidates, bestCandidate, {
-            ...context,
-            sectorContextData
-        });
-    }
 
-    let finalHtml = `<strong class="${signalColor}">${signal}:</strong> Play <strong style="color: ${bestCandidate.type.textColor};">${bestCandidate.type.label}</strong><br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
-    
-    if (signal.includes('Wait') || signal.includes('Avoid')) {
-        finalHtml = `<strong class="${signalColor}">${signal}</strong> <br><span class="text-xs text-gray-600">Final Score: ${bestCandidate.score.toFixed(2)}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
-    }
-
-    // Use useNeighbourFocusBool parameter
-    if (useNeighbourFocusBool && (signal === 'Play' || signal === 'Strong Play')) {
-        const fullPredictionType = allPredictionTypes.find(t => t.id === bestCandidate.type.id);
-        if (fullPredictionType) {
-            const baseNum = fullPredictionType.calculateBase(currentNum1, currentNum2);
-            const terminals = terminalMapping?.[baseNum] || [];
-            const hotNumbers = getHitZone(baseNum, terminals, lastWinningNumber, context.useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel)
-                .map(num => ({num, score: neighbourScores[num]?.success || 0 }))
-                .filter(n => n.score > 0)
-                .sort((a,b) => b.score - a.score)
-                .slice(0,5)
-                .map(n => n.num);
-
-            if (hotNumbers.length > 0) {
-                finalHtml += `<br><span class=\"text-xs text-gray-600\">Focus on hot neighbours: <strong>${hotNumbers.join(', ')}</strong></span>`;
+        // Less strict mode alternative conditions
+        if (useLessStrictBool && signal === "Wait") {
+            if (bestCandidate.details.hitRate >= current_STRATEGY_CONFIG.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD ||
+                bestCandidate.details.currentStreak >= current_STRATEGY_CONFIG.LESS_STRICT_MIN_STREAK) {
+                signal = "Strong Play";
+                scoreLevel = 'high';
+                reason += ' (Less Strict)';
             }
         }
+
+        // Trend confirmation check
+        if (useTrendConfirmationBool && signal !== "Wait") {
+            const lastSuccessState = trendStats.lastSuccessState || [];
+            if (lastSuccessState.length > 0 && !lastSuccessState.includes(bestCandidate.type.id)) {
+                signal = "Wait";
+                scoreLevel = 'low';
+                reason = 'Awaiting trend confirmation';
+            }
+        }
+    } else {
+        // Simple mode
+        if (finalScore >= current_STRATEGY_CONFIG.SIMPLE_PLAY_THRESHOLD) {
+            signal = "Play";
+            scoreLevel = 'medium';
+        } else {
+            signal = "Wait";
+            scoreLevel = 'low';
+        }
+    }
+
+    // Generate HTML output
+    const colorClass = signal === "Strong Play" ? 'text-green-500' : 
+                       signal === "Play" ? 'text-blue-500' : 
+                       signal === "Wait" ? 'text-gray-500' : 'text-red-500';
+    
+    const groupLabel = bestCandidate.type.displayLabel;
+    
+    let htmlOutput = `<span class="${colorClass} font-bold">${signal}: ${groupLabel}</span>`;
+    htmlOutput += `<br><span class="text-xs">${reason}</span>`;
+    
+    if (bestCandidate.details.currentStreak >= 2) {
+        htmlOutput += `<br><span class="text-xs text-green-600">On ${bestCandidate.details.currentStreak}-spin streak</span>`;
     }
 
     return { 
-        html: finalHtml, 
-        bestCandidate: bestCandidate, 
+        html: htmlOutput, 
+        bestCandidate, 
         details: bestCandidate.details, 
-        signal: signal, 
-        reason: reason,
-        detailedExplanation: detailedExplanation
+        signal, 
+        reason,
+        detailedExplanation
     };
+}
+
+/**
+ * Returns an empty pattern match result
+ * Used when pattern matching is disabled or no patterns found
+ */
+export function noPatternMatch() {
+    return { matchedPattern: null, confidence: 0, reason: '' };
 }
