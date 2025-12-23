@@ -447,7 +447,7 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
         }
     }
 
-    // Add number context info if available
+    // Add number context info if available - FOR REFERENCE ONLY
     let numberContextInfo = null;
     if (bestCandidate.details.numberContext && bestCandidate.details.numberContext.hasContext) {
         const numCtx = bestCandidate.details.numberContext;
@@ -455,16 +455,17 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             description: numCtx.contextDescription,
             avgLossStreak: numCtx.avgLossStreak,
             elevatedCount: numCtx.elevatedNumbers?.length || 0,
-            hasApiData: numCtx.hasApiData
+            hasApiData: numCtx.hasApiData,
+            isReferenceOnly: true  // Mark as reference only
         };
         
         if (numCtx.elevatedNumbers && numCtx.elevatedNumbers.length > 0) {
             const elevatedList = numCtx.elevatedNumbers.slice(0, 3).map(e => e.number).join(', ');
-            bullets.push(`Extended numbers in zone: ${elevatedList}`);
+            bullets.push(`[Ref] Extended numbers: ${elevatedList}`);
         }
     }
 
-    // Add sector context info if available (fallback if no number context)
+    // Add sector context info if available (fallback if no number context) - FOR REFERENCE ONLY
     let sectorContextInfo = null;
     if (bestCandidate.details.sectorContext && bestCandidate.details.sectorContext.hasContext) {
         const sectorCtx = bestCandidate.details.sectorContext;
@@ -472,14 +473,15 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             dominantSector: sectorCtx.dominantSector?.name || null,
             dominantSectorLevel: sectorCtx.dominantSector?.severity?.level || 'normal',
             aggregateSeverity: sectorCtx.aggregateSeverity,
-            hasApiData: sectorCtx.hasApiData
+            hasApiData: sectorCtx.hasApiData,
+            isReferenceOnly: true  // Mark as reference only
         };
         
         // Only add sector bullet if we did not already add number context info
         if (!numberContextInfo && sectorCtx.dominantSector) {
             const severity = sectorCtx.dominantSector.severity;
             if (severity && severity.level !== 'normal') {
-                bullets.push(`Sector note: ${severity.description}`);
+                bullets.push(`[Ref] Sector: ${severity.description}`);
             }
         }
     }
@@ -639,13 +641,14 @@ export function getRecommendation(context) {
             if (details.weightedZoneBoostApplied) details.reason.push(`Neighbours`);
         }
 
-        // 5. AI Confidence Score
+        // 5. AI Confidence Score - DISPLAY ONLY, does NOT add to score
+        // AI has shown poor accuracy; displaying for reference without inflating group points
         if (isAiReadyBool && details.mlProbability > 0) {
-            const rawAiPoints = details.mlProbability * current_STRATEGY_CONFIG.aiConfidenceMultiplier;
-            rawScore += rawAiPoints;
-            details.individualScores['High AI Confidence'] = rawAiPoints;
-            details.mlBoostApplied = rawAiPoints > 0;
-            if (rawAiPoints > current_STRATEGY_CONFIG.minAiPointsForReason) details.reason.push(`AI Conf`);
+            // Store for display purposes only - DO NOT add to rawScore
+            details.individualScores['High AI Confidence'] = 0; // Set to 0 for scoring
+            details.mlBoostApplied = false;
+            details.mlProbabilityDisplay = details.mlProbability; // Keep for UI display
+            // Do not add to reason - AI is reference only
         }
 
         // 6. Conditional Probability Score (from API data)
@@ -687,15 +690,13 @@ export function getRecommendation(context) {
             }
         }
         
-        // Apply context confidence modifier (number-level or sector-level)
-        // This is a REDUCTION for high-stress environments, not a boost
+        // Context confidence modifier - DISPLAY ONLY, does NOT adjust score
+        // Historical data is for reference only, not for boosting/penalizing groups
+        // Store context info for UI display but do not modify finalCalculatedScore
         if (details.contextConfidenceModifier < 1.0) {
-            finalCalculatedScore *= details.contextConfidenceModifier;
-            
-            // Add to reason if significant
-            if (details.contextConfidenceModifier < 0.95) {
-                details.reason.push('Context stress');
-            }
+            // Store for display purposes only
+            details.contextStressDisplay = details.contextConfidenceModifier;
+            // Do not add to reason or modify score
         }
 
         details.finalScore = finalCalculatedScore;
