@@ -203,143 +203,241 @@ export function handleClearInputs() {
     dom.number1.value = '';
     dom.number2.value = '';
     dom.winningNumberInput.value = '';
+    dom.resultDisplay.classList.add('hidden');
+    dom.number1.focus();
+    state.setCurrentPendingCalculationId(null);
+
+    if (apiContext.isLivePollingActive()) {
+        apiContext.stopLivePolling();
+        updateApiLiveButtonState(false);
+    }
+
+    drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
     updateMainRecommendationDisplay();
-    console.log("handleClearInputs: Inputs cleared.");
+    hidePatternAlert();
+    console.log("handleClearInputs: Inputs cleared and UI updated.");
 }
 
+export function handleSwap() {
+    console.log("handleSwap: Function started.");
+    const v = dom.number1.value;
+    dom.number1.value = dom.number2.value;
+    dom.number2.value = v;
+    updateMainRecommendationDisplay();
+    console.log("handleSwap: Inputs swapped and UI updated.");
+}
+
+export function handleHistoryAction(event) {
+    console.log("handleHistoryAction: Function started.");
+    const button = event.target.closest('.delete-btn');
+    if (!button) return;
+
+    const deletedId = parseInt(button.dataset.id);
+    const newHistory = state.history.filter(item => item.id !== deletedId);
+    state.setHistory(newHistory);
+
+    if (state.currentPendingCalculationId === deletedId) {
+        state.setCurrentPendingCalculationId(null);
+        console.log(`handleHistoryAction: Cleared currentPendingCalculationId as deleted item (ID: ${deletedId}) was pending.`);
+    }
+
+    const newLog = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
+    state.setConfirmedWinsLog(newLog);
+
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+
+    analysis.runAllAnalyses();
+    renderHistory();
+    updateMainRecommendationDisplay();
+    hidePatternAlert();
+    console.log("handleHistoryAction: History modified and UI updated.");
+}
 
 export function handleClearHistory() {
     console.log("handleClearHistory: Function started.");
     state.setHistory([]);
     state.setConfirmedWinsLog([]);
+    state.setPatternMemory({});
+    state.setAdaptiveFactorInfluences({
+        'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
+        'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
+    });
+    state.setIsAiReady(false);
+    updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
     state.setCurrentPendingCalculationId(null);
-    
-    // Clear API context spin history but preserve settings
+
     apiContext.clearContext();
-    
-    renderHistory();
-    hidePatternAlert();
+
     analysis.runAllAnalyses();
-    dom.number1.value = '';
-    dom.number2.value = '';
-    dom.winningNumberInput.value = '';
+    renderHistory();
+
+    drawRouletteWheel();
+
+    aiWorker.postMessage({ type: 'clear_model' });
+    hidePatternAlert();
     updateMainRecommendationDisplay();
-    console.log("handleClearHistory: History cleared and UI refreshed.");
+    
+    addTrainingLogEntry('info', 'History cleared. AI model reset.');
+    
+    console.log("handleClearHistory: History cleared and UI updated.");
 }
 
-// --- API HANDLERS ---
-
-function autoFillTerminalCalculatorFromHistory(spins) {
-    // spins is newest-first from API
-    if (spins.length >= 2) {
-        dom.number1.value = spins[1]; // Second newest
-        dom.number2.value = spins[0]; // Newest
+export function handlePresetSelection(presetName) {
+    console.log(`handlePresetSelection: Applying preset ${presetName}.`);
+    const preset = config.STRATEGY_PRESETS[presetName];
+    if (!preset) {
+        console.error(`Preset "${presetName}" not found.`);
+        return;
     }
+
+    Object.assign(config.STRATEGY_CONFIG, preset.STRATEGY_CONFIG);
+    Object.assign(config.ADAPTIVE_LEARNING_RATES, preset.ADAPTIVE_LEARNING_RATES);
+    state.setToggles(preset.TOGGLES);
+
+    updateAllTogglesUI();
+    initializeAdvancedSettingsUI();
+    analysis.updateActivePredictionTypes();
+    analysis.handleStrategyChange();
+    hidePatternAlert();
+    updateMainRecommendationDisplay();
+    console.log(`handlePresetSelection: Preset ${presetName} applied and UI updated.`);
 }
 
-async function handleApiProviderChange() {
-    const provider = dom.apiProviderSelect.value;
+export function resetAllParameters() {
+    console.log("resetAllParameters: Function started.");
+    Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
+    Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
+    state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
+    updateAllTogglesUI();
+    initializeAdvancedSettingsUI();
+    dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
+    analysis.handleStrategyChange();
+    hidePatternAlert();
+    updateMainRecommendationDisplay();
+    console.log("resetAllParameters: Parameters reset and UI updated.");
+}
+
+export function saveParametersToFile() {
+    console.log("saveParametersToFile: Function started.");
+    const parametersToSave = {
+        STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
+        TOGGLES: {
+            useTrendConfirmation: state.useTrendConfirmation, useWeightedZone: state.useWeightedZone,
+            useProximityBoost: state.useProximityBoost, usePocketDistance: state.usePocketDistance,
+            useLowestPocketDistance: state.useLowestPocketDistance, useAdvancedCalculations: state.useAdvancedCalculations,
+            useDynamicStrategy: state.useDynamicStrategy, useAdaptivePlay: state.useAdaptivePlay,
+            useTableChangeWarnings: state.useTableChangeWarnings, useDueForHit: state.useDueForHit,
+            useNeighbourFocus: state.useNeighbourFocus, useLessStrict: state.useLessStrict,
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount
+        }
+    };
+    const dataStr = JSON.stringify(parametersToSave, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'roulette_parameters.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    dom.parameterStatusMessage.textContent = 'Parameters saved.';
+    console.log("saveParametersToFile: Parameters saved.");
+}
+
+export function loadParametersFromFile(event) {
+    console.log("loadParametersFromFile: Function started.");
+    const file = event.target.files[0];
+    if (!file) {
+        console.log("loadParametersFromFile: No file selected.");
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const loaded = JSON.parse(e.target.result);
+            if (loaded.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, loaded.STRATEGY_CONFIG);
+            if (loaded.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, loaded.ADAPTIVE_LEARNING_RATES);
+            if (loaded.TOGGLES) state.setToggles(loaded.TOGGLES);
+            updateAllTogglesUI();
+            initializeAdvancedSettingsUI();
+            dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
+            analysis.handleStrategyChange();
+        } catch (error) {
+            dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
+            console.error("loadParametersFromFile: Error loading parameters:", error);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+    hidePatternAlert();
+    updateMainRecommendationDisplay();
+    console.log("loadParametersFromFile: File processed and UI updated.");
+}
+
+// --- API EVENT HANDLERS ---
+
+function autoFillTerminalCalculatorFromHistory(history) {
+    if (!history || history.length < 2) return;
+
+    // history[0] is the latest spin, history[1] is the previous spin
+    dom.number1.value = history[1];
+    dom.number2.value = history[0];
+
+    console.log(`Auto-filling terminal: num1=${dom.number1.value}, num2=${dom.number2.value}`);
+    handleNewCalculation(true);
+}
+
+/**
+ * Updates the historical data indicator UI element
+ * @param {Object|null} status - Data source status object or null to reset
+ */
+function updateHistoricalDataIndicator(status) {
+    const indicator = document.getElementById('historicalDataIndicator');
+    if (!indicator) return;
     
-    dom.apiTableSelect.innerHTML = '<option value="">Loading tables...</option>';
-    dom.apiTableSelect.disabled = true;
-    dom.apiLiveButton.disabled = true;
-    dom.apiRefreshButton.disabled = true;
-    dom.apiLoadHistoryButton.disabled = true;
-    dom.apiAutoToggle.disabled = true;
-    dom.apiStatusMessage.textContent = 'Loading tables...';
-    
-    if (!provider) {
-        dom.apiTableSelect.innerHTML = '<option value="">Select Provider First</option>';
-        dom.apiStatusMessage.textContent = 'Select a provider to begin';
-        updateHistoricalDataIndicator(null);
+    if (!status || status.status === 'not_initialized' || status.status === 'defaults') {
+        indicator.innerHTML = `
+            <div class="flex items-center text-gray-400">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span class="text-xs">Historical data: Not loaded</span>
+            </div>
+        `;
+        indicator.className = 'historical-data-indicator p-3 rounded-lg border bg-gray-50 border-gray-200';
         return;
     }
     
-    try {
-        const apiResponse = await winspinApi.fetchRouletteData(provider);
-        const tables = winspinApi.extractTableNames(apiResponse);
-        
-        if (tables.length === 0) {
-            dom.apiTableSelect.innerHTML = '<option value="">No tables found</option>';
-            dom.apiStatusMessage.textContent = 'No tables available for this provider';
-            return;
-        }
-        
-        dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
-        tables.forEach(table => {
-            const option = document.createElement('option');
-            option.value = table.name;
-            option.textContent = table.name;
-            dom.apiTableSelect.appendChild(option);
-        });
-        
-        dom.apiTableSelect.disabled = false;
-        dom.apiStatusMessage.textContent = `Found ${tables.length} tables. Select one to continue.`;
-        
-    } catch (error) {
-        dom.apiTableSelect.innerHTML = '<option value="">Error loading tables</option>';
-        dom.apiStatusMessage.textContent = `Error: ${error.message}`;
-        console.error('Error loading tables:', error);
-    }
-}
-
-function handleApiTableChange() {
-    const provider = dom.apiProviderSelect.value;
-    const tableName = dom.apiTableSelect.value;
+    let bgColor, borderColor, textColor, icon;
     
-    if (provider && tableName) {
-        apiContext.setContext(provider, tableName);
-        dom.apiLiveButton.disabled = false;
-        dom.apiRefreshButton.disabled = false;
-        dom.apiLoadHistoryButton.disabled = false;
-        dom.apiAutoToggle.disabled = false;
-        dom.apiStatusMessage.textContent = `Selected: ${tableName}`;
+    if (status.isApiCalibrated && status.confidence === 'high') {
+        bgColor = 'bg-green-50';
+        borderColor = 'border-green-200';
+        textColor = 'text-green-700';
+        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>`;
+    } else if (status.isApiCalibrated) {
+        bgColor = 'bg-blue-50';
+        borderColor = 'border-blue-200';
+        textColor = 'text-blue-700';
+        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>`;
     } else {
-        dom.apiLiveButton.disabled = true;
-        dom.apiRefreshButton.disabled = true;
-        dom.apiLoadHistoryButton.disabled = true;
-        dom.apiAutoToggle.disabled = true;
-        updateHistoricalDataIndicator(null);
+        bgColor = 'bg-yellow-50';
+        borderColor = 'border-yellow-200';
+        textColor = 'text-yellow-700';
+        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.001c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001c-.77 1.332.192 2.999 1.732 2.999z"></path>`;
     }
-}
-
-function handleApiAutoToggle() {
-    const isEnabled = dom.apiAutoToggle.checked;
-    apiContext.setAutoMode(isEnabled);
     
-    // Disable manual input fields when auto mode is on
-    dom.number1.disabled = isEnabled;
-    dom.number2.disabled = isEnabled;
-    dom.winningNumberInput.disabled = isEnabled;
-    dom.calculateButton.disabled = isEnabled;
-    dom.submitResultButton.disabled = isEnabled;
-    
-    if (isEnabled) {
-        dom.apiStatusMessage.textContent = 'Auto mode enabled - API is input source';
-        addTrainingLogEntry('info', 'Auto mode enabled - manual input disabled');
-    } else {
-        apiContext.stopLivePolling();
-        updateApiLiveButtonState(false);
-        dom.apiStatusMessage.textContent = 'Auto mode disabled - manual input enabled';
-        addTrainingLogEntry('info', 'Auto mode disabled - manual input enabled');
-    }
-}
-
-async function handleApiLiveToggle() {
-    if (apiContext.isPolling()) {
-        apiContext.stopLivePolling();
-        updateApiLiveButtonState(false);
-        dom.apiStatusMessage.textContent = 'Live polling stopped';
-    } else {
-        updateApiLiveButtonState(true);
-        dom.apiStatusMessage.textContent = 'Starting live polling...';
-        
-        // Do an immediate refresh first
-        await handleApiRefresh();
-        
-        // Start polling
-        apiContext.startLivePolling(handleApiRefresh);
-    }
+    indicator.innerHTML = `
+        <div class="flex items-center ${textColor}">
+            <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                ${icon}
+            </svg>
+            <div>
+                <span class="text-xs font-semibold">${status.label}</span>
+                <span class="text-xs block">${status.description}</span>
+            </div>
+        </div>
+    `;
+    indicator.className = `historical-data-indicator p-3 rounded-lg border ${bgColor} ${borderColor}`;
 }
 
 async function handleApiRefresh() {
@@ -366,7 +464,7 @@ async function handleApiRefresh() {
         const numberLosses = winspinApi.getNumberLosses(apiResponse, tableName);
         if (numberLosses) {
             apiContext.updateNumberContext(numberLosses);
-            addTrainingLogEntry('info', `Number context updated (${numberLosses.dataQuality})`);
+            console.log('[API Refresh] Number context updated:', numberLosses.dataQuality);
         }
         
         // Update historical data indicator
@@ -374,8 +472,8 @@ async function handleApiRefresh() {
         
         const latestSpin = winspinApi.getLatestSpin(apiResponse, tableName);
         
-        if (!latestSpin) {
-            dom.apiStatusMessage.textContent = 'No spin data available for this table.';
+        if (latestSpin === null) {
+            dom.apiStatusMessage.textContent = 'No spins available for this table.';
             return;
         }
         
@@ -520,60 +618,6 @@ async function handleApiLoadHistory() {
         console.error('Error loading history:', error);
         addTrainingLogEntry('error', `API history load failed: ${error.message}`);
     }
-}
-
-/**
- * Updates the historical data indicator UI element
- * @param {Object|null} status - Data source status object or null to reset
- */
-function updateHistoricalDataIndicator(status) {
-    const indicator = document.getElementById('historicalDataIndicator');
-    if (!indicator) return;
-    
-    if (!status || status.status === 'not_initialized' || status.status === 'defaults') {
-        indicator.innerHTML = `
-            <div class="flex items-center text-gray-400">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <span class="text-xs">Historical data: Not loaded</span>
-            </div>
-        `;
-        indicator.className = 'historical-data-indicator p-3 rounded-lg border bg-gray-50 border-gray-200';
-        return;
-    }
-    
-    let bgColor, borderColor, textColor, icon;
-    
-    if (status.isApiCalibrated && status.confidence === 'high') {
-        bgColor = 'bg-green-50';
-        borderColor = 'border-green-200';
-        textColor = 'text-green-700';
-        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>`;
-    } else if (status.isApiCalibrated) {
-        bgColor = 'bg-blue-50';
-        borderColor = 'border-blue-200';
-        textColor = 'text-blue-700';
-        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>`;
-    } else {
-        bgColor = 'bg-yellow-50';
-        borderColor = 'border-yellow-200';
-        textColor = 'text-yellow-700';
-        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.001c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001c-.77 1.332.192 2.999 1.732 2.999z"></path>`;
-    }
-    
-    indicator.innerHTML = `
-        <div class="flex items-center ${textColor}">
-            <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                ${icon}
-            </svg>
-            <div>
-                <span class="text-xs font-semibold">${status.label}</span>
-                <span class="text-xs block">${status.description}</span>
-            </div>
-        </div>
-    `;
-    indicator.className = `historical-data-indicator p-3 rounded-lg border ${bgColor} ${borderColor}`;
 }
 
 async function processApiSpin(spin) {
@@ -732,184 +776,441 @@ function runSimulationOnHistory(spinsToProcess) {
         };
         
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-        
         localHistory.push(newHistoryItem);
-        if (newHistoryItem.winningNumber !== null) {
-            localConfirmedWinsLog.push(newHistoryItem.winningNumber);
+        
+        if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
+            const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
+            const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+            
+            if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
+            
+            if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
+                localAdaptiveFactorInfluences[primaryFactor] = Math.min(
+                    config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE,
+                    localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)
+                );
+            } else {
+                localAdaptiveFactorInfluences[primaryFactor] = Math.max(
+                    config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
+                    localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)
+                );
+            }
+        }
+        
+        if (winningNumber !== null) {
+            localConfirmedWinsLog.push(winningNumber);
         }
     }
     
     return localHistory;
 }
 
-// --- TOGGLE HANDLERS ---
-
-function handleTrendConfirmationToggle() {
-    state.useTrendConfirmation = dom.trendConfirmationToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleWeightedZoneToggle() {
-    state.useWeightedZone = dom.weightedZoneToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleProximityBoostToggle() {
-    state.useProximityBoost = dom.proximityBoostToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handlePocketDistanceToggle() {
-    state.usePocketDistance = dom.pocketDistanceToggle.checked;
-    renderHistory();
-}
-
-function handleLowestPocketDistanceToggle() {
-    state.useLowestPocketDistance = dom.lowestPocketDistanceToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleAdvancedCalculationsToggle() {
-    state.useAdvancedCalculations = dom.advancedCalculationsToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleDynamicStrategyToggle() {
-    state.useDynamicStrategy = dom.dynamicStrategyToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleAdaptivePlayToggle() {
-    state.useAdaptivePlay = dom.adaptivePlayToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleTableChangeWarningsToggle() {
-    state.useTableChangeWarnings = dom.tableChangeWarningsToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleDueForHitToggle() {
-    state.useDueForHit = dom.dueForHitToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleNeighbourFocusToggle() {
-    state.useNeighbourFocus = dom.neighbourFocusToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleLessStrictModeToggle() {
-    state.useLessStrict = dom.lessStrictModeToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-function handleDynamicTerminalNeighbourCountToggle() {
-    state.useDynamicTerminalNeighbourCount = dom.dynamicTerminalNeighbourCountToggle.checked;
-    analysis.handleStrategyChange();
-}
-
-// --- OPTIMIZER EVENT HANDLERS ---
-
-function handleStartOptimization() {
-    console.log("handleStartOptimization: Starting optimization.");
+function startLivePolling() {
+    apiContext.stopLivePolling();
     
-    if (state.history.filter(item => item.winningNumber !== null).length < 10) {
-        alert('Need at least 10 confirmed spins in history to run optimization.');
-        return;
-    }
+    handleApiRefresh();
     
-    const winningNumbers = state.history
-        .filter(item => item.winningNumber !== null)
-        .sort((a, b) => a.id - b.id)
-        .map(item => item.winningNumber);
+    const intervalId = setInterval(async () => {
+        await handleApiRefresh();
+    }, 2500);
     
-    dom.startOptimizationButton.disabled = true;
-    dom.stopOptimizationButton.disabled = false;
-    toggleParameterSliders(false);
-    
-    updateOptimizationStatus('Initializing...');
-    
-    optimizationWorker.postMessage({
-        type: 'start',
-        payload: {
-            winningNumbers: winningNumbers,
-            config: {
-                STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-                ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
-                GA_CONFIG: config.GA_CONFIG
-            },
-            toggles: {
-                useTrendConfirmation: state.useTrendConfirmation,
-                useWeightedZone: state.useWeightedZone,
-                useProximityBoost: state.useProximityBoost,
-                useNeighbourFocus: state.useNeighbourFocus,
-                useAdaptivePlay: state.useAdaptivePlay,
-                useLessStrict: state.useLessStrict,
-                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
-                useLowestPocketDistance: state.useLowestPocketDistance
-            },
-            activeTypeIds: state.activePredictionTypes.map(t => t.id),
-            clonablePredictionTypes: config.clonablePredictionTypes,
-            terminalMapping: config.terminalMapping,
-            rouletteWheel: config.rouletteWheel
+    apiContext.setLivePollingInterval(intervalId);
+}
+
+// --- LISTENER ATTACHMENT FUNCTIONS ---
+
+export function attachMainActionListeners() {
+    document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
+    document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
+
+    document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
+    document.getElementById('swapButton').addEventListener('click', handleSwap);
+    document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
+    dom.historyList.addEventListener('click', handleHistoryAction);
+
+    [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            console.log("Enter key pressed in number input. Triggering handleNewCalculation.");
+            handleNewCalculation();
+        }
+    }));
+
+    dom.winningNumberInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            console.log("Enter key pressed in winning number input. Triggering handleSubmitResult.");
+            handleSubmitResult();
         }
     });
 }
 
-function handleStopOptimization() {
-    console.log("handleStopOptimization: Stopping optimization.");
-    optimizationWorker.postMessage({ type: 'stop' });
-    
-    dom.startOptimizationButton.disabled = false;
-    dom.stopOptimizationButton.disabled = true;
-    toggleParameterSliders(true);
-    
-    showOptimizationStopped();
+export function attachOptimizationButtonListeners() {
+    // Worker handler for optimization progress/completion
+    optimizationWorker.onmessage = function (e) {
+        const { type, payload } = e.data;
+        if (type === 'progress') {
+            const progressHtml = payload.message || 'Optimizing...';
+            updateOptimizationStatus(progressHtml);
+            state.setBestFoundParams(payload);
+            if (payload.debugMetrics) {
+                updateOptimizerDebugPanel(payload.debugMetrics);
+            }
+        } else if (type === 'complete') {
+            showOptimizationComplete(payload);
+            state.setBestFoundParams(payload);
+            if (payload.debugMetrics) {
+                updateOptimizerDebugPanel(payload.debugMetrics);
+            }
+        }
+    };
+
+    if (dom.startOptimizationButton) {
+        dom.startOptimizationButton.addEventListener('click', () => {
+            console.log("Start Optimization button clicked.");
+            if (state.history.length < 20) {
+                updateOptimizationStatus('Error: Need at least 20 history items.');
+                return;
+            }
+            updateOptimizationStatus('Starting optimization...');
+            dom.optimizationResult.classList.add('hidden');
+            toggleParameterSliders(false);
+            dom.startOptimizationButton.disabled = true;
+            dom.stopOptimizationButton.disabled = false;
+
+            const togglesForWorker = {
+                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+                useProximityBoost: state.useProximityBoost,
+                useWeightedZone: state.useWeightedZone,
+                useNeighbourFocus: state.useNeighbourFocus,
+                useTrendConfirmation: state.useTrendConfirmation,
+                usePocketDistance: state.usePocketDistance,
+                useLowestPocketDistance: state.useLowestPocketDistance,
+                useAdvancedCalculations: state.useAdvancedCalculations,
+                useDynamicStrategy: state.useDynamicStrategy,
+                useAdaptivePlay: state.useAdaptivePlay,
+                useTableChangeWarnings: state.useTableChangeWarnings,
+                useDueForHit: state.useDueForHit,
+                useLessStrict: state.useLessStrict
+            };
+
+            optimizationWorker.postMessage({
+                type: 'start',
+                payload: {
+                    history: state.history,
+                    terminalMapping: config.terminalMapping,
+                    rouletteWheel: config.rouletteWheel,
+                    GA_CONFIG: config.GA_CONFIG,
+                    toggles: togglesForWorker,
+                    optimizeCategories: {
+                        coreStrategy: dom.optimizeCoreStrategyToggle.checked,
+                        adaptiveRates: dom.optimizeAdaptiveRatesToggle.checked
+                    }
+                }
+            });
+        });
+    }
+
+    if (dom.stopOptimizationButton) {
+        dom.stopOptimizationButton.addEventListener('click', () => {
+            console.log("Stop Optimization button clicked.");
+            optimizationWorker.postMessage({ type: 'stop' });
+        });
+    }
+
+    if (dom.applyBestParamsButton) {
+        dom.applyBestParamsButton.addEventListener('click', () => {
+            console.log("Apply Best Params button clicked.");
+            const bestFoundParams = state.bestFoundParams;
+            if (bestFoundParams && bestFoundParams.params) {
+                const params = bestFoundParams.params;
+                const toggles = bestFoundParams.toggles;
+                
+                Object.assign(config.STRATEGY_CONFIG, {
+                    decayFactor: params.decayFactor, hitRateThreshold: params.hitRateThreshold,
+                    hitRateMultiplier: params.hitRateMultiplier, streakMultiplier: params.streakMultiplier,
+                    maxStreakPoints: params.maxStreakPoints, proximityMaxDistance: params.proximityMaxDistance,
+                    proximityMultiplier: params.proximityMultiplier, neighbourMultiplier: params.neighbourMultiplier,
+                    maxNeighbourPoints: params.maxNeighbourPoints, aiConfidenceMultiplier: params.aiConfidenceMultiplier,
+                    minAiPointsForReason: params.minAiPointsForReason, conditionalProbMultiplier: params.conditionalProbMultiplier,
+                    minConditionalSampleSize: params.minConditionalSampleSize,
+                    ADAPTIVE_STRONG_PLAY_THRESHOLD: params.ADAPTIVE_STRONG_PLAY_THRESHOLD,
+                    ADAPTIVE_PLAY_THRESHOLD: params.ADAPTIVE_PLAY_THRESHOLD,
+                    SIMPLE_PLAY_THRESHOLD: params.SIMPLE_PLAY_THRESHOLD,
+                    LESS_STRICT_STRONG_PLAY_THRESHOLD: params.LESS_STRICT_STRONG_PLAY_THRESHOLD,
+                    LESS_STRICT_PLAY_THRESHOLD: params.LESS_STRICT_PLAY_THRESHOLD,
+                    LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: params.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
+                    LESS_STRICT_MIN_STREAK: params.LESS_STRICT_MIN_STREAK,
+                    WARNING_ROLLING_WINDOW_SIZE: params.WARNING_ROLLING_WINDOW_SIZE,
+                    WARNING_MIN_PLAYS_FOR_EVAL: params.WARNING_MIN_PLAYS_FOR_EVAL,
+                    WARNING_LOSS_STREAK_THRESHOLD: params.WARNING_LOSS_STREAK_THRESHOLD,
+                    WARNING_ROLLING_WIN_RATE_THRESHOLD: params.WARNING_ROLLING_WIN_RATE_THRESHOLD,
+                    DEFAULT_AVERAGE_WIN_RATE: params.DEFAULT_AVERAGE_WIN_RATE,
+                    LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: params.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
+                    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: params.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER,
+                    WARNING_FACTOR_SHIFT_WINDOW_SIZE: params.WARNING_FACTOR_SHIFT_WINDOW_SIZE,
+                    WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: params.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD,
+                    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: params.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT
+                });
+                Object.assign(config.ADAPTIVE_LEARNING_RATES, {
+                    SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
+                    MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence,
+                    FORGET_FACTOR: params.FORGET_FACTOR,
+                    CONFIDENCE_WEIGHTING_MULTIPLIER: params.CONFIDENCE_WEIGHTING_MULTIPLIER,
+                    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: params.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
+                });
+
+                if (toggles) {
+                    state.setToggles(toggles);
+                    updateAllTogglesUI();
+                    analysis.updateActivePredictionTypes();
+                }
+
+                initializeAdvancedSettingsUI();
+                updateOptimizationStatus('Best parameters applied!');
+                analysis.handleStrategyChange();
+                hidePatternAlert();
+                updateMainRecommendationDisplay();
+            }
+            console.log("Apply Best Params: Settings applied and UI updated.");
+        });
+    }
+
+    // Debug panel toggle
+    if (dom.optimizerDebugToggle || dom.optimizerDebugHeader) {
+        const toggleElement = dom.optimizerDebugToggle || dom.optimizerDebugHeader;
+        toggleElement.addEventListener('click', () => {
+            if (dom.optimizerDebugContent) {
+                dom.optimizerDebugContent.classList.toggle('open');
+                if (dom.optimizerDebugToggle) {
+                    const isOpen = dom.optimizerDebugContent.classList.contains('open');
+                    dom.optimizerDebugToggle.textContent = isOpen ? 'Hide Debug ^' : 'Show Debug v';
+                }
+            }
+        });
+    }
 }
 
-// --- INITIALIZATION ---
+export function attachToggleListeners() {
+    const toggles = {
+        trendConfirmationToggle: 'useTrendConfirmation', weightedZoneToggle: 'useWeightedZone',
+        proximityBoostToggle: 'useProximityBoost', pocketDistanceToggle: 'usePocketDistance',
+        lowestPocketDistanceToggle: 'useLowestPocketDistance', advancedCalculationsToggle: 'useAdvancedCalculations',
+        dynamicStrategyToggle: 'useDynamicStrategy', adaptivePlayToggle: 'useAdaptivePlay',
+        tableChangeWarningsToggle: 'useTableChangeWarnings', dueForHitToggle: 'useDueForHit',
+        neighbourFocusToggle: 'useNeighbourFocus', lessStrictModeToggle: 'useLessStrict',
+        dynamicTerminalNeighbourCountToggle: 'useDynamicTerminalNeighbourCount'
+    };
 
-export function initializeEventListeners() {
-    // Main calculator buttons
-    if (dom.calculateButton) dom.calculateButton.addEventListener('click', () => handleNewCalculation(false));
-    if (dom.submitResultButton) dom.submitResultButton.addEventListener('click', handleSubmitResult);
-    if (dom.clearInputsButton) dom.clearInputsButton.addEventListener('click', handleClearInputs);
-    if (dom.clearHistoryButton) dom.clearHistoryButton.addEventListener('click', handleClearHistory);
+    for (const [toggleId, stateKey] of Object.entries(toggles)) {
+        dom[toggleId].addEventListener('change', () => {
+            console.log(`Toggle '${toggleId}' changed.`);
+            const newToggleStates = { 
+                useTrendConfirmation: state.useTrendConfirmation,
+                useWeightedZone: state.useWeightedZone,
+                useProximityBoost: state.useProximityBoost,
+                usePocketDistance: state.usePocketDistance,
+                useLowestPocketDistance: state.useLowestPocketDistance,
+                useAdvancedCalculations: state.useAdvancedCalculations,
+                useDynamicStrategy: state.useDynamicStrategy,
+                useAdaptivePlay: state.useAdaptivePlay,
+                useTableChangeWarnings: state.useTableChangeWarnings,
+                useDueForHit: state.useDueForHit,
+                useNeighbourFocus: state.useNeighbourFocus,
+                useLessStrict: state.useLessStrict,
+                useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount
+            };
+            newToggleStates[stateKey] = dom[toggleId].checked;
+            state.setToggles(newToggleStates);
+            state.saveState();
+
+            if (stateKey === 'useAdvancedCalculations') {
+                analysis.updateActivePredictionTypes();
+            }
+
+            if (stateKey === 'usePocketDistance') {
+                renderHistory();
+            } else {
+                analysis.handleStrategyChange();
+                const num1Val = parseInt(dom.number1.value, 10);
+                const num2Val = parseInt(document.getElementById('number2').value, 10);
+                const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
+                drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
+            }
+            hidePatternAlert();
+            updateMainRecommendationDisplay();
+            console.log(`Toggle '${toggleId}' change processed and UI updated.`);
+        });
+    }
+}
+
+export function attachAdvancedSettingsListeners() {
+    dom.resetParametersButton.addEventListener('click', resetAllParameters);
+    dom.saveParametersButton.addEventListener('click', saveParametersToFile);
+    dom.loadParametersInput.addEventListener('change', loadParametersFromFile);
+
+    dom.optimizeCoreStrategyToggle.addEventListener('change', () => toggleParameterSliders(true));
+    dom.optimizeAdaptiveRatesToggle.addEventListener('change', () => toggleParameterSliders(true));
+}
+
+export function attachTrainingListeners() {
+    // Train AI button handler
+    if (dom.trainAiButton) {
+        dom.trainAiButton.addEventListener('click', () => {
+            analysis.handleTrainFromHistory();
+        });
+    }
     
-    // Train AI button
-    if (dom.trainAiButton) dom.trainAiButton.addEventListener('click', analysis.handleTrainFromHistory);
+    // Training log toggle
+    if (dom.trainingLogToggle || dom.trainingLogHeader) {
+        const toggleElement = dom.trainingLogToggle || dom.trainingLogHeader;
+        toggleElement.addEventListener('click', toggleTrainingLog);
+    }
     
-    // Toggles
-    if (dom.trendConfirmationToggle) dom.trendConfirmationToggle.addEventListener('change', handleTrendConfirmationToggle);
-    if (dom.weightedZoneToggle) dom.weightedZoneToggle.addEventListener('change', handleWeightedZoneToggle);
-    if (dom.proximityBoostToggle) dom.proximityBoostToggle.addEventListener('change', handleProximityBoostToggle);
-    if (dom.pocketDistanceToggle) dom.pocketDistanceToggle.addEventListener('change', handlePocketDistanceToggle);
-    if (dom.lowestPocketDistanceToggle) dom.lowestPocketDistanceToggle.addEventListener('change', handleLowestPocketDistanceToggle);
-    if (dom.advancedCalculationsToggle) dom.advancedCalculationsToggle.addEventListener('change', handleAdvancedCalculationsToggle);
-    if (dom.dynamicStrategyToggle) dom.dynamicStrategyToggle.addEventListener('change', handleDynamicStrategyToggle);
-    if (dom.adaptivePlayToggle) dom.adaptivePlayToggle.addEventListener('change', handleAdaptivePlayToggle);
-    if (dom.tableChangeWarningsToggle) dom.tableChangeWarningsToggle.addEventListener('change', handleTableChangeWarningsToggle);
-    if (dom.dueForHitToggle) dom.dueForHitToggle.addEventListener('change', handleDueForHitToggle);
-    if (dom.neighbourFocusToggle) dom.neighbourFocusToggle.addEventListener('change', handleNeighbourFocusToggle);
-    if (dom.lessStrictModeToggle) dom.lessStrictModeToggle.addEventListener('change', handleLessStrictModeToggle);
-    if (dom.dynamicTerminalNeighbourCountToggle) dom.dynamicTerminalNeighbourCountToggle.addEventListener('change', handleDynamicTerminalNeighbourCountToggle);
+    // Clear training log button
+    if (dom.clearTrainingLogButton) {
+        dom.clearTrainingLogButton.addEventListener('click', () => {
+            clearTrainingLog();
+            addTrainingLogEntry('info', 'Log cleared');
+        });
+    }
+}
+
+export function attachGuideAndInfoListeners() {
+    document.getElementById('baseStrategyGuideHeader').addEventListener('click', () => toggleGuide('baseStrategyGuideContent'));
+    document.getElementById('advancedStrategyGuideHeader').addEventListener('click', () => toggleGuide('advancedStrategyGuideContent'));
+    document.getElementById('advancedSettingsHeader').addEventListener('click', () => toggleGuide('advancedSettingsContent'));
+
+    if(dom.historyInfoToggle) {
+        dom.historyInfoToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dom.historyInfoDropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!dom.historyInfoToggle.contains(e.target) && !dom.historyInfoDropdown.contains(e.target)) {
+                dom.historyInfoDropdown.classList.add('hidden');
+            }
+        });
+    }
+}
+
+export function attachApiEventHandlers() {
+    if (dom.apiProviderSelect) {
+        dom.apiProviderSelect.addEventListener('change', async () => {
+            const provider = dom.apiProviderSelect.value;
+            
+            dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
+            dom.apiTableSelect.disabled = true;
+            dom.apiAutoToggle.disabled = true;
+            dom.apiLiveButton.disabled = true;
+            dom.apiRefreshButton.disabled = true;
+            dom.apiLoadHistoryButton.disabled = true;
+            apiContext.stopLivePolling();
+            updateApiLiveButtonState(false);
+            updateHistoricalDataIndicator(null);
+            
+            if (!provider) {
+                dom.apiStatusMessage.textContent = '';
+                return;
+            }
+            
+            dom.apiStatusMessage.textContent = 'Loading tables...';
+            try {
+                const apiResponse = await winspinApi.fetchRouletteData(provider);
+                apiContext.setLastApiResponse(apiResponse);
+                
+                const tables = winspinApi.extractTableNames(apiResponse);
+                
+                if (tables.length === 0) {
+                    dom.apiStatusMessage.textContent = 'No tables found for this provider.';
+                    return;
+                }
+                
+                tables.forEach(table => {
+                    const option = document.createElement('option');
+                    option.value = table.name;
+                    option.textContent = table.name.replace(/_/g, ' ');
+                    dom.apiTableSelect.appendChild(option);
+                });
+                
+                dom.apiTableSelect.disabled = false;
+                dom.apiStatusMessage.textContent = `${tables.length} table(s) available.`;
+            } catch (error) {
+                dom.apiStatusMessage.textContent = `Error: ${error.message}`;
+                console.error('Error loading tables:', error);
+            }
+        });
+    }
     
-    // API panel
-    if (dom.apiProviderSelect) dom.apiProviderSelect.addEventListener('change', handleApiProviderChange);
-    if (dom.apiTableSelect) dom.apiTableSelect.addEventListener('change', handleApiTableChange);
-    if (dom.apiAutoToggle) dom.apiAutoToggle.addEventListener('change', handleApiAutoToggle);
-    if (dom.apiLiveButton) dom.apiLiveButton.addEventListener('click', handleApiLiveToggle);
-    if (dom.apiRefreshButton) dom.apiRefreshButton.addEventListener('click', handleApiRefresh);
-    if (dom.apiLoadHistoryButton) dom.apiLoadHistoryButton.addEventListener('click', handleApiLoadHistory);
+    if (dom.apiTableSelect) {
+        dom.apiTableSelect.addEventListener('change', () => {
+            const provider = dom.apiProviderSelect.value;
+            const tableName = dom.apiTableSelect.value;
+            
+            if (!provider || !tableName) {
+                dom.apiAutoToggle.disabled = true;
+                dom.apiLiveButton.disabled = true;
+                dom.apiRefreshButton.disabled = true;
+                dom.apiLoadHistoryButton.disabled = true;
+                updateHistoricalDataIndicator(null);
+                return;
+            }
+            
+            apiContext.setContext(provider, tableName);
+            
+            dom.apiAutoToggle.disabled = false;
+            dom.apiRefreshButton.disabled = false;
+            dom.apiLoadHistoryButton.disabled = false;
+            
+            if (apiContext.isAutoModeEnabled()) {
+                dom.apiLiveButton.disabled = false;
+            }
+            
+            dom.apiStatusMessage.textContent = `Table "${tableName}" selected.`;
+        });
+    }
     
-    // Optimizer
-    if (dom.startOptimizationButton) dom.startOptimizationButton.addEventListener('click', handleStartOptimization);
-    if (dom.stopOptimizationButton) dom.stopOptimizationButton.addEventListener('click', handleStopOptimization);
+    if (dom.apiAutoToggle) {
+        dom.apiAutoToggle.addEventListener('change', () => {
+            const isAutoEnabled = dom.apiAutoToggle.checked;
+            apiContext.setAutoMode(isAutoEnabled);
+            
+            if (isAutoEnabled) {
+                const tableName = dom.apiTableSelect.value;
+                if (tableName) {
+                    dom.apiLiveButton.disabled = false;
+                }
+                dom.apiStatusMessage.textContent = 'Auto mode enabled. API is now the input source.';
+            } else {
+                dom.apiLiveButton.disabled = true;
+                apiContext.stopLivePolling();
+                updateApiLiveButtonState(false);
+                dom.apiStatusMessage.textContent = 'Auto mode disabled. Manual input resumed.';
+            }
+        });
+    }
     
-    // Training log
-    if (dom.trainingLogToggle) dom.trainingLogToggle.addEventListener('click', toggleTrainingLog);
-    if (dom.clearTrainingLogButton) dom.clearTrainingLogButton.addEventListener('click', clearTrainingLog);
+    if (dom.apiLiveButton) {
+        dom.apiLiveButton.addEventListener('click', () => {
+            if (apiContext.isLivePollingActive()) {
+                apiContext.stopLivePolling();
+                updateApiLiveButtonState(false);
+                dom.apiStatusMessage.textContent = 'Live polling stopped.';
+            } else {
+                startLivePolling();
+                updateApiLiveButtonState(true);
+                dom.apiStatusMessage.textContent = 'Live polling started (every 2-3 seconds).';
+            }
+        });
+    }
     
-    console.log("initializeEventListeners: All event listeners attached.");
+    if (dom.apiRefreshButton) {
+        dom.apiRefreshButton.addEventListener('click', async () => {
+            await handleApiRefresh();
+        });
+    }
+    
+    if (dom.apiLoadHistoryButton) {
+        dom.apiLoadHistoryButton.addEventListener('click', async () => {
+            await handleApiLoadHistory();
+        });
+    }
 }
