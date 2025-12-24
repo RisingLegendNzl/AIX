@@ -1,4 +1,5 @@
 // optimizationWorker.js - Genetic Algorithm for Parameter Optimization
+// IMPROVED: Wilson score, non-overlapping windows, enhanced fitness calculation
 
 // Corrected import paths for being inside the /js folder
 import * as shared from './shared-logic.js';
@@ -85,7 +86,14 @@ const parameterSpace = {
     CONFIDENCE_WEIGHTING_MIN_THRESHOLD: { min: 0, max: 50, step: 1 },
     WARNING_FACTOR_SHIFT_WINDOW_SIZE: { min: 1, max: 20, step: 1 },
     WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: { min: 0.1, max: 1.0, step: 0.05 },
-    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: { min: 0, max: 100, step: 1 }
+    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: { min: 0, max: 100, step: 1 },
+    // NEW: Severity bonus parameters
+    severityMultiplier: { min: 0.0, max: 10.0, step: 0.5 },
+    severityThreshold: { min: 0.3, max: 0.8, step: 0.05 },
+    // NEW: AI integration parameters
+    aiScoreWeight: { min: 0.0, max: 50.0, step: 1.0 },
+    // NEW: Overlap penalty parameters
+    overlapPenaltyWeight: { min: 0.0, max: 0.5, step: 0.05 }
 };
 
 let historyData = [];
@@ -93,11 +101,13 @@ let sharedData = {};
 let isRunning = false;
 let generationCount = 0;
 
-// NEW: Debug tracking
+// Debug tracking
 let debugMetrics = {
     perGroupStats: {},
     totalSimulations: 0,
-    currentSeed: null
+    currentSeed: null,
+    wilsonScores: [],
+    windowBreakdown: []
 };
 
 // ===========================
@@ -113,7 +123,7 @@ function createIndividual() {
     for (const key in parameterSpace) {
         const { min, max, step } = parameterSpace[key];
         const range = (max - min) / step;
-        const randomStep = Math.floor(random() * (range + 1)); // SEEDED RANDOM
+        const randomStep = Math.floor(random() * (range + 1));
         individual[key] = min + randomStep * step;
     }
     return individual;
@@ -126,7 +136,7 @@ function createIndividual() {
 function crossover(parent1, parent2) {
     const child = {};
     const keys = Object.keys(parent1);
-    const crossoverPoint = Math.floor(random() * keys.length); // SEEDED RANDOM
+    const crossoverPoint = Math.floor(random() * keys.length);
 
     for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
@@ -146,10 +156,10 @@ function crossover(parent1, parent2) {
 function mutate(individual) {
     const mutatedIndividual = { ...individual };
     for (const key in mutatedIndividual) {
-        if (random() < currentGaConfig.mutationRate) { // SEEDED RANDOM
+        if (random() < currentGaConfig.mutationRate) {
             const { min, max, step } = parameterSpace[key];
             const range = (max - min) / step;
-            const randomStep = Math.floor(random() * (range + 1)); // SEEDED RANDOM
+            const randomStep = Math.floor(random() * (range + 1));
             mutatedIndividual[key] = min + randomStep * step;
         }
     }
@@ -164,7 +174,7 @@ function selectParent(population) {
     const tournamentSize = 3;
     let best = null;
     for (let i = 0; i < tournamentSize; i++) {
-        const randomIndex = Math.floor(random() * population.length); // SEEDED RANDOM
+        const randomIndex = Math.floor(random() * population.length);
         const randomCompetitor = population[randomIndex];
         if (best === null || randomCompetitor.fitness > best.fitness) {
             best = randomCompetitor;
@@ -174,8 +184,41 @@ function selectParent(population) {
 }
 
 // ===========================
-// ENHANCED FITNESS CALCULATION
+// IMPROVED STATISTICAL FUNCTIONS
 // ===========================
+
+/**
+ * IMPROVED: Wilson score interval lower bound
+ * More accurate confidence measure for small sample sizes
+ * @param {number} wins - Number of wins
+ * @param {number} total - Total number of plays
+ * @param {number} z - Z-score for confidence level (default 1.96 for 95%)
+ * @returns {number} Lower bound of Wilson score interval
+ */
+function wilsonLowerBound(wins, total, z = 1.96) {
+    if (total === 0) return 0;
+    const p = wins / total;
+    const denominator = 1 + (z * z) / total;
+    const centre = p + (z * z) / (2 * total);
+    const spread = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total);
+    return Math.max(0, (centre - spread) / denominator);
+}
+
+/**
+ * IMPROVED: Stability score using coefficient of variation
+ * Better scaling with actual win rate magnitudes
+ * @param {number[]} rollingWinRates - Array of rolling win rates
+ * @returns {number} Stability score between 0 and 1
+ */
+function calculateStabilityScore(rollingWinRates) {
+    if (rollingWinRates.length < 5) return 1.0;
+    const mean = rollingWinRates.reduce((a, b) => a + b, 0) / rollingWinRates.length;
+    if (mean === 0) return 0;
+    const variance = calculateVariance(rollingWinRates);
+    const stdDev = Math.sqrt(variance);
+    const cv = stdDev / mean; // Coefficient of variation
+    return 1 / (1 + cv); // Bounded [0, 1]
+}
 
 /**
  * Calculate variance of an array
@@ -208,8 +251,57 @@ function calculateCorrelation(x, y) {
 }
 
 /**
- * ENHANCED FITNESS CALCULATION with composite scoring
- * NOW TRACKS PER-GROUP WINS/LOSSES FOR DEBUG PANEL
+ * NEW: Calculate recency-weighted win rate
+ * More recent plays have higher weight
+ * @param {boolean[]} results - Array of results (true = win, false = loss), newest last
+ * @param {number} halfLife - Number of plays for weight to halve
+ * @returns {number} Weighted win rate
+ */
+function calculateRecencyWeightedWinRate(results, halfLife = 10) {
+    if (results.length === 0) return 0;
+    
+    let weightedWins = 0;
+    let totalWeight = 0;
+    
+    for (let i = 0; i < results.length; i++) {
+        const age = results.length - 1 - i;
+        const weight = Math.pow(0.5, age / halfLife);
+        totalWeight += weight;
+        if (results[i]) {
+            weightedWins += weight;
+        }
+    }
+    
+    return totalWeight > 0 ? weightedWins / totalWeight : 0;
+}
+
+/**
+ * NEW: Calculate streak consistency score
+ * Rewards consistent performance, penalizes high variance in win streaks
+ * @param {number[]} streakLengths - Array of consecutive win streak lengths
+ * @returns {number} Consistency score between 0 and 1
+ */
+function calculateStreakConsistency(streakLengths) {
+    if (streakLengths.length < 2) return 0.5;
+    
+    const mean = streakLengths.reduce((a, b) => a + b, 0) / streakLengths.length;
+    const variance = calculateVariance(streakLengths);
+    const cv = mean > 0 ? Math.sqrt(variance) / mean : 1;
+    
+    // Lower CV = more consistent streaks = higher score
+    return 1 / (1 + cv);
+}
+
+// ===========================
+// ENHANCED FITNESS CALCULATION
+// ===========================
+
+/**
+ * IMPROVED: Enhanced fitness calculation with Wilson score and non-overlapping windows
+ * - Uses Wilson score lower bound instead of simple continuity correction
+ * - Uses non-overlapping windows to prevent data leakage
+ * - Includes recency weighting
+ * - Tracks per-group performance
  */
 function calculateFitness(individual) {
     if (!individual) {
@@ -255,7 +347,14 @@ function calculateFitness(individual) {
         WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: individual.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD,
         WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: individual.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT,
         LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: individual.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER,
-        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: individual.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER
+        HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: individual.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER,
+        conditionalProbMultiplier: individual.conditionalProbMultiplier || 10,
+        minConditionalSampleSize: individual.minConditionalSampleSize || 5,
+        // NEW: Severity and AI parameters
+        severityMultiplier: individual.severityMultiplier || 5,
+        severityThreshold: individual.severityThreshold || 0.5,
+        aiScoreWeight: individual.aiScoreWeight || 10,
+        overlapPenaltyWeight: individual.overlapPenaltyWeight || 0.2
     };
     
     const SIM_ADAPTIVE_LEARNING_RATES = {
@@ -268,26 +367,30 @@ function calculateFitness(individual) {
         CONFIDENCE_WEIGHTING_MIN_THRESHOLD: individual.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
     };
 
-    // Multi-window evaluation to prevent overfitting
+    // IMPROVED: Non-overlapping windows to prevent data leakage
+    const historyLength = historyData.length;
+    const windowSize = Math.floor(historyLength / 3);
+    
     const windows = [
-        { start: 0, end: Math.floor(historyData.length * 0.6), name: 'First 60%' },
-        { start: Math.floor(historyData.length * 0.4), end: historyData.length, name: 'Last 60%' },
-        { start: Math.floor(historyData.length * 0.2), end: Math.floor(historyData.length * 0.8), name: 'Middle 60%' }
+        { start: 0, end: windowSize, name: 'Early', weight: 0.8 },
+        { start: windowSize, end: windowSize * 2, name: 'Middle', weight: 1.0 },
+        { start: windowSize * 2, end: historyLength, name: 'Recent', weight: 1.2 }
     ];
 
     let windowFitnesses = [];
+    let windowBreakdown = [];
     
-    // NEW: Initialize per-group tracking
+    // Initialize per-group tracking
     const groupStats = {};
     config.allPredictionTypes.forEach(type => {
-        groupStats[type.id] = { wins: 0, losses: 0, plays: 0 };
+        groupStats[type.id] = { wins: 0, losses: 0, plays: 0, streakLengths: [] };
     });
 
     for (const window of windows) {
         if (!isRunning) return 0;
 
         const windowHistory = historyData.slice(window.start, window.end);
-        if (windowHistory.length < 3) continue; // Skip if too small
+        if (windowHistory.length < 5) continue; // Skip if too small
 
         const sortedHistory = [...windowHistory].sort((a, b) => a.id - b.id);
 
@@ -295,11 +398,17 @@ function calculateFitness(individual) {
         let losses = 0;
         let simulatedHistory = [];
         let tempConfirmedWinsLog = [];
+        let currentStreak = 0;
+        let streakLengths = [];
         
         // Track data for enhanced metrics
         let rollingWinRates = [];
         let recommendationScores = [];
         let actualHits = []; // 1 if hit, 0 if miss
+        let resultSequence = []; // true/false for recency weighting
+        
+        // Track recent failures for overlap penalty
+        let recentFailedHitZones = [];
         
         const localAdaptiveFactorInfluences = {
             'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
@@ -311,6 +420,8 @@ function calculateFitness(individual) {
             consecutiveLosses: 0,
             totalPlaysInWindow: 0
         };
+
+        let recommendationMadeCount = 0;
 
         for (let i = 2; i < sortedHistory.length; i++) {
             if (!isRunning) return 0;
@@ -325,41 +436,37 @@ function calculateFitness(individual) {
 
             // Update rolling performance
             if (simulatedHistory.length > 0) {
-                if (!isRunning) return 0;
-                const prevSimItem = simulatedHistory[simulatedHistory.length - 1];
-                if (prevSimItem.recommendationDetails && prevSimItem.recommendationDetails.finalScore > 0 && prevSimItem.recommendationDetails.signal !== 'Avoid Play') {
-                    simRollingPerformance.totalPlaysInWindow++;
-                    if (prevSimItem.hitTypes.includes(prevSimItem.recommendedGroupId)) {
-                        simRollingPerformance.consecutiveLosses = 0;
-                    } else {
-                        simRollingPerformance.consecutiveLosses++;
-                    }
-                    
-                    // Calculate rolling win rate
-                    let winsInWindowCalc = 0;
-                    let playsInWindowCalc = 0;
-                    const windowStart = Math.max(0, simulatedHistory.length - SIM_STRATEGY_CONFIG.WARNING_ROLLING_WINDOW_SIZE);
-                    for (let j = simulatedHistory.length - 1; j >= windowStart; j--) {
-                        if (!isRunning) return 0;
-                        const historyItemInWindow = simulatedHistory[j];
-                        if (historyItemInWindow.recommendationDetails && historyItemInWindow.recommendationDetails.finalScore > 0 && historyItemInWindow.recommendationDetails.signal !== 'Avoid Play') {
-                            playsInWindowCalc++;
-                            if (historyItemInWindow.hitTypes.includes(historyItemInWindow.recommendedGroupId)) {
-                                winsInWindowCalc++;
-                            }
+                const rollingWindowCalc = Math.min(SIM_STRATEGY_CONFIG.WARNING_ROLLING_WINDOW_SIZE, simulatedHistory.length);
+                const recentForRolling = simulatedHistory.slice(-rollingWindowCalc);
+                let winsInWindowCalc = 0;
+                let playsInWindowCalc = 0;
+                
+                for (const simHistItem of recentForRolling) {
+                    if (simHistItem.recommendedGroupId && simHistItem.recommendationDetails?.finalScore > 0) {
+                        playsInWindowCalc++;
+                        if (simHistItem.hitTypes.includes(simHistItem.recommendedGroupId)) {
+                            winsInWindowCalc++;
                         }
                     }
-                    simRollingPerformance.rollingWinRate = playsInWindowCalc > 0 ? (winsInWindowCalc / playsInWindowCalc) * 100 : 0;
-                    
-                    // Track rolling win rate for variance calculation
+                }
+                simRollingPerformance.totalPlaysInWindow = playsInWindowCalc;
+                simRollingPerformance.rollingWinRate = playsInWindowCalc > 0 ? (winsInWindowCalc / playsInWindowCalc) * 100 : 0;
+                
+                // Track rolling win rate for variance calculation
+                if (playsInWindowCalc >= 3) {
                     rollingWinRates.push(simRollingPerformance.rollingWinRate);
                 }
             }
 
-            // Apply forget factor
-            for (const factorName in localAdaptiveFactorInfluences) {
-                if (!isRunning) return 0;
-                localAdaptiveFactorInfluences[factorName] = Math.max(SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, localAdaptiveFactorInfluences[factorName] * SIM_ADAPTIVE_LEARNING_RATES.FORGET_FACTOR);
+            // IMPROVED: Only apply forget factor when recommendation was made
+            if (recommendationMadeCount > 0 && recommendationMadeCount % 5 === 0) {
+                for (const factorName in localAdaptiveFactorInfluences) {
+                    if (!isRunning) return 0;
+                    localAdaptiveFactorInfluences[factorName] = Math.max(
+                        SIM_ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE, 
+                        localAdaptiveFactorInfluences[factorName] * SIM_ADAPTIVE_LEARNING_RATES.FORGET_FACTOR
+                    );
+                }
             }
 
             const simFactorShiftStatus = shared.analyzeFactorShift(simulatedHistory, SIM_STRATEGY_CONFIG);
@@ -371,8 +478,10 @@ function calculateFitness(individual) {
                 trendStats, boardStats, neighbourScores, inputNum1: num1, inputNum2: num2,
                 isForWeightUpdate: false, aiPredictionData: null, currentAdaptiveInfluences: localAdaptiveFactorInfluences,
                 lastWinningNumber: tempConfirmedWinsLog.length > 0 ? tempConfirmedWinsLog[tempConfirmedWinsLog.length - 1] : null,
-                useProximityBoostBool: sharedData.toggles.useProximityBoost, useWeightedZoneBool: sharedData.toggles.useWeightedZone,
-                useNeighbourFocusBool: sharedData.toggles.useNeighbourFocus, isAiReadyBool: false,
+                useProximityBoostBool: sharedData.toggles.useProximityBoost, 
+                useWeightedZoneBool: sharedData.toggles.useWeightedZone,
+                useNeighbourFocusBool: sharedData.toggles.useNeighbourFocus, 
+                isAiReadyBool: false,
                 useTrendConfirmationBool: sharedData.toggles.useTrendConfirmation, 
                 useAdaptivePlayBool: sharedData.toggles.useAdaptivePlay, 
                 useLessStrictBool: sharedData.toggles.useLessStrict,
@@ -381,10 +490,15 @@ function calculateFitness(individual) {
                 factorShiftStatus: simFactorShiftStatus,
                 useLowestPocketDistanceBool: sharedData.toggles.useLowestPocketDistance,
                 current_STRATEGY_CONFIG: SIM_STRATEGY_CONFIG,
-                current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: simulatedHistory,
+                current_ADAPTIVE_LEARNING_RATES: SIM_ADAPTIVE_LEARNING_RATES, 
+                currentHistoryForTrend: simulatedHistory,
                 useDynamicTerminalNeighbourCount: sharedData.toggles.useDynamicTerminalNeighbourCount,
-                activePredictionTypes: config.allPredictionTypes, allPredictionTypes: config.allPredictionTypes,
-                terminalMapping: sharedData.terminalMapping, rouletteWheel: sharedData.rouletteWheel
+                activePredictionTypes: config.allPredictionTypes, 
+                allPredictionTypes: config.allPredictionTypes,
+                terminalMapping: sharedData.terminalMapping, 
+                rouletteWheel: sharedData.rouletteWheel,
+                // NEW: Pass recent failed zones for overlap penalty
+                recentFailedHitZones: recentFailedHitZones.slice(-5)
             });
             
             const simItem = { 
@@ -410,16 +524,29 @@ function calculateFitness(individual) {
                 
                 recommendationScores.push(simItem.recommendationDetails.finalScore);
                 actualHits.push(isHit ? 1 : 0);
+                resultSequence.push(isHit);
+                recommendationMadeCount++;
                 
-                // NEW: Track per-group stats
+                // Track per-group stats
                 if (groupStats[simItem.recommendedGroupId]) {
                     groupStats[simItem.recommendedGroupId].plays++;
                     if (isHit) {
                         groupStats[simItem.recommendedGroupId].wins++;
                         wins++;
+                        currentStreak++;
                     } else {
                         groupStats[simItem.recommendedGroupId].losses++;
                         losses++;
+                        if (currentStreak > 0) {
+                            streakLengths.push(currentStreak);
+                            groupStats[simItem.recommendedGroupId].streakLengths.push(currentStreak);
+                        }
+                        currentStreak = 0;
+                        
+                        // Track failed hit zone for overlap penalty
+                        if (simItem.recommendationDetails.hitZone) {
+                            recentFailedHitZones.push(simItem.recommendationDetails.hitZone);
+                        }
                     }
                 }
             }
@@ -444,52 +571,83 @@ function calculateFitness(individual) {
             if (rawItem.winningNumber !== null) tempConfirmedWinsLog.push(rawItem.winningNumber);
         }
 
+        // Capture final streak if any
+        if (currentStreak > 0) {
+            streakLengths.push(currentStreak);
+        }
+
         // ===========================
-        // CALCULATE COMPOSITE FITNESS FOR THIS WINDOW
+        // IMPROVED: Calculate composite fitness for this window
         // ===========================
 
         if (wins === 0 && losses === 0) {
             windowFitnesses.push(0);
+            windowBreakdown.push({ name: window.name, fitness: 0, reason: 'No plays' });
             continue;
         }
 
-        // 1. Adjusted W/L ratio with continuity correction
-        const adjustedWL = (wins + 1) / (losses + 1);
+        const totalPlays = wins + losses;
 
-        // 2. Stability bonus (penalizes variance in rolling win rates)
-        let stabilityBonus = 1.0;
-        if (rollingWinRates.length >= 5) {
-            const variance = calculateVariance(rollingWinRates);
-            stabilityBonus = 1 / (1 + variance / 100); // Normalize variance
-        }
+        // 1. IMPROVED: Wilson score lower bound (replaces continuity correction)
+        const wilsonScore = wilsonLowerBound(wins, totalPlays);
+
+        // 2. IMPROVED: Stability score using coefficient of variation
+        const stabilityScore = calculateStabilityScore(rollingWinRates);
 
         // 3. Sample size confidence (saturates at 30 plays)
-        const totalPlays = wins + losses;
         const sampleSizeConfidence = Math.min(1.0, totalPlays / 30);
 
         // 4. Score calibration quality (correlation between scores and hits)
         let calibrationQuality = 0.5; // Neutral default
         if (recommendationScores.length >= 10) {
             const correlation = calculateCorrelation(recommendationScores, actualHits);
-            calibrationQuality = 0.5 + 0.5 * Math.max(-1, Math.min(1, correlation)); // Map [-1,1] to [0,1]
+            calibrationQuality = 0.5 + 0.5 * Math.max(-1, Math.min(1, correlation));
         }
 
-        // 5. Composite fitness
-        const windowFitness = adjustedWL * stabilityBonus * sampleSizeConfidence * calibrationQuality;
-        windowFitnesses.push(windowFitness);
+        // 5. NEW: Recency-weighted win rate bonus
+        const recencyWinRate = calculateRecencyWeightedWinRate(resultSequence, 10);
+        const recencyBonus = recencyWinRate > 0.5 ? 1 + (recencyWinRate - 0.5) * 0.5 : 1;
+
+        // 6. NEW: Streak consistency bonus
+        const streakConsistency = calculateStreakConsistency(streakLengths);
+        const streakBonus = 1 + streakConsistency * 0.2;
+
+        // 7. Composite fitness with window weight
+        const rawWindowFitness = wilsonScore * stabilityScore * sampleSizeConfidence * calibrationQuality * recencyBonus * streakBonus;
+        const weightedWindowFitness = rawWindowFitness * window.weight;
+        
+        windowFitnesses.push(weightedWindowFitness);
+        windowBreakdown.push({
+            name: window.name,
+            fitness: weightedWindowFitness.toFixed(4),
+            wilson: wilsonScore.toFixed(4),
+            stability: stabilityScore.toFixed(4),
+            calibration: calibrationQuality.toFixed(4),
+            recency: recencyBonus.toFixed(4),
+            streak: streakBonus.toFixed(4),
+            wins,
+            losses,
+            winRate: ((wins / totalPlays) * 100).toFixed(1)
+        });
     }
 
-    // Calculate geometric mean of window fitnesses (prevents overfitting to one lucky segment)
+    // Calculate geometric mean of window fitnesses
     if (windowFitnesses.length === 0) return 0;
     
+    // Filter out zero values to prevent geometric mean from being zero
+    const nonZeroFitnesses = windowFitnesses.filter(f => f > 0);
+    if (nonZeroFitnesses.length === 0) return 0;
+    
     const geometricMean = Math.pow(
-        windowFitnesses.reduce((product, fitness) => product * Math.max(0.001, fitness), 1),
-        1 / windowFitnesses.length
+        nonZeroFitnesses.reduce((product, fitness) => product * fitness, 1),
+        1 / nonZeroFitnesses.length
     );
 
-    // NEW: Update debug metrics with aggregated group stats
+    // Update debug metrics
     debugMetrics.perGroupStats = groupStats;
     debugMetrics.totalSimulations++;
+    debugMetrics.windowBreakdown = windowBreakdown;
+    debugMetrics.wilsonScores.push(geometricMean);
 
     return geometricMean;
 }
@@ -503,16 +661,17 @@ async function runEvolution() {
     generationCount = 0;
     
     // Initialize seeded PRNG with deterministic seed
-    // Seed is based on history length for repeatability
     const seed = historyData.length * 12345 + 67890;
     seededRandom = mulberry32(seed);
     debugMetrics.currentSeed = seed;
     
-    // NEW: Reset debug metrics
+    // Reset debug metrics
     debugMetrics.totalSimulations = 0;
     debugMetrics.perGroupStats = {};
+    debugMetrics.wilsonScores = [];
+    debugMetrics.windowBreakdown = [];
     config.allPredictionTypes.forEach(type => {
-        debugMetrics.perGroupStats[type.id] = { wins: 0, losses: 0, plays: 0 };
+        debugMetrics.perGroupStats[type.id] = { wins: 0, losses: 0, plays: 0, streakLengths: [] };
     });
     
     let population = [];
@@ -531,20 +690,24 @@ async function runEvolution() {
 
             population.sort((a, b) => b.fitness - a.fitness);
             
-            // NEW: Send debug data with progress
+            // Send progress with enhanced debug data
             self.postMessage({
                 type: 'progress',
                 payload: {
                     generation: generationCount,
                     maxGenerations: currentGaConfig.maxGenerations,
-                    bestFitness: population[0].fitness.toFixed(3),
+                    bestFitness: population[0].fitness.toFixed(4),
                     bestIndividual: population[0].individual,
                     processedCount: generationCount * currentGaConfig.populationSize,
                     populationSize: currentGaConfig.populationSize,
                     debugMetrics: {
                         perGroupStats: debugMetrics.perGroupStats,
                         totalSimulations: debugMetrics.totalSimulations,
-                        currentSeed: debugMetrics.currentSeed
+                        currentSeed: debugMetrics.currentSeed,
+                        windowBreakdown: debugMetrics.windowBreakdown,
+                        avgWilsonScore: debugMetrics.wilsonScores.length > 0 
+                            ? (debugMetrics.wilsonScores.reduce((a, b) => a + b, 0) / debugMetrics.wilsonScores.length).toFixed(4)
+                            : '0'
                     }
                 }
             });
@@ -578,13 +741,17 @@ async function runEvolution() {
                 type: 'complete',
                 payload: {
                     generation: generationCount,
-                    bestFitness: population[0].fitness.toFixed(3),
+                    bestFitness: population[0].fitness.toFixed(4),
                     bestIndividual: population[0].individual,
                     togglesUsed: sharedData.toggles,
                     debugMetrics: {
                         perGroupStats: debugMetrics.perGroupStats,
                         totalSimulations: debugMetrics.totalSimulations,
-                        currentSeed: debugMetrics.currentSeed
+                        currentSeed: debugMetrics.currentSeed,
+                        windowBreakdown: debugMetrics.windowBreakdown,
+                        avgWilsonScore: debugMetrics.wilsonScores.length > 0 
+                            ? (debugMetrics.wilsonScores.reduce((a, b) => a + b, 0) / debugMetrics.wilsonScores.length).toFixed(4)
+                            : '0'
                     }
                 }
             });
@@ -596,7 +763,7 @@ async function runEvolution() {
         self.postMessage({ type: 'error', payload: { message: error.message } });
     } finally {
         isRunning = false;
-        seededRandom = null; // Clear seeded RNG
+        seededRandom = null;
     }
 }
 
