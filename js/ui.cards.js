@@ -98,10 +98,23 @@ export function updateAllTogglesUI() {
 export function updateWinLossCounter() {
     let wins = 0;
     let losses = 0;
+
     state.history.forEach(item => {
-        if (item.status === 'success') wins++;
-        else if (item.status === 'fail') losses++;
+        // Only count items where:
+        // 1. A recommendation was made (recommendedGroupId exists)
+        // 2. The result is known (winningNumber is set)
+        // 3. The recommendation had a positive signal (finalScore > 0)
+        if (item.recommendedGroupId && item.winningNumber !== null && item.recommendationDetails && item.recommendationDetails.finalScore > 0) {
+            // Win = recommended group actually hit
+            // Loss = recommended group did not hit
+            if (item.hitTypes && item.hitTypes.includes(item.recommendedGroupId)) {
+                wins++;
+            } else {
+                losses++;
+            }
+        }
     });
+
     if (dom.winCount) dom.winCount.textContent = wins;
     if (dom.lossCount) dom.lossCount.textContent = losses;
 }
