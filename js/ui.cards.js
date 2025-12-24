@@ -500,7 +500,7 @@ export async function getRecommendationDataForDisplay(num1Val, num2Val) {
     const boardStats = getBoardStateStats(state.history, config.STRATEGY_CONFIG, state.activePredictionTypes, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const neighbourScores = runSharedNeighbourAnalysis(state.history, config.STRATEGY_CONFIG, state.useDynamicTerminalNeighbourCount, config.allPredictionTypes, config.terminalMapping, config.rouletteWheel);
     const rollingPerformance = analysis.calculateRollingPerformance(state.history, config.STRATEGY_CONFIG);
-    const factorShiftStatus = analysis.detectFactorShiftWarning(state.history, config.STRATEGY_CONFIG);
+    const factorShiftStatus = analysis.analyzeFactorShift(state.history, config.STRATEGY_CONFIG);
     const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
 
     updateAiStatus('AI Model: Getting prediction...');
