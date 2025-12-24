@@ -325,7 +325,7 @@ async function loadApiHistoryIntoApp(spins, tableName) {
     dom.apiStatusMessage.textContent = `Loaded ${simulatedHistory.length} items from ${tableName}.`;
 }
 
-export function attachInputListeners() {
+export function attachMainActionListeners() {
     dom.number1.addEventListener('input', () => {
         const num1Val = parseInt(dom.number1.value, 10);
         const num2Val = parseInt(dom.number2.value, 10);
