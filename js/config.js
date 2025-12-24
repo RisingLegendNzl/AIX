@@ -1,117 +1,52 @@
-// js/config.js
+// config.js
+// IMPROVED: Added new parameters for severity bonus, AI integration, overlap penalty, and enhanced scoring
 
-export const DEBUG_MODE = true;
+export const DEBUG_MODE = false;
 
-// --- Core Strategy Configuration ---
-export let STRATEGY_CONFIG = {
-    learningRate_success: 0.35, 
-    learningRate_failure: 0.05, 
-    maxWeight: 6.0,             
-    minWeight: 0.03,            
-    decayFactor: 0.88,          
-    patternMinAttempts: 5,      
-    patternSuccessThreshold: 68,
-    triggerMinAttempts: 5,      
-    triggerSuccessThreshold: 63,
-
-    // NEW: Recommendation Scoring Multipliers & Thresholds (used in shared-logic.js)
-    hitRateThreshold: 40,        // Below this hit rate, points start from 0 for hitRatePoints
-    hitRateMultiplier: 0.5,      // Points = (HitRate - threshold) * multiplier
-    maxStreakPoints: 15,         // Max points a streak can contribute
-    streakMultiplier: 5,         // Points = currentStreak * multiplier
-    proximityMaxDistance: 5,     // Max pocket distance for proximity boost to apply
-    proximityMultiplier: 2,      // Points = (MaxDistance - actualDistance) * multiplier
-    maxNeighbourPoints: 10,      // Max points neighbour weighting can contribute
-    neighbourMultiplier: 0.5,    // Points = neighbourWeightedScore * multiplier
-    aiConfidenceMultiplier: 25,  // Points = mlProbability * multiplier
-    minAiPointsForReason: 5,     // Min AI points for 'AI Conf' to appear in reason list
-
-    // NEW: Adaptive Play Signal Thresholds (used in shared-logic.js)
-    // When useAdaptivePlay is ON
-    ADAPTIVE_STRONG_PLAY_THRESHOLD: 50, // Score needed for "Strong Play"
-    ADAPTIVE_PLAY_THRESHOLD: 20,        // Score needed for "Play" (below Strong, above Wait)
-
-    // When useAdaptivePlay is ON and useLessStrict is ON
-    LESS_STRICT_STRONG_PLAY_THRESHOLD: 40, // Lower score for "Strong Play" in less strict mode
-    LESS_STRICT_PLAY_THRESHOLD: 10,        // Lower score for "Play" in less strict mode
-    LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: 60, // Alternative condition for Less Strict Strong Play (e.g. if hitRate > 60% and minStreak)
-    LESS_STRICT_MIN_STREAK: 3,             // Min streak for Less Strict Strong Play (with high hit rate)
-
-    // When useAdaptivePlay is OFF (simple fallback logic)
-    SIMPLE_PLAY_THRESHOLD: 20,           // Simple threshold for "Play" vs "Wait"
-
-    // NEW: Trend Confirmation Threshold (used in shared-logic.js)
-    MIN_TREND_HISTORY_FOR_CONFIRMATION: 3, // Minimum successful plays needed to even consider trend confirmation
-
-    // NEW: Table Change Warning Parameters (used in analysis.js and shared-logic.js)
-    WARNING_ROLLING_WINDOW_SIZE: 10,      // Number of recent "plays" to consider for rolling performance
-    WARNING_MIN_PLAYS_FOR_EVAL: 5,        // Minimum number of plays within window to trigger evaluation
-    WARNING_LOSS_STREAK_THRESHOLD: 4,     // Consecutive "play" losses to trigger a warning
-    WARNING_ROLLING_WIN_RATE_THRESHOLD: 40, // Rolling win rate % below which a warning is triggered
-    DEFAULT_AVERAGE_WIN_RATE: 45,          // Baseline expected win rate if insufficient history for true average
-    // NEW: Parameters for Primary Factor Shift Detection
-    WARNING_FACTOR_SHIFT_WINDOW_SIZE: 5, // Number of recent successful plays to check for factor shifts
-    WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.8, // If primary factors are too diverse (e.g., >80% are different), warn
-    WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 50, // Min percentage of one factor needed for it to be 'dominant'
-
-
-    // NEW: Pocket Distance Prioritization Multipliers (for useLowestPocketDistance)
-    LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5, // Multiplier to boost score if distance is 0 or 1
-    HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5, // Multiplier to suppress score if distance is > 1 but others are low
-    
-    // NEW: Conditional Probability Parameters (for situational context from API data)
-    conditionalProbMultiplier: 10,       // Points = conditionalProbability * multiplier
-    minConditionalSampleSize: 5          // Minimum occurrences needed for conditional probability to be considered reliable
-};
-
-// --- Adaptive Learning Rates for Factor Influences ---
-export let ADAPTIVE_LEARNING_RATES = {
-    SUCCESS: 0.15, 
-    FAILURE: 0.1,  
-    MIN_INFLUENCE: 0.2, 
-    MAX_INFLUENCE: 2.5,
-    // NEW: Forgetfulness factor for adaptive influences
-    FORGET_FACTOR: 0.995, // Multiplier applied to influences each spin (e.g., 0.995 means 0.5% decay per spin)
-    // NEW: Confidence weighting for adaptive influence updates
-    CONFIDENCE_WEIGHTING_MULTIPLIER: 0.02, // How much finalScore impacts the influence change
-    CONFIDENCE_WEIGHTING_MIN_THRESHOLD: 5, // Below this finalScore, confidence weighting has less effect
-};
-
-// --- DEFAULT PARAMETERS ---
+// --- Default Strategy Parameters ---
 export const DEFAULT_PARAMETERS = {
     STRATEGY_CONFIG: {
-        learningRate_success: 0.30, 
-        learningRate_failure: 0.03, 
-        maxWeight: 5.0,             
-        minWeight: 0.03,            
-        decayFactor: 0.88,          
-        patternMinAttempts: 5,      
-        patternSuccessThreshold: 68,
-        triggerMinAttempts: 5,      
-        triggerSuccessThreshold: 63,
+        // Learning and Weighting
+        learningRate_success: 0.25,
+        learningRate_failure: 0.15,
+        maxWeight: 5.0,
+        minWeight: 0.05,
+        decayFactor: 0.92,
 
-        // Defaults for new scoring parameters
-        hitRateThreshold: 40,
-        hitRateMultiplier: 0.5,
-        maxStreakPoints: 15,
+        // Pattern Recognition
+        patternMinAttempts: 4,
+        patternSuccessThreshold: 60,
+        triggerMinAttempts: 4,
+        triggerSuccessThreshold: 55,
+
+        // Scoring Thresholds and Multipliers
+        hitRateThreshold: 35,
+        hitRateMultiplier: 1.2,
+        maxStreakPoints: 25,
         streakMultiplier: 5,
         proximityMaxDistance: 5,
-        proximityMultiplier: 2,
-        maxNeighbourPoints: 10,
-        neighbourMultiplier: 0.5,
-        aiConfidenceMultiplier: 25,
-        minAiPointsForReason: 5,
+        proximityMultiplier: 2.5,
+        maxNeighbourPoints: 20,
+        neighbourMultiplier: 1.0,
 
+        // AI Confidence (now integrated into scoring)
+        aiConfidenceMultiplier: 15,
+        minAiPointsForReason: 3,
+        
+        // NEW: AI Score Weight - how much AI probability contributes to final score
+        aiScoreWeight: 15,
+
+        // Adaptive Play Thresholds
         ADAPTIVE_STRONG_PLAY_THRESHOLD: 50,
-        ADAPTIVE_PLAY_THRESHOLD: 20,
-        LESS_STRICT_STRONG_PLAY_THRESHOLD: 40,
-        LESS_STRICT_PLAY_THRESHOLD: 10,
-        LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: 60,
+        ADAPTIVE_PLAY_THRESHOLD: 25,
+        LESS_STRICT_STRONG_PLAY_THRESHOLD: 35,
+        LESS_STRICT_PLAY_THRESHOLD: 15,
+        LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: 55,
         LESS_STRICT_MIN_STREAK: 3,
         SIMPLE_PLAY_THRESHOLD: 20,
         MIN_TREND_HISTORY_FOR_CONFIRMATION: 3,
 
-        // Defaults for new Table Change Warning Parameters
+        // Table Change Warning Parameters
         WARNING_ROLLING_WINDOW_SIZE: 10,
         WARNING_MIN_PLAYS_FOR_EVAL: 5,
         WARNING_LOSS_STREAK_THRESHOLD: 4,
@@ -121,13 +56,21 @@ export const DEFAULT_PARAMETERS = {
         WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.8,
         WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 50,
 
-        // Defaults for new Pocket Distance Prioritization
+        // Pocket Distance Multipliers
         LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.5,
         HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.5,
         
-        // Defaults for conditional probability
+        // Conditional Probability Parameters
         conditionalProbMultiplier: 10,
-        minConditionalSampleSize: 5
+        minConditionalSampleSize: 5,
+        
+        // NEW: Severity Bonus Parameters (for number context integration)
+        severityMultiplier: 5,      // How much severity bonus contributes to score
+        severityThreshold: 0.5,     // Minimum severity ratio to trigger bonus
+        
+        // NEW: Overlap Penalty Parameters
+        overlapPenaltyWeight: 0.2,  // Weight of overlap penalty (0-1)
+        overlapPenaltyWindow: 5     // Number of recent failures to consider
     },
     ADAPTIVE_LEARNING_RATES: {
         SUCCESS: 0.15, 
@@ -159,7 +102,7 @@ export const DEFAULT_PARAMETERS = {
 export const STRATEGY_PRESETS = {
     highestWinRate: {
         STRATEGY_CONFIG: {
-            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherit all default config params
+            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG,
             learningRate_success: 0.35,
             learningRate_failure: 0.05,
             maxWeight: 6.0,
@@ -169,95 +112,62 @@ export const STRATEGY_PRESETS = {
             patternSuccessThreshold: 68,
             triggerMinAttempts: 5,
             triggerSuccessThreshold: 63,
-            // Ensure new scoring parameters are set explicitly or inherited if desired
-            ADAPTIVE_STRONG_PLAY_THRESHOLD: 60, // Higher threshold for this preset
+            ADAPTIVE_STRONG_PLAY_THRESHOLD: 60,
             ADAPTIVE_PLAY_THRESHOLD: 30,
-            // Adjust warning thresholds for this preset if desired
-            WARNING_LOSS_STREAK_THRESHOLD: 5, // More tolerant of losses for high win rate
-            WARNING_ROLLING_WIN_RATE_THRESHOLD: 35, // More tolerant of lower rolling win rate
-            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 7, // Longer window for factor shift
-            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.7, // Slightly less strict diversity
-            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 40, // Lower dominance for warning
-            // Pocket distance for preset
-            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 2.0, // More aggressive boost
+            WARNING_LOSS_STREAK_THRESHOLD: 5,
+            WARNING_ROLLING_WIN_RATE_THRESHOLD: 35,
+            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 7,
+            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.7,
+            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 40,
+            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 2.0,
             conditionalProbMultiplier: 12,
-            minConditionalSampleSize: 4
-        },
-        ADAPTIVE_LEARNING_RATES: {
-            SUCCESS: 0.15,
-            FAILURE: 0.1,
-            MIN_INFLUENCE: 0.2,
-            MAX_INFLUENCE: 2.5,
-            FORGET_FACTOR: 0.99, // Slightly faster forgetting for potentially higher win rate
-            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.03, // Higher influence change
-        },
-        TOGGLES: {
-            ...DEFAULT_PARAMETERS.TOGGLES,
-            useTrendConfirmation: true,
-            useWeightedZone: true,
-            useProximityBoost: true, 
-            useAdvancedCalculations: true,
-            useDynamicStrategy: true,
-            useAdaptivePlay: true, 
-            useNeighbourFocus: true,
-            useDynamicTerminalNeighbourCount: true,
-            useLessStrict: false,
-            useTableChangeWarnings: true, 
-            useLowestPocketDistance: true 
-        }
-    },
-    balancedSafe: {
-        STRATEGY_CONFIG: {
-            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherits new defaults
-            // Maybe tighter warning thresholds for a "safe" preset
-            WARNING_LOSS_STREAK_THRESHOLD: 3,
-            WARNING_ROLLING_WIN_RATE_THRESHOLD: 45,
-            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 5,
-            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.9, // Very strict diversity check
-            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 60, // Higher dominance needed
-            // Pocket distance for preset
-            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.2, // Moderate boost
-            conditionalProbMultiplier: 8,
-            minConditionalSampleSize: 6
+            minConditionalSampleSize: 4,
+            // Enhanced for highest win rate
+            aiScoreWeight: 20,
+            severityMultiplier: 8,
+            severityThreshold: 0.4,
+            overlapPenaltyWeight: 0.3
         },
         ADAPTIVE_LEARNING_RATES: {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
-            FORGET_FACTOR: 0.998, // Slower forgetting for stability
-            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.015, // Moderate influence change
+            FORGET_FACTOR: 0.99,
+            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.015,
         },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
             useTrendConfirmation: true, 
             useWeightedZone: true, 
-            useProximityBoost: true,
+            useProximityBoost: true, 
+            useLessStrict: false, 
             useAdaptivePlay: true, 
-            useLessStrict: false,
             useTableChangeWarnings: true, 
             useLowestPocketDistance: true 
         }
     },
     aggressiveSignals: {
         STRATEGY_CONFIG: {
-            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG, // Inherits new defaults
-            // Potentially lower thresholds for more signals in aggressive mode
+            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG,
             ADAPTIVE_STRONG_PLAY_THRESHOLD: 40,
             ADAPTIVE_PLAY_THRESHOLD: 15,
-            // Less strict warnings for aggressive play
             WARNING_LOSS_STREAK_THRESHOLD: 6,
             WARNING_ROLLING_WIN_RATE_THRESHOLD: 30,
-            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 10, // Longer window for factor shift
-            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.5, // Very loose diversity
-            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 30, // Very low dominance needed
-            // Pocket distance for preset
-            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.8, // Aggressive boost
+            WARNING_FACTOR_SHIFT_WINDOW_SIZE: 10,
+            WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD: 0.5,
+            WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: 30,
+            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.8,
             HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER: 0.2,
             conditionalProbMultiplier: 15,
-            minConditionalSampleSize: 3
+            minConditionalSampleSize: 3,
+            // Aggressive settings
+            aiScoreWeight: 25,
+            severityMultiplier: 10,
+            severityThreshold: 0.3,
+            overlapPenaltyWeight: 0.1
         },
         ADAPTIVE_LEARNING_RATES: {
             ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
-            FORGET_FACTOR: 0.98, // Very aggressive forgetting
-            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.025, // Higher influence change
+            FORGET_FACTOR: 0.98,
+            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.025,
         },
         TOGGLES: { 
             ...DEFAULT_PARAMETERS.TOGGLES, 
@@ -268,6 +178,43 @@ export const STRATEGY_PRESETS = {
             useAdaptivePlay: true,
             useTableChangeWarnings: true, 
             useLowestPocketDistance: true 
+        }
+    },
+    conservative: {
+        STRATEGY_CONFIG: {
+            ...DEFAULT_PARAMETERS.STRATEGY_CONFIG,
+            learningRate_success: 0.15,
+            learningRate_failure: 0.2,
+            maxWeight: 4.0,
+            minWeight: 0.1,
+            decayFactor: 0.95,
+            ADAPTIVE_STRONG_PLAY_THRESHOLD: 65,
+            ADAPTIVE_PLAY_THRESHOLD: 40,
+            WARNING_LOSS_STREAK_THRESHOLD: 3,
+            WARNING_ROLLING_WIN_RATE_THRESHOLD: 45,
+            LOW_POCKET_DISTANCE_BOOST_MULTIPLIER: 1.2,
+            conditionalProbMultiplier: 8,
+            minConditionalSampleSize: 7,
+            // Conservative settings
+            aiScoreWeight: 10,
+            severityMultiplier: 3,
+            severityThreshold: 0.6,
+            overlapPenaltyWeight: 0.4
+        },
+        ADAPTIVE_LEARNING_RATES: {
+            ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES,
+            FORGET_FACTOR: 0.999,
+            CONFIDENCE_WEIGHTING_MULTIPLIER: 0.01,
+        },
+        TOGGLES: { 
+            ...DEFAULT_PARAMETERS.TOGGLES, 
+            useTrendConfirmation: true, 
+            useWeightedZone: true, 
+            useProximityBoost: false, 
+            useLessStrict: false, 
+            useAdaptivePlay: true, 
+            useTableChangeWarnings: true, 
+            useLowestPocketDistance: false 
         }
     }
 };
@@ -282,7 +229,8 @@ export const terminalMapping = {
     27: [20, 32], 28: [23, 35], 29: [22, 34, 24, 36], 30: [23, 35], 31: [26],
     32: [25, 27], 33: [26], 34: [29], 35: [28, 30], 36: [29]
 };
-export const rouletteWheel = [0, 26, 3, 35, 12, 28, 7, 29, 18, 22, 9, 31, 14, 20, 1, 33, 16, 24, 5, 10, 23, 8, 30, 11, 36, 13, 27, 6, 34, 17, 25, 2, 21, 4, 19, 15, 32];
+
+export const rouletteWheel = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
 
 // --- Prediction Types ---
 export const allPredictionTypes = [
@@ -304,24 +252,24 @@ export const clonablePredictionTypes = allPredictionTypes.map(type => ({
 
 // --- Genetic Algorithm Configuration ---
 export const GA_CONFIG = {
-    populationSize: 50, // RESTORED to original value
+    populationSize: 50,
     mutationRate: 0.15,
     crossoverRate: 0.7,
-    eliteCount: 4,      // RESTORED to original value
-    maxGenerations: 100 // RESTORED to original value
+    eliteCount: 4,
+    maxGenerations: 100
 };
 
 // --- AI Model Configuration ---
 export const AI_CONFIG = {
-    sequenceLength: 5,
-    trainingMinHistory: 10,
+    sequenceLength: 8,          // IMPROVED: Increased from 5
+    trainingMinHistory: 15,     // IMPROVED: Increased from 10
     failureModes: ['none', 'normalLoss', 'streakBreak', 'sectionShift'],
     ensemble_config: [
         {
             name: 'Specialist',
             path: 'roulette-ml-model-specialist',
-            lstmUnits: 16,
-            epochs: 40,
+            lstmUnits: 24,      // IMPROVED: Increased from 16
+            epochs: 50,         // IMPROVED: Increased from 40
             batchSize: 32,
         },
         {
@@ -333,3 +281,7 @@ export const AI_CONFIG = {
         }
     ]
 };
+
+// --- Active (modifiable) copies of parameters ---
+export let STRATEGY_CONFIG = { ...DEFAULT_PARAMETERS.STRATEGY_CONFIG };
+export let ADAPTIVE_LEARNING_RATES = { ...DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES };
