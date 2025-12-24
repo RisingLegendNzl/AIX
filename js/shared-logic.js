@@ -1,7 +1,5 @@
 // shared-logic.js
-
-// This file contains core calculation logic shared between the main app (index.html)
-// and the optimization web worker (optimizationWorker.js).
+// IMPROVED: AI probability integration, streak normalization, weighted hit zone aggregation
 
 /**
  * NOTE: These functions are designed to be "pure" where possible.
@@ -11,7 +9,7 @@
  */
 
 /**
- * FIX: Helper function to wrap base numbers to valid roulette range (0-36)
+ * Helper function to wrap base numbers to valid roulette range (0-36)
  * Numbers > 36 are wrapped using modulo 37
  * Numbers < 0 are handled by wrapping around from 36
  * @param {number} baseNum - The calculated base number
@@ -49,13 +47,11 @@ export function calculatePocketDistance(num1, num2, rouletteWheel) {
 }
 
 export function getHitZone(baseNumber, terminals, winningNumber, useDynamicTerminalNeighbourCountBool, terminalMapping, rouletteWheel) {
-    // FIX: Wrap base number instead of returning empty array
     const wrappedBaseNumber = wrapBaseNumber(baseNumber);
     if (wrappedBaseNumber < 0 || wrappedBaseNumber > 36) return [];
     
     const hitZone = new Set([wrappedBaseNumber]);
     
-    // Get terminals for the wrapped base number
     const actualTerminals = terminals || terminalMapping?.[wrappedBaseNumber] || [];
     const numTerminals = actualTerminals.length;
 
@@ -82,9 +78,6 @@ export function getHitZone(baseNumber, terminals, winningNumber, useDynamicTermi
     return Array.from(hitZone);
 }
 
-/**
- * FIX: Updated to wrap base numbers > 36 instead of marking as failure
- */
 export function evaluateCalculationStatus(historyItem, winningNumber, useDynamicTerminalNeighbourCountBool, activePredictionTypes, terminalMapping, rouletteWheel) {
     historyItem.winningNumber = winningNumber;
     historyItem.hitTypes = [];
@@ -93,10 +86,8 @@ export function evaluateCalculationStatus(historyItem, winningNumber, useDynamic
 
     activePredictionTypes.forEach(type => {
         const rawBaseNum = type.calculateBase(historyItem.num1, historyItem.num2);
-        // FIX: Wrap base number instead of skipping
         const baseNum = wrapBaseNumber(rawBaseNum);
         
-        // Store wrapped info on the history item for debugging/display
         if (!historyItem.wrappedBaseNumbers) {
             historyItem.wrappedBaseNumbers = {};
         }
@@ -131,9 +122,6 @@ export function evaluateCalculationStatus(historyItem, winningNumber, useDynamic
     }
 }
 
-/**
- * FIX: Updated to wrap base numbers > 36 instead of skipping
- */
 export function calculateTrendStats(currentHistory, current_STRATEGY_CONFIG, activeTypesArr, allPredictionTypes, terminalMapping, rouletteWheel) {
     const sortedHistory = [...currentHistory].sort((a, b) => a.id - b.id);
     const streakData = {};
@@ -156,10 +144,8 @@ export function calculateTrendStats(currentHistory, current_STRATEGY_CONFIG, act
             const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
             if (!predictionTypeDefinition) return;
             const rawBaseNum = predictionTypeDefinition.calculateBase(item.num1, item.num2);
-            // FIX: Wrap base number instead of skipping
             const baseNum = wrapBaseNumber(rawBaseNum);
 
-            // Always count this type since we now handle all base numbers
             totalOccurrences[type.id] += weight;
 
             if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
@@ -185,9 +171,6 @@ export function calculateTrendStats(currentHistory, current_STRATEGY_CONFIG, act
     return { averages, currentStreaks, lastSuccessState, streakData };
 }
 
-/**
- * FIX: Updated to wrap base numbers > 36 instead of skipping
- */
 export function getBoardStateStats(simulatedHistory, current_STRATEGY_CONFIG, activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel) {
     const stats = {};
     activePredictionTypes.forEach(type => {
@@ -199,7 +182,6 @@ export function getBoardStateStats(simulatedHistory, current_STRATEGY_CONFIG, ac
             const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
             if (!predictionTypeDefinition) return;
             const rawBaseNum = predictionTypeDefinition.calculateBase(item.num1, item.num2);
-            // FIX: Wrap base number - always count this type
             const baseNum = wrapBaseNumber(rawBaseNum);
             stats[type.id].total += weight;
         });
@@ -212,9 +194,6 @@ export function getBoardStateStats(simulatedHistory, current_STRATEGY_CONFIG, ac
     return stats;
 }
 
-/**
- * FIX: Updated to wrap base numbers > 36 instead of skipping
- */
 export function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, useDynamicTerminalNeighbourCountBool, allPredictionTypes, terminalMapping, rouletteWheel) {
     const analysis = {};
     for (let i = 0; i <= 36; i++) analysis[i] = { success: 0 };
@@ -226,7 +205,6 @@ export function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, 
             if (!type) return;
 
             const rawBaseNum = type.calculateBase(item.num1, item.num2);
-            // FIX: Wrap base number instead of skipping
             const baseNum = wrapBaseNumber(rawBaseNum);
 
             const terminals = terminalMapping[baseNum] || [];
@@ -240,11 +218,6 @@ export function runNeighbourAnalysis(simulatedHistory, current_STRATEGY_CONFIG, 
     return analysis;
 }
 
-/**
- * Analyzes conditional probability: when previous result was closest to group X, how often does group Y hit next?
- * This provides situational context, not prediction certainty.
- * FIX: Updated to wrap base numbers > 36 instead of skipping
- */
 export function calculateConditionalProbability(history, groupId, activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel, useDynamicTerminalNeighbourCount, minSampleSize) {
     const validHistory = history.filter(item => item.winningNumber !== null && item.status !== 'pending');
     
@@ -255,12 +228,10 @@ export function calculateConditionalProbability(history, groupId, activePredicti
     let relevantOccurrences = 0;
     let groupHitCount = 0;
 
-    // Iterate through history to find when previous spin was closest to this group
     for (let i = 1; i < validHistory.length; i++) {
         const previousItem = validHistory[i - 1];
         const currentItem = validHistory[i];
         
-        // Find which group the previous spin was closest to
         let closestGroupId = null;
         let closestDistance = Infinity;
         
@@ -269,7 +240,6 @@ export function calculateConditionalProbability(history, groupId, activePredicti
             if (!predictionTypeDefinition) return;
             
             const rawBaseNum = predictionTypeDefinition.calculateBase(previousItem.num1, previousItem.num2);
-            // FIX: Wrap base number instead of skipping
             const baseNum = wrapBaseNumber(rawBaseNum);
             
             const terminals = terminalMapping?.[baseNum] || [];
@@ -284,7 +254,6 @@ export function calculateConditionalProbability(history, groupId, activePredicti
             });
         });
         
-        // If previous was closest to our group, check if current hit our group
         if (closestGroupId === groupId) {
             relevantOccurrences++;
             
@@ -301,9 +270,6 @@ export function calculateConditionalProbability(history, groupId, activePredicti
     return { probability, sampleSize: relevantOccurrences };
 }
 
-/**
- * Calculates rolling performance for table change warnings
- */
 export function calculateRollingPerformance(history, windowSize, minPlays) {
     const confirmedItems = history
         .filter(item => item.winningNumber !== null && item.recommendedGroupId && item.recommendationDetails?.finalScore > 0)
@@ -339,17 +305,30 @@ export function calculateRollingPerformance(history, windowSize, minPlays) {
     };
 }
 
-/**
- * Analyzes if the primary driving factors have been shifting
- */
-export function analyzeFactorShift(history, windowSize, diversityThreshold, minDominancePercent) {
+export function analyzeFactorShift(history, strategyConfigOrWindowSize, diversityThreshold, minDominancePercent) {
+    // Handle both old signature (history, strategyConfig) and new signature (history, windowSize, diversityThreshold, minDominancePercent)
+    let windowSize, divThreshold, minDominance;
+    
+    if (typeof strategyConfigOrWindowSize === 'object' && strategyConfigOrWindowSize !== null) {
+        // Old signature: analyzeFactorShift(history, strategyConfig)
+        const strategyConfig = strategyConfigOrWindowSize;
+        windowSize = strategyConfig.WARNING_FACTOR_SHIFT_WINDOW_SIZE || 5;
+        divThreshold = strategyConfig.WARNING_FACTOR_SHIFT_DIVERSITY_THRESHOLD || 0.8;
+        minDominance = strategyConfig.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT || 50;
+    } else {
+        // New signature: analyzeFactorShift(history, windowSize, diversityThreshold, minDominancePercent)
+        windowSize = strategyConfigOrWindowSize || 5;
+        divThreshold = diversityThreshold || 0.8;
+        minDominance = minDominancePercent || 50;
+    }
+    
     const recentSuccessfulItems = history
         .filter(item => item.status === 'success' && item.recommendationDetails?.primaryDrivingFactor)
         .sort((a, b) => b.id - a.id)
         .slice(0, windowSize);
     
     if (recentSuccessfulItems.length < 3) {
-        return { sufficientData: false, isShifting: false, dominantFactor: null, factorDistribution: {} };
+        return { sufficientData: false, isShifting: false, dominantFactor: null, factorDistribution: {}, factorShiftDetected: false, reason: 'Not enough data' };
     }
     
     const factorCounts = {};
@@ -371,7 +350,7 @@ export function analyzeFactorShift(history, windowSize, diversityThreshold, minD
     const uniqueFactors = Object.keys(factorCounts).length;
     const diversityRatio = uniqueFactors / recentSuccessfulItems.length;
     
-    const isShifting = diversityRatio >= diversityThreshold || dominancePercent < minDominancePercent;
+    const isShifting = diversityRatio >= divThreshold || dominancePercent < minDominance;
     
     return {
         sufficientData: true,
@@ -379,24 +358,134 @@ export function analyzeFactorShift(history, windowSize, diversityThreshold, minD
         dominantFactor,
         factorDistribution: factorCounts,
         diversityRatio,
-        dominancePercent
+        dominancePercent,
+        factorShiftDetected: isShifting,
+        reason: isShifting ? 'High factor diversity detected' : 'Stable factor dominance'
     };
 }
 
-/**
- * Wraps a group name in a colored span element for visual distinction
- */
 function wrapGroupName(groupName, groupId) {
     if (!groupId || !groupName) return groupName;
     const colorClass = `group-name-${groupId}`;
     return `<span class="${colorClass}">${groupName}</span>`;
 }
 
+// ===========================
+// IMPROVED: Sigmoid streak normalization
+// ===========================
+
 /**
- * Generates a detailed, deterministic explanation for a recommendation
- * This is used when AI explanations are not available or to supplement them
- * NOW INCLUDES NUMBER AND SECTOR CONTEXT when available
+ * IMPROVED: Sigmoid normalization for streaks
+ * Provides smooth S-curve that doesn't clip information from long streaks
+ * @param {number} streak - Current streak length
+ * @param {number} halfPoint - Streak length at which output is 0.5
+ * @returns {number} Normalized value between 0 and 1
  */
+function normalizeStreakSigmoid(streak, halfPoint = 5) {
+    return 1 / (1 + Math.exp(-streak / halfPoint + 1));
+}
+
+/**
+ * IMPROVED: Get relative streak strength compared to historical distribution
+ * @param {number} currentStreak - Current streak length
+ * @param {number[]} streakDistribution - Historical streak lengths for this group
+ * @returns {number} Percentile rank between 0 and 1
+ */
+function getRelativeStreakStrength(currentStreak, streakDistribution) {
+    if (!streakDistribution || streakDistribution.length < 5) return 0.5;
+    const percentile = streakDistribution.filter(s => s < currentStreak).length / streakDistribution.length;
+    return percentile;
+}
+
+// ===========================
+// IMPROVED: Weighted hit zone aggregation
+// ===========================
+
+/**
+ * IMPROVED: Weight hit zone neighbour scores by proximity to base number
+ * Numbers closer to the base get higher weight
+ * @param {number[]} hitZone - Array of numbers in the hit zone
+ * @param {number} baseNum - The base number for this group
+ * @param {Object} neighbourScores - Neighbour score object
+ * @param {number[]} rouletteWheel - Wheel layout
+ * @returns {number} Weighted score
+ */
+function calculateWeightedHitZoneScore(hitZone, baseNum, neighbourScores, rouletteWheel) {
+    let totalScore = 0;
+    let totalWeight = 0;
+    
+    for (const num of hitZone) {
+        const distance = calculatePocketDistance(num, baseNum, rouletteWheel);
+        const proximityWeight = 1 / (1 + distance);
+        const score = neighbourScores[num]?.success || 0;
+        
+        totalScore += score * proximityWeight;
+        totalWeight += proximityWeight;
+    }
+    
+    return totalWeight > 0 ? totalScore / totalWeight : 0;
+}
+
+/**
+ * IMPROVED: Calculate overlap penalty for groups whose hit zones overlap with recent failures
+ * @param {number[]} hitZone - Current hit zone
+ * @param {Array} recentFailedHitZones - Array of hit zones from recent failed recommendations
+ * @returns {number} Penalty multiplier between 0.7 and 1.0
+ */
+function calculateOverlapPenalty(hitZone, recentFailedHitZones) {
+    if (!recentFailedHitZones || recentFailedHitZones.length === 0) return 1.0;
+    
+    // Flatten all recent failed zones
+    const failedNumbers = new Set();
+    for (const failedZone of recentFailedHitZones) {
+        if (Array.isArray(failedZone)) {
+            failedZone.forEach(n => failedNumbers.add(n));
+        }
+    }
+    
+    if (failedNumbers.size === 0) return 1.0;
+    
+    const overlapCount = hitZone.filter(n => failedNumbers.has(n)).length;
+    const overlapRatio = overlapCount / hitZone.length;
+    
+    // Max 30% penalty for complete overlap
+    return 1 - (overlapRatio * 0.3);
+}
+
+/**
+ * IMPROVED: Get severity bonus from number context
+ * Uses historical max data for contextual weighting (NOT prediction)
+ * @param {number[]} hitZone - Hit zone numbers
+ * @param {Object} numberContextProvider - Number context provider
+ * @returns {number} Severity bonus score
+ */
+function getSeverityBonus(hitZone, numberContextProvider, severityThreshold = 0.5) {
+    if (!numberContextProvider || typeof numberContextProvider.getNumberSeverity !== 'function') {
+        return 0;
+    }
+    
+    let totalBonus = 0;
+    let validNumbers = 0;
+    
+    for (const num of hitZone) {
+        try {
+            const severity = numberContextProvider.getNumberSeverity(num);
+            if (severity && typeof severity.ratio === 'number') {
+                validNumbers++;
+                // Higher ratio = longer drought = modest contextual interest
+                // NOT a "due" prediction, just weighting
+                if (severity.ratio >= severityThreshold) {
+                    totalBonus += (severity.ratio - severityThreshold) * 2;
+                }
+            }
+        } catch (e) {
+            // Skip if error getting severity
+        }
+    }
+    
+    return validNumbers > 0 ? totalBonus / validNumbers : 0;
+}
+
 function generateDetailedExplanation(candidates, bestCandidate, context) {
     const {
         trendStats, boardStats, lastWinningNumber,
@@ -419,21 +508,19 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
         };
     }
 
-    // Sort candidates by score to find runner-up
     const sortedCandidates = [...candidates].sort((a, b) => b.score - a.score);
     const topGroup = sortedCandidates[0];
     const runnerUpGroup = sortedCandidates[1] || { type: { displayLabel: 'None' }, score: 0 };
     const scoreGap = topGroup.score - runnerUpGroup.score;
 
-    // Calculate recent performance for chosen group
-    const recentWindow = Math.min(10, currentHistoryForTrend.length);
-    const recentHistory = currentHistoryForTrend
+    const recentWindow = Math.min(10, currentHistoryForTrend?.length || 0);
+    const recentHistory = (currentHistoryForTrend || [])
         .filter(item => item.winningNumber !== null && item.status !== 'pending')
         .slice(-recentWindow);
     
     let hits = 0;
     let total = 0;
-    let currentStreak = bestCandidate.details.currentStreak || 0;
+    let currentStreak = bestCandidate.details?.currentStreak || 0;
     
     for (const item of recentHistory) {
         if (item.typeSuccessStatus && item.typeSuccessStatus[bestCandidate.type.id] !== undefined) {
@@ -446,58 +533,42 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
     
     const hitRate = total > 0 ? (hits / total) * 100 : 0;
 
-    // Determine confidence based on score gap and sample size
     let confidence = 'low';
     const scoreGapPercent = runnerUpGroup.score > 0 ? ((scoreGap / runnerUpGroup.score) * 100) : (topGroup.score > 0 ? 100 : 0);
     
-    if (scoreGapPercent >= 50 && total >= 5 && hitRate >= 50) {
+    if (scoreGapPercent >= 30 && hitRate >= 50 && total >= 5) {
         confidence = 'high';
-    } else if (scoreGapPercent >= 25 && total >= 3) {
+    } else if (scoreGapPercent >= 15 || (hitRate >= 40 && total >= 3)) {
         confidence = 'medium';
     }
 
-    // Generate headline
-    const wrappedGroupName = wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id);
-    let headline = `${wrappedGroupName} leads with ${topGroup.score.toFixed(1)} points`;
-    
-    if (currentStreak >= 2) {
-        headline = `${wrappedGroupName} on ${currentStreak}-win streak`;
-    } else if (hitRate >= 60 && total >= 3) {
-        headline = `${wrappedGroupName} at ${hitRate.toFixed(0)}% recent hit rate`;
-    }
+    const wrappedTopName = wrapGroupName(topGroup.type.displayLabel, topGroup.type.id);
+    const wrappedRunnerUpName = wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id);
 
-    // Generate bullets explaining WHY this group was chosen
+    let headline = `${wrappedTopName} leads by ${scoreGapPercent.toFixed(0)}%`;
     const bullets = [];
-    
-    // Primary factor bullet
-    const primaryFactor = bestCandidate.details.primaryDrivingFactor;
-    if (primaryFactor && primaryFactor !== 'N/A') {
-        const factorScore = bestCandidate.details.individualScores[primaryFactor] || 0;
-        bullets.push(`Primary driver: ${primaryFactor} (+${factorScore.toFixed(1)} pts)`);
-    }
-    
-    // Score comparison bullet
-    if (runnerUpGroup.score > 0) {
-        const wrappedRunnerUp = wrapGroupName(runnerUpGroup.type.displayLabel, runnerUpGroup.type.id);
-        bullets.push(`Leads ${wrappedRunnerUp} by ${scoreGap.toFixed(1)} points`);
-    }
-    
-    // Streak bullet
-    if (currentStreak >= 2) {
-        bullets.push(`Currently on a ${currentStreak}-win streak`);
-    }
-    
-    // Recent performance bullet
-    if (total >= 3) {
-        bullets.push(`Recent: ${hits}/${total} hits (${hitRate.toFixed(0)}%)`);
+
+    if (currentStreak >= 3) {
+        headline = `${wrappedTopName} on ${currentStreak}-spin winning streak`;
+        bullets.push(`Active streak: ${currentStreak} consecutive hits`);
+    } else if (hitRate >= 60 && total >= 5) {
+        headline = `${wrappedTopName} hitting ${hitRate.toFixed(0)}% recently`;
     }
 
-    // Get context info for display (number-level preferred over sector-level)
+    if (total >= 3) {
+        bullets.push(`Recent: ${hits}/${total} (${hitRate.toFixed(0)}%)`);
+    }
+
+    bullets.push(`Runner-up: ${wrappedRunnerUpName} (${scoreGapPercent.toFixed(0)}% gap)`);
+
+    if (bestCandidate.details?.primaryDrivingFactor && bestCandidate.details.primaryDrivingFactor !== 'N/A') {
+        bullets.push(`Primary driver: ${bestCandidate.details.primaryDrivingFactor}`);
+    }
+
     let sectorContextInfo = null;
     let numberContextInfo = null;
-    
-    // Try number-level context first (more granular)
-    if (bestCandidate.details.numberContext && bestCandidate.details.numberContext.hasContext) {
+
+    if (bestCandidate.details?.numberContext && bestCandidate.details.numberContext.hasContext) {
         const numCtx = bestCandidate.details.numberContext;
         numberContextInfo = {
             aggregateSeverity: numCtx.aggregateSeverity,
@@ -505,28 +576,24 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             elevatedNumbers: numCtx.elevatedNumbers?.length || 0,
             hasApiData: numCtx.hasApiData,
             contextDescription: numCtx.contextDescription,
-            isReferenceOnly: true  // Mark as reference only
+            isReferenceOnly: true
         };
         
-        // Add bullet about number context (reference only, not prediction)
         if (numCtx.elevatedNumbers && numCtx.elevatedNumbers.length > 0) {
-            const elevatedCount = numCtx.elevatedNumbers.length;
-            bullets.push(`[Ref] ${elevatedCount} number(s) in hit zone have extended non-appearance`);
+            bullets.push(`[Ref] ${numCtx.elevatedNumbers.length} number(s) with extended non-appearance`);
         }
     }
     
-    // Fall back to sector context if no number context
-    const sectorCtx = bestCandidate.details.sectorContext;
+    const sectorCtx = bestCandidate.details?.sectorContext;
     if (!numberContextInfo && sectorCtx && sectorCtx.hasContext) {
         sectorContextInfo = {
             dominantSector: sectorCtx.dominantSector?.name || null,
             dominantSectorLevel: sectorCtx.dominantSector?.severity?.level || 'normal',
             aggregateSeverity: sectorCtx.aggregateSeverity,
             hasApiData: sectorCtx.hasApiData,
-            isReferenceOnly: true  // Mark as reference only
+            isReferenceOnly: true
         };
         
-        // Only add sector bullet if we did not already add number context info
         if (sectorCtx.dominantSector) {
             const severity = sectorCtx.dominantSector.severity;
             if (severity && severity.level !== 'normal') {
@@ -550,15 +617,12 @@ function generateDetailedExplanation(candidates, bestCandidate, context) {
             currentStreak
         },
         finalScore: topGroup.score.toFixed(2),
-        primaryFactor: bestCandidate.details.primaryDrivingFactor || 'N/A',
+        primaryFactor: bestCandidate.details?.primaryDrivingFactor || 'N/A',
         sectorContext: sectorContextInfo,
         numberContext: numberContextInfo
     };
 }
 
-/**
- * FIX: Updated getRecommendation to wrap base numbers > 36 instead of returning null
- */
 export function getRecommendation(context) {
     const {
         trendStats, boardStats, neighbourScores,
@@ -575,13 +639,14 @@ export function getRecommendation(context) {
         current_ADAPTIVE_LEARNING_RATES, 
         activePredictionTypes, allPredictionTypes, terminalMapping, rouletteWheel,
         currentHistoryForTrend,
-        useDynamicTerminalNeighbourCount
+        useDynamicTerminalNeighbourCount,
+        // NEW: For overlap penalty calculation
+        recentFailedHitZones = []
     } = context;
 
     const currentNum1 = inputNum1;
     const currentNum2 = inputNum2;
 
-    // Determine which context provider to use
     const contextProvider = numberContextProvider || sectorContextProvider;
 
     let candidates = activePredictionTypes.map(type => {
@@ -609,104 +674,112 @@ export function getRecommendation(context) {
             numberContext: null,
             contextConfidenceModifier: 1.0,
             rawBaseNum: null,
-            wrappedBaseNum: null
+            wrappedBaseNum: null,
+            hitZone: null,
+            // NEW: Track additional metrics
+            severityBonus: 0,
+            overlapPenalty: 1.0,
+            relativeStreakStrength: 0.5
         };
 
         const predictionTypeDefinition = allPredictionTypes.find(t => t.id === type.id);
         if (!predictionTypeDefinition) return null;
         
         const rawBaseNum = predictionTypeDefinition.calculateBase(currentNum1, currentNum2);
-        // FIX: Wrap base number instead of returning null
         const baseNum = wrapBaseNumber(rawBaseNum);
         
-        // Store for debugging/display
         details.rawBaseNum = rawBaseNum;
         details.wrappedBaseNum = baseNum;
 
         const terminals = terminalMapping?.[baseNum] || [];
         const hitZone = getHitZone(baseNum, terminals, lastWinningNumber, useDynamicTerminalNeighbourCount, terminalMapping, rouletteWheel);
+        details.hitZone = hitZone;
 
-        // --- Calculate context for this group's hit zone ---
+        // Get context for this group's hit zone
         if (contextProvider) {
             try {
-                // Get number-level context if available
                 if (typeof contextProvider.getGroupNumberContext === 'function') {
                     const groupNumberContext = contextProvider.getGroupNumberContext(hitZone);
                     if (groupNumberContext && groupNumberContext.hasContext) {
                         details.numberContext = groupNumberContext;
                         details.contextConfidenceModifier = contextProvider.getNumberConfidenceModifier 
-                            ? contextProvider.getNumberConfidenceModifier(groupNumberContext)
+                            ? contextProvider.getNumberConfidenceModifier(hitZone)
                             : 1.0;
                     }
                 }
-                
-                // Also get sector context for additional info
-                if (typeof contextProvider.getGroupSectorContext === 'function') {
-                    const groupSectorContext = contextProvider.getGroupSectorContext(hitZone);
-                    if (groupSectorContext && groupSectorContext.hasContext) {
-                        details.sectorContext = groupSectorContext;
-                        
-                        // If we did not get number context, use sector context modifier
-                        if (!details.numberContext) {
-                            details.contextConfidenceModifier = contextProvider.getSectorConfidenceModifier 
-                                ? contextProvider.getSectorConfidenceModifier(groupSectorContext)
-                                : 1.0;
-                        }
-                    }
-                }
-            } catch (error) {
-                console.warn('Error getting context for group:', type.id, error);
+            } catch (e) {
+                // Ignore context errors
             }
         }
 
-        // --- Calculate Raw Score Components ---
+        // ===========================
+        // SCORING COMPONENTS
+        // ===========================
+
         let rawScore = 0;
 
-        // 1. Base Score from Hit Rate
-        const rawHitRatePoints = Math.max(0, details.hitRate - current_STRATEGY_CONFIG.hitRateThreshold) * current_STRATEGY_CONFIG.hitRateMultiplier;
+        // 1. Hit Rate Score
+        const rawHitRatePoints = details.hitRate >= current_STRATEGY_CONFIG.hitRateThreshold 
+            ? details.hitRate * current_STRATEGY_CONFIG.hitRateMultiplier 
+            : 0;
         rawScore += rawHitRatePoints;
         details.individualScores['Hit Rate'] = rawHitRatePoints;
-        if (rawHitRatePoints > 1) details.reason.push(`Hit Rate`);
+        if (rawHitRatePoints > 0) details.reason.push('HitRate');
 
-        // 2. Momentum Score from Current Streak
-        const rawStreakPoints = Math.min(current_STRATEGY_CONFIG.maxStreakPoints, details.currentStreak * current_STRATEGY_CONFIG.streakMultiplier);
+        // 2. IMPROVED: Streak Score with sigmoid normalization
+        const streakDistribution = trendStats.streakData?.[type.id] || [];
+        const relativeStrength = getRelativeStreakStrength(details.currentStreak, streakDistribution);
+        details.relativeStreakStrength = relativeStrength;
+        
+        // Use both absolute and relative streak scoring
+        const absoluteStreakPoints = Math.min(current_STRATEGY_CONFIG.maxStreakPoints, details.currentStreak * current_STRATEGY_CONFIG.streakMultiplier);
+        const relativeStreakBonus = relativeStrength * current_STRATEGY_CONFIG.maxStreakPoints * 0.5;
+        const rawStreakPoints = absoluteStreakPoints + relativeStreakBonus;
+        
         rawScore += rawStreakPoints;
         details.individualScores['Streak'] = rawStreakPoints;
-        if (rawStreakPoints > 0) details.reason.push(`Streak`);
+        if (details.currentStreak >= 2) details.reason.push('Streak');
 
         // 3. Proximity Score (IF TOGGLED)
-        if (useProximityBoostBool && lastWinningNumber !== null) {
-            for (const zoneNum of hitZone) {
+        if (useProximityBoostBool && lastWinningNumber !== null && hitZone.length > 0) {
+            let minDist = Infinity;
+            hitZone.forEach(zoneNum => {
                 const dist = calculatePocketDistance(zoneNum, lastWinningNumber, rouletteWheel);
-                if (dist < details.predictiveDistance) details.predictiveDistance = dist;
-            }
-            details.proximityBoostApplied = details.predictiveDistance <= current_STRATEGY_CONFIG.proximityMaxDistance;
-            if (details.proximityBoostApplied) {
-                const rawProximityPoints = (current_STRATEGY_CONFIG.proximityMaxDistance - details.predictiveDistance) * current_STRATEGY_CONFIG.proximityMultiplier;
+                if (dist < minDist) minDist = dist;
+            });
+            details.predictiveDistance = minDist;
+            if (minDist <= current_STRATEGY_CONFIG.proximityMaxDistance) {
+                const rawProximityPoints = (current_STRATEGY_CONFIG.proximityMaxDistance - minDist) * current_STRATEGY_CONFIG.proximityMultiplier;
                 rawScore += rawProximityPoints;
                 details.individualScores['Proximity to Last Spin'] = rawProximityPoints;
-                details.reason.push(`Proximity`);
+                details.proximityBoostApplied = true;
+                if (rawProximityPoints > 0) details.reason.push('Proximity');
             }
         }
 
-        // 4. Neighbour Score (IF TOGGLED)
+        // 4. IMPROVED: Weighted Neighbour Score (IF TOGGLED)
         if (useWeightedZoneBool) {
-            const neighbourWeightedScore = hitZone.reduce((sum, num) => sum + (neighbourScores[num]?.success || 0), 0);
-            const rawNeighbourPoints = Math.min(current_STRATEGY_CONFIG.maxNeighbourPoints, neighbourWeightedScore * current_STRATEGY_CONFIG.neighbourMultiplier);
+            // Use proximity-weighted hit zone scoring
+            const weightedNeighbourScore = calculateWeightedHitZoneScore(hitZone, baseNum, neighbourScores, rouletteWheel);
+            const rawNeighbourPoints = Math.min(current_STRATEGY_CONFIG.maxNeighbourPoints, weightedNeighbourScore * current_STRATEGY_CONFIG.neighbourMultiplier);
             rawScore += rawNeighbourPoints;
             details.individualScores['Hot Zone Weighting'] = rawNeighbourPoints;
             details.weightedZoneBoostApplied = rawNeighbourPoints > 0;
-            if (details.weightedZoneBoostApplied) details.reason.push(`Neighbours`);
+            if (details.weightedZoneBoostApplied) details.reason.push('Neighbours');
         }
 
-        // 5. AI Confidence Score - DISPLAY ONLY, does NOT add to score
+        // 5. IMPROVED: AI Confidence Score - NOW INTEGRATED INTO SCORING
         if (isAiReadyBool && details.mlProbability > 0) {
-            details.individualScores['High AI Confidence'] = 0;
-            details.mlBoostApplied = false;
+            const aiWeight = current_STRATEGY_CONFIG.aiScoreWeight || 10;
+            const aiPoints = details.mlProbability * aiWeight;
+            rawScore += aiPoints;
+            details.individualScores['High AI Confidence'] = aiPoints;
+            details.mlBoostApplied = aiPoints > (current_STRATEGY_CONFIG.minAiPointsForReason || 2);
             details.mlProbabilityDisplay = details.mlProbability;
+            if (details.mlBoostApplied) details.reason.push('AI');
         }
 
-        // 6. Conditional Probability Score (from API data)
+        // 6. Conditional Probability Score
         if (currentHistoryForTrend && currentHistoryForTrend.length > 0) {
             const condProb = calculateConditionalProbability(
                 currentHistoryForTrend, type.id, activePredictionTypes, allPredictionTypes,
@@ -721,7 +794,24 @@ export function getRecommendation(context) {
             }
         }
 
-        // --- Adaptive Influence ---
+        // 7. NEW: Severity Bonus from number context
+        if (numberContextProvider) {
+            const severityThreshold = current_STRATEGY_CONFIG.severityThreshold || 0.5;
+            const severityMultiplier = current_STRATEGY_CONFIG.severityMultiplier || 5;
+            const severityBonus = getSeverityBonus(hitZone, numberContextProvider, severityThreshold);
+            if (severityBonus > 0) {
+                const severityPoints = severityBonus * severityMultiplier;
+                rawScore += severityPoints;
+                details.severityBonus = severityPoints;
+                details.individualScores['Contextual Interest'] = severityPoints;
+                if (severityPoints > 1) details.reason.push('Context');
+            }
+        }
+
+        // ===========================
+        // ADAPTIVE INFLUENCE
+        // ===========================
+
         let maxInfluenceApplied = 0;
         let mostInfluentialFactor = "N/A";
         for (const [factorName, points] of Object.entries(details.individualScores)) {
@@ -733,21 +823,31 @@ export function getRecommendation(context) {
             }
         }
         
-        // --- Final Score Calculation ---
+        // ===========================
+        // FINAL SCORE CALCULATION
+        // ===========================
+
         let finalCalculatedScore = rawScore;
         
-        // Apply lowest pocket distance boost/suppression
+        // Apply pocket distance boost/suppression (additive, not multiplicative)
         if (useLowestPocketDistanceBool && lastWinningNumber !== null && details.predictiveDistance !== Infinity) {
             if (details.predictiveDistance <= 1) {
-                finalCalculatedScore *= current_STRATEGY_CONFIG.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER;
+                const boostPoints = current_STRATEGY_CONFIG.LOW_POCKET_DISTANCE_BOOST_MULTIPLIER * 5;
+                finalCalculatedScore += boostPoints;
                 details.aiLowPocketBoostApplied = true;
                 details.reason.push('PD');
+            } else if (details.predictiveDistance >= 5) {
+                // Slight penalty for very distant predictions
+                finalCalculatedScore *= current_STRATEGY_CONFIG.HIGH_POCKET_DISTANCE_SUPPRESS_MULTIPLIER;
             }
         }
         
-        // Context confidence modifier - DISPLAY ONLY, does NOT adjust score
-        if (details.contextConfidenceModifier < 1.0) {
-            details.contextStressDisplay = details.contextConfidenceModifier;
+        // NEW: Apply overlap penalty
+        if (recentFailedHitZones && recentFailedHitZones.length > 0) {
+            const overlapPenalty = calculateOverlapPenalty(hitZone, recentFailedHitZones);
+            const penaltyWeight = current_STRATEGY_CONFIG.overlapPenaltyWeight || 0.2;
+            details.overlapPenalty = 1 - ((1 - overlapPenalty) * penaltyWeight);
+            finalCalculatedScore *= details.overlapPenalty;
         }
 
         details.finalScore = finalCalculatedScore;
@@ -755,7 +855,6 @@ export function getRecommendation(context) {
         details.primaryDrivingFactor = mostInfluentialFactor;
         details.adaptiveInfluenceUsed = currentAdaptiveInfluences[mostInfluentialFactor] || 1.0;
 
-        // Store AI explanation if available
         if (aiPredictionData && aiPredictionData.aiExplanation) {
             details.aiExplanation = aiPredictionData.aiExplanation;
         }
@@ -787,7 +886,6 @@ export function getRecommendation(context) {
     candidates.sort((a, b) => b.score - a.score);
     let bestCandidate = candidates[0];
 
-    // Handle scenario where best candidate has very low or zero score
     if (bestCandidate.score <= 0) {
         return { 
             html: '<span class="text-gray-500">Wait for Signal</span><br><span class="text-xs">No strong context based on current data.</span>', 
@@ -808,10 +906,9 @@ export function getRecommendation(context) {
         contextProvider
     });
 
-    // --- Determine Signal based on Adaptive Play ---
+    // Determine Signal
     let signal = "Wait";
     let reason = bestCandidate.details.reason.join(', ') || 'General patterns';
-    let scoreLevel = '';
 
     const finalScore = bestCandidate.score;
 
@@ -839,44 +936,45 @@ export function getRecommendation(context) {
 
         if (finalScore >= strongThreshold) {
             signal = "Strong Play";
-            scoreLevel = '(High Confidence)';
         } else if (finalScore >= playThreshold) {
             signal = "Play";
-            scoreLevel = '(Moderate Confidence)';
-        } else {
-            signal = "Wait";
-            scoreLevel = '(Building confidence...)';
-        }
-    } else {
-        // Simple fallback if Adaptive Play is OFF
-        if (finalScore >= current_STRATEGY_CONFIG.SIMPLE_PLAY_THRESHOLD) {
-            signal = "Play";
         } else {
             signal = "Wait";
         }
-    }
 
-    // Trend confirmation override
-    if (useTrendConfirmationBool && signal !== "Wait") {
-        const lastSuccessState = trendStats.lastSuccessState;
-        if (lastSuccessState && lastSuccessState.length > 0 && !lastSuccessState.includes(bestCandidate.type.id)) {
-            const recentConfirmedCount = currentHistoryForTrend.filter(item => item.winningNumber !== null && item.status !== 'pending').length;
-            if (recentConfirmedCount >= current_STRATEGY_CONFIG.MIN_TREND_HISTORY_FOR_CONFIRMATION) {
-                signal = "Wait";
-                reason = `Waiting for trend confirmation (last success: ${lastSuccessState.join(', ')})`;
+        if (useLessStrictBool && signal === "Wait") {
+            if (bestCandidate.details.hitRate >= current_STRATEGY_CONFIG.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD && 
+                bestCandidate.details.currentStreak >= current_STRATEGY_CONFIG.LESS_STRICT_MIN_STREAK) {
+                signal = "Strong Play";
             }
         }
+    } else {
+        signal = finalScore >= current_STRATEGY_CONFIG.SIMPLE_PLAY_THRESHOLD ? "Play" : "Wait";
     }
 
-    const wrappedDisplayLabel = wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id);
+    if (useTrendConfirmationBool && signal !== "Wait" && signal !== "Avoid Play") {
+        const lastSuccessState = trendStats.lastSuccessState || [];
+        if (lastSuccessState.length > 0 && !lastSuccessState.includes(bestCandidate.type.id)) {
+            signal = "Wait";
+            reason = "Trend not confirmed";
+        }
+    }
 
-    let signalColorClass = 'text-gray-500';
-    if (signal === 'Strong Play') signalColorClass = 'text-green-500';
-    else if (signal === 'Play') signalColorClass = 'text-blue-500';
-    else if (signal === 'Avoid Play') signalColorClass = 'text-red-500';
-    else if (signal === 'Wait') signalColorClass = 'text-yellow-500';
+    const colorClass = signal === "Strong Play" ? "text-green-600 font-bold" :
+                       signal === "Play" ? "text-green-500" :
+                       signal === "Avoid Play" ? "text-red-500 font-bold" :
+                       "text-yellow-600";
 
-    const html = `<span class="font-bold ${signalColorClass}">${signal}</span> ${scoreLevel}<br><span class="font-bold text-lg">${wrappedDisplayLabel}</span><br><span class="text-xs text-gray-500">${reason}</span>`;
+    const wrappedGroupName = wrapGroupName(bestCandidate.type.displayLabel, bestCandidate.type.id);
+    const html = `<span class="${colorClass}">${signal}: ${wrappedGroupName}</span><br><span class="text-xs">${reason} | Score: ${finalScore.toFixed(1)}</span>`;
 
-    return { html, bestCandidate, details: bestCandidate.details, signal, reason, detailedExplanation };
+    return { 
+        html, 
+        bestCandidate, 
+        details: bestCandidate.details, 
+        signal, 
+        reason,
+        detailedExplanation,
+        allCandidates: candidates
+    };
 }
