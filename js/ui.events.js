@@ -108,55 +108,118 @@ export function handleNewCalculation(isAutoCall = false) {
 
 /**
  * Handles the "Submit Result" button click.
+ * If no pending calculation exists but valid inputs are present, automatically creates one.
+ * After resolving, auto-populates inputs and triggers next calculation.
+ * @param {boolean} isAutoCall - If true, bypasses auto mode check (for API-driven calls)
  */
-export async function handleSubmitResult() {
+export async function handleSubmitResult(isAutoCall = false) {
     console.log("handleSubmitResult: Function started.");
-    const winningNumberVal = parseInt(dom.winningNumberInput.value, 10);
+    
+    // Only block manual calls when auto mode is enabled, allow API-driven calls through
+    if (apiContext.isAutoModeEnabled() && isAutoCall !== true) {
+        alert('Auto mode is enabled. Disable it to use manual input.');
+        return;
+    }
+    
+    console.log(`handleSubmitResult: state.currentPendingCalculationId at start: ${state.currentPendingCalculationId}`);
 
-    if (isNaN(winningNumberVal) || winningNumberVal < 0 || winningNumberVal > 36) {
+    const winningNumberVal = dom.winningNumberInput.value;
+    let winningNumber = null;
+    if (winningNumberVal.trim() !== '') {
+        winningNumber = parseInt(winningNumberVal, 10);
+    }
+
+    if (winningNumber === null || isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
         alert("Please enter a valid winning number (0-36).");
+        console.log("handleSubmitResult: Invalid winning number input. Alert shown.");
         return;
     }
 
-    const pendingItemId = state.currentPendingCalculationId;
-    if (pendingItemId === null) {
-        alert("No pending calculation to submit a result for. Please enter numbers and click 'Calculate' first.");
-        return;
+    // If no pending calculation but valid inputs exist, create one automatically
+    if (!state.currentPendingCalculationId) {
+        const num1Val = parseInt(dom.number1.value, 10);
+        const num2Val = parseInt(dom.number2.value, 10);
+        
+        if (!isNaN(num1Val) && !isNaN(num2Val)) {
+            console.log("handleSubmitResult: No pending calculation, but valid inputs exist. Creating one automatically.");
+            const newHistoryItem = {
+                id: Date.now(),
+                num1: num1Val,
+                num2: num2Val,
+                difference: Math.abs(num2Val - num1Val),
+                status: 'pending',
+                hitTypes: [],
+                typeSuccessStatus: {},
+                winningNumber: null,
+                pocketDistance: null,
+                recommendedGroupId: null,
+                recommendationDetails: null
+            };
+            state.history.push(newHistoryItem);
+            state.setCurrentPendingCalculationId(newHistoryItem.id);
+            console.log(`handleSubmitResult: Created pending item ID: ${newHistoryItem.id}`);
+        } else {
+            console.log("handleSubmitResult: No current pending calculation ID set and no valid inputs.");
+            hidePatternAlert();
+            updateMainRecommendationDisplay();
+            return;
+        }
     }
 
-    const pendingItem = state.history.find(item => item.id === pendingItemId);
+    const lastPendingForSubmission = state.history.find(
+        item => item.id === state.currentPendingCalculationId && item.status === 'pending' && item.winningNumber === null
+    );
 
-    if (!pendingItem) {
-        console.error(`handleSubmitResult: No pending item found with ID: ${pendingItemId}. This indicates a state mismatch.`);
-        alert("Error: Could not find the pending calculation. Please try again.");
+    if (!lastPendingForSubmission) {
+        console.error("handleSubmitResult: Could not find pending calculation by stored ID.");
         state.setCurrentPendingCalculationId(null);
+        updateMainRecommendationDisplay();
         return;
     }
-
-    console.log(`handleSubmitResult: Evaluating pending item ID: ${pendingItem.id} with winning number: ${winningNumberVal}`);
+    console.log(`handleSubmitResult: Found pending item by stored ID: ${lastPendingForSubmission.id}. Resolving this item.`);
 
     // Get the current recommendation *before* updating the item's status
-    const recommendationBeforeResult = await getRecommendationDataForDisplay(pendingItem.num1, pendingItem.num2);
+    const recommendationBeforeResult = await getRecommendationDataForDisplay(lastPendingForSubmission.num1, lastPendingForSubmission.num2);
     
     // Store recommendation details on the item
     if (recommendationBeforeResult.bestCandidate) {
-        pendingItem.recommendedGroupId = recommendationBeforeResult.bestCandidate.type.id;
-        pendingItem.recommendationDetails = recommendationBeforeResult.bestCandidate.details;
+        lastPendingForSubmission.recommendedGroupId = recommendationBeforeResult.bestCandidate.type.id;
+        lastPendingForSubmission.recommendationDetails = recommendationBeforeResult.bestCandidate.details;
     }
-    // FIX: Use wrapped base numbers for hit zone calculation
-    evaluateCalculationStatus(pendingItem, winningNumberVal, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    
+
+    evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
+    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status}`);
+
+    state.setCurrentPendingCalculationId(null);
+
+    // Update confirmed wins log (unified spin history)
+    const newLog = state.history
+        .filter(item => item.winningNumber !== null)
+        .sort((a, b) => a.id - b.id)
+        .map(item => item.winningNumber);
+    state.setConfirmedWinsLog(newLog);
+    console.log("handleSubmitResult: confirmedWinsLog updated.");
+
+    // IMPORTANT: Also update apiContext spin history for consistency
+    if (apiContext.getContextSpins().length > 0 || apiContext.getContextId() !== null) {
+        const contextSpins = apiContext.getContextSpins();
+        if (contextSpins.length === 0 || contextSpins[0] !== winningNumber) {
+            apiContext.addSpin(winningNumber);
+            console.log("handleSubmitResult: Manual entry added to apiContext spin history.");
+        }
+    }
+
     // Update adaptive influences based on result
-    if (pendingItem.recommendedGroupId && pendingItem.recommendationDetails?.primaryDrivingFactor) {
-        const primaryFactor = pendingItem.recommendationDetails.primaryDrivingFactor;
-        const influenceChangeMagnitude = Math.max(0, pendingItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+    if (lastPendingForSubmission.recommendedGroupId && lastPendingForSubmission.recommendationDetails?.primaryDrivingFactor) {
+        const primaryFactor = lastPendingForSubmission.recommendationDetails.primaryDrivingFactor;
+        const influenceChangeMagnitude = Math.max(0, lastPendingForSubmission.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
 
         if (state.adaptiveFactorInfluences[primaryFactor] === undefined) {
             state.adaptiveFactorInfluences[primaryFactor] = 1.0;
         }
 
-        if (pendingItem.recommendationDetails.finalScore > 0 && pendingItem.recommendationDetails.signal !== 'Avoid Play') {
-            if (pendingItem.hitTypes.includes(pendingItem.recommendedGroupId)) {
+        if (lastPendingForSubmission.recommendationDetails.finalScore > 0 && lastPendingForSubmission.recommendationDetails.signal !== 'Avoid Play') {
+            if (lastPendingForSubmission.hitTypes.includes(lastPendingForSubmission.recommendedGroupId)) {
                 state.adaptiveFactorInfluences[primaryFactor] = Math.min(
                     config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE,
                     state.adaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)
@@ -178,9 +241,7 @@ export async function handleSubmitResult() {
         );
     }
 
-    state.confirmedWinsLog.push(winningNumberVal);
-    state.setCurrentPendingCalculationId(null);
-    dom.winningNumberInput.value = '';
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
 
     // AI training check
     const confirmedCount = state.history.filter(item => item.winningNumber !== null && item.status !== 'pending').length;
@@ -188,13 +249,33 @@ export async function handleSubmitResult() {
         analysis.initializeAi();
     }
 
-    console.log("handleSubmitResult: Result submitted. Running all analyses.");
-    analysis.runAllAnalyses();
+    analysis.runAllAnalyses(winningNumber);
     renderHistory();
-    await updateMainRecommendationDisplay();
+    console.log("handleSubmitResult: Analysis and history re-rendered.");
+
+    dom.winningNumberInput.value = '';
+    console.log("handleSubmitResult: Winning number input cleared.");
+
+    // Auto-populate for next spin and trigger calculation
+    const prevNum2 = parseInt(lastPendingForSubmission.num2, 10);
+    if (!isNaN(prevNum2)) {
+        dom.number1.value = prevNum2;
+        dom.number2.value = winningNumber;
+        console.log(`handleSubmitResult: Auto-populating for next spin: num1=${dom.number1.value}, num2=${dom.number2.value}`);
+        setTimeout(() => {
+            console.log("handleSubmitResult: Triggering next handleNewCalculation via setTimeout.");
+            handleNewCalculation(isAutoCall);
+        }, 50);
+    } else {
+        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.');
+        updateMainRecommendationDisplay();
+    }
+    
+    hidePatternAlert();
     updateWinLossCounter();
     renderStrategyWeights();
     state.saveState();
+    console.log("handleSubmitResult: Function finished.");
 }
 
 function runSimulationOnHistory(spinsToProcess) {
@@ -334,6 +415,11 @@ async function loadApiHistoryIntoApp(spins, tableName) {
     renderStrategyWeights();
     state.saveState();
     
+    // Auto-trigger a new calculation with the loaded inputs
+    setTimeout(() => {
+        handleNewCalculation(true);
+    }, 50);
+    
     dom.apiStatusMessage.textContent = `Loaded ${simulatedHistory.length} items from ${tableName}.`;
     addTrainingLogEntry('info', `API History loaded: ${spins.length} spins from ${tableName}`);
 }
@@ -359,7 +445,7 @@ export function attachMainActionListeners() {
     });
 
     document.getElementById('calculateButton').addEventListener('click', () => handleNewCalculation());
-    dom.submitResultButton.addEventListener('click', handleSubmitResult);
+    dom.submitResultButton.addEventListener('click', () => handleSubmitResult());
     document.getElementById('swapButton').addEventListener('click', () => {
         const temp = dom.number1.value;
         dom.number1.value = dom.number2.value;
@@ -835,18 +921,17 @@ export function attachApiEventHandlers() {
                     const num2Val = parseInt(dom.number2.value, 10);
                     
                     if (!isNaN(num1Val) && !isNaN(num2Val)) {
-                        const pendingItemId = state.currentPendingCalculationId;
-                        if (pendingItemId !== null) {
-                            dom.winningNumberInput.value = newSpin;
-                            await handleSubmitResult();
+                        // Set the winning number and submit with isAutoCall=true to bypass auto mode check
+                        dom.winningNumberInput.value = newSpin;
+                        await handleSubmitResult(true);
+                    } else {
+                        // No valid inputs yet, just update the inputs with recent spins
+                        const recentSpins = apiContext.getRecentSpins(2);
+                        if (recentSpins.length >= 2) {
+                            dom.number1.value = recentSpins[1];
+                            dom.number2.value = recentSpins[0];
+                            handleNewCalculation(true);
                         }
-                    }
-                    
-                    const recentSpins = apiContext.getRecentSpins(2);
-                    if (recentSpins.length >= 2) {
-                        dom.number1.value = recentSpins[1];
-                        dom.number2.value = recentSpins[0];
-                        handleNewCalculation(true);
                     }
                 });
                 
