@@ -1,4 +1,5 @@
 // js/api/numberContext.js - Number-Level Context Manager
+// IMPROVED: Enhanced severity bonus calculation for scoring integration
 // Manages individual number streak data (losses and historical max per number 0-36)
 // Aggregates to calculation groups for contextual analysis
 
@@ -11,10 +12,11 @@
 
 // Severity thresholds (as ratios of historical max)
 export const NUMBER_SEVERITY_THRESHOLDS = {
-    NORMAL: 0.3,      // Below 30% of historical max
-    MILD: 0.5,        // 30-50% of historical max
-    ELEVATED: 0.7,    // 50-70% of historical max
-    HIGH: 0.85,       // 70-85% of historical max
+    NORMAL: 0.25,     // Below 25% of historical max
+    MILD: 0.4,        // 25-40% of historical max  
+    ELEVATED: 0.55,   // 40-55% of historical max
+    HIGH: 0.7,        // 55-70% of historical max
+    VERY_HIGH: 0.85,  // 70-85% of historical max
     EXTREME: 1.0      // 85%+ of historical max
 };
 
@@ -201,6 +203,9 @@ class NumberContextManager {
         } else if (ratio < NUMBER_SEVERITY_THRESHOLDS.HIGH) {
             level = 'high';
             description = 'notably extended';
+        } else if (ratio < NUMBER_SEVERITY_THRESHOLDS.VERY_HIGH) {
+            level = 'very_high';
+            description = 'significantly extended';
         } else {
             level = 'extreme';
             description = 'near historical extreme';
@@ -215,6 +220,34 @@ class NumberContextManager {
             description,
             isApiMax
         };
+    }
+
+    /**
+     * IMPROVED: Calculate severity bonus for scoring
+     * This provides a weighted score based on number severity ratios
+     * NOT a prediction - just contextual weighting
+     * @param {number} num - Roulette number (0-36)
+     * @param {number} threshold - Minimum ratio to trigger bonus (default 0.5)
+     * @returns {number} Severity bonus value (0 to ~2)
+     */
+    getSeverityBonus(num, threshold = 0.5) {
+        const severity = this.getNumberSeverity(num);
+        if (!severity || severity.level === 'invalid') {
+            return 0;
+        }
+
+        // Only provide bonus above threshold
+        if (severity.ratio < threshold) {
+            return 0;
+        }
+
+        // Scale bonus from threshold to 1.0
+        // Uses a smooth curve that increases more slowly at extremes
+        const normalizedRatio = (severity.ratio - threshold) / (1.0 - threshold);
+        
+        // Apply diminishing returns curve
+        // This prevents extreme values from having outsized impact
+        return Math.sqrt(normalizedRatio) * 2;
     }
 
     /**
@@ -300,6 +333,8 @@ class NumberContextManager {
             contextDescription = 'Moderate number streaks detected';
         } else if (aggregateSeverity < NUMBER_SEVERITY_THRESHOLDS.HIGH) {
             contextDescription = 'Elevated number streak levels';
+        } else if (aggregateSeverity < NUMBER_SEVERITY_THRESHOLDS.VERY_HIGH) {
+            contextDescription = 'High number streak environment';
         } else {
             contextDescription = 'Unusual number environment (near historical extremes)';
         }
@@ -330,15 +365,51 @@ class NumberContextManager {
     }
 
     /**
+     * IMPROVED: Calculate aggregate severity bonus for a hit zone
+     * Used by the scoring system to add contextual weight
+     * @param {Array<number>} hitZoneNumbers - Numbers in the hit zone
+     * @param {number} threshold - Minimum severity ratio to trigger bonus
+     * @returns {number} Aggregate severity bonus for the hit zone
+     */
+    calculateHitZoneSeverityBonus(hitZoneNumbers, threshold = 0.5) {
+        if (!hitZoneNumbers || hitZoneNumbers.length === 0) {
+            return 0;
+        }
+
+        const validNumbers = hitZoneNumbers.filter(n => n >= 0 && n <= 36);
+        if (validNumbers.length === 0) {
+            return 0;
+        }
+
+        let totalBonus = 0;
+        let validCount = 0;
+
+        for (const num of validNumbers) {
+            const bonus = this.getSeverityBonus(num, threshold);
+            if (bonus > 0) {
+                totalBonus += bonus;
+                validCount++;
+            }
+        }
+
+        // Return weighted average, not sum
+        // This prevents larger hit zones from getting unfair advantage
+        return validCount > 0 ? totalBonus / validNumbers.length : 0;
+    }
+
+    /**
      * Get confidence modifier based on number context
-     * Returns a multiplier (0.85 to 1.0) for group confidence adjustment
+     * Returns a multiplier for group confidence adjustment
      * 
-     * IMPORTANT: This is a CONTEXTUAL modifier, not a boost.
-     * Extreme streaks reduce confidence (more uncertainty), not increase it.
-     * This avoids gambler's fallacy implications.
+     * IMPROVED: Now returns values that can both reduce and increase confidence
+     * - Low severity = neutral (1.0)
+     * - Moderate severity = slight boost (1.0-1.2)
+     * - High severity = larger boost (1.2-1.5)
+     * 
+     * NOTE: This is contextual interest, not prediction certainty
      * 
      * @param {Object} groupContext - Context from calculateGroupContext
-     * @returns {number} Confidence modifier (0.85 to 1.0)
+     * @returns {number} Confidence modifier (0.8 to 1.5)
      */
     getConfidenceModifier(groupContext) {
         if (!groupContext || !groupContext.hasContext) {
@@ -347,17 +418,20 @@ class NumberContextManager {
 
         const severity = groupContext.aggregateSeverity;
 
-        // Higher severity = more uncertainty = lower confidence modifier
-        // This is intentionally conservative
-        if (severity >= NUMBER_SEVERITY_THRESHOLDS.EXTREME) {
-            return 0.85; // Near historical extreme - high uncertainty
-        } else if (severity >= NUMBER_SEVERITY_THRESHOLDS.HIGH) {
-            return 0.90;
-        } else if (severity >= NUMBER_SEVERITY_THRESHOLDS.ELEVATED) {
-            return 0.95;
+        // IMPROVED: Graduated scale based on severity
+        if (severity < NUMBER_SEVERITY_THRESHOLDS.NORMAL) {
+            return 1.0; // Normal - no modification
+        } else if (severity < NUMBER_SEVERITY_THRESHOLDS.MILD) {
+            return 1.0; // Mild - still neutral
+        } else if (severity < NUMBER_SEVERITY_THRESHOLDS.ELEVATED) {
+            return 1.1; // Elevated - slight interest
+        } else if (severity < NUMBER_SEVERITY_THRESHOLDS.HIGH) {
+            return 1.2; // High - moderate interest
+        } else if (severity < NUMBER_SEVERITY_THRESHOLDS.VERY_HIGH) {
+            return 1.35; // Very high - notable interest
+        } else {
+            return 1.5; // Extreme - maximum interest
         }
-        
-        return 1.0; // Normal conditions - no modification
     }
 
     /**
@@ -418,7 +492,7 @@ class NumberContextManager {
         if (!groupContext.hasContext) {
             return {
                 headline: 'No historical number context',
-                description: 'Number analysis unavailable for this configuration.',
+                description: 'Number analysis unavailable for this configuration',
                 details: [],
                 disclaimer: null,
                 isApiCalibrated: false
@@ -448,7 +522,7 @@ class NumberContextManager {
         // Add aggregate context note
         if (groupContext.aggregateSeverity >= NUMBER_SEVERITY_THRESHOLDS.ELEVATED) {
             details.push(
-                'Note: Extended streaks may indicate increased variance'
+                'Note: Extended streaks provide contextual interest'
             );
         }
 
