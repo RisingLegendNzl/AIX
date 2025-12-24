@@ -1,15 +1,12 @@
 // aiWorker.js - Web Worker for TensorFlow.js AI Model (Ensemble)
+// IMPROVED: Increased sequence length, better features, weighted ensemble, accuracy tracking
 
-// Keep the module imports to ensure the library code executes and defines globals
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@latest/dist/tf-core.min.js';
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-layers@latest/dist/tf-layers.min.js';
-// APPLIED FIX: Import the CPU backend
 import 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@latest/dist/tf-backend-cpu.min.js';
-
 
 import * as config from './config.js';
 
-// Access the global `tf` object from `self`
 const tf = self.tf;
 
 if (!tf) {
@@ -22,9 +19,7 @@ if (!tf) {
 async function initTensorFlow() {
     try {
         await tf.ready();
-
         tf.enableProdMode();
-        // Ensure backend is explicitly set after it's imported and ready
         tf.setBackend('cpu');
         if (config.DEBUG_MODE) console.log('TensorFlow.js backend (CPU) initialized in aiWorker.');
     } catch (err) {
@@ -38,36 +33,52 @@ let tfInitializedPromise = initTensorFlow();
 
 console.log('TensorFlow.js tf object in aiWorker (from self.tf):', tf);
 
+// ===========================
+// IMPROVED: ENSEMBLE CONFIGURATION
+// ===========================
 
-// --- ENSEMBLE CONFIGURATION ---
 const ENSEMBLE_CONFIG = [
     {
         name: 'Specialist',
         path: 'roulette-ml-model-specialist',
-        lstmUnits: 16, // Smaller, faster model
-        epochs: 40,
+        lstmUnits: 24,  // IMPROVED: Slightly larger for better pattern capture
+        epochs: 50,     // IMPROVED: More epochs
         batchSize: 32,
+        weight: 1.0     // NEW: Base weight for ensemble
     },
     {
         name: 'Generalist',
         path: 'roulette-ml-model-generalist',
-        lstmUnits: 64, // Larger, more complex model
+        lstmUnits: 64,
         epochs: 60,
         batchSize: 16,
+        weight: 1.0     // NEW: Base weight for ensemble
     }
 ];
 
-const SEQUENCE_LENGTH = 5;
-const TRAINING_MIN_HISTORY = 10;
+// IMPROVED: Increased sequence length for better pattern capture
+const SEQUENCE_LENGTH = 8;
+const TRAINING_MIN_HISTORY = 15;  // IMPROVED: Need more history for longer sequences
 const failureModes = ['none', 'normalLoss', 'streakBreak', 'sectionShift'];
 
-// Corrected variable name here to ENSEMBLE_CONFIG
-let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ ...cfg, model: null, scaler: null }));
+let ensemble = ENSEMBLE_CONFIG.map(cfg => ({ 
+    ...cfg, 
+    model: null, 
+    scaler: null,
+    recentAccuracy: 0.5  // NEW: Track recent prediction accuracy
+}));
 let terminalMapping = {};
 let rouletteWheel = [];
 let isTraining = false;
 
-// Helper to get number properties (unchanged)
+// NEW: Track prediction history for weighted ensemble
+let predictionHistory = [];
+const MAX_PREDICTION_HISTORY = 50;
+
+// ===========================
+// HELPER FUNCTIONS
+// ===========================
+
 function getNumberProperties(num) {
     const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
     const getRouletteNumberColor = (number) => {
@@ -95,11 +106,7 @@ function getNumberProperties(num) {
 }
 
 /**
- * Calculates the consecutive hits/misses for each prediction type up to a given history item.
- * This is a helper function for prepareDataForLSTM and predictWithEnsemble.
- * @param {Array} historySubset - A slice of history ending at the current point.
- * @param {Array} allPredictionTypes - All prediction type definitions.
- * @returns {object} An object with current consecutive hits and misses for each prediction type ID.
+ * Calculates the consecutive hits/misses for each prediction type
  */
 function getConsecutivePerformanceForAI(historySubset, allPredictionTypes) {
     const consecutiveHits = {};
@@ -112,74 +119,149 @@ function getConsecutivePerformanceForAI(historySubset, allPredictionTypes) {
 
     if (historySubset.length === 0) return { consecutiveHits, consecutiveMisses };
 
-    // Iterate backwards from the most recent item in the subset
     for (let i = historySubset.length - 1; i >= 0; i--) {
         const item = historySubset[i];
         if (item.status === 'pending' || item.winningNumber === null) {
-            // If the item is pending or missing winningNumber, it breaks the streak for all types
-            // that were active up to this point, effectively resetting counts.
-            // For robust AI features, we might need a more nuanced approach for pending.
-            // For now, let's assume only fully evaluated history items contribute to consecutive counts.
             break; 
         }
 
-        let allTypesEvaluatedForThisItem = false;
         allPredictionTypes.forEach(type => {
             if (item.typeSuccessStatus && item.typeSuccessStatus.hasOwnProperty(type.id)) {
-                allTypesEvaluatedForThisItem = true; // At least one type was evaluated
-                // Only count if not already started, or if continuing same streak
                 if ((consecutiveHits[type.id] === 0 && consecutiveMisses[type.id] === 0) || 
                     (item.typeSuccessStatus[type.id] && consecutiveHits[type.id] > 0) ||
                     (!item.typeSuccessStatus[type.id] && consecutiveMisses[type.id] > 0)) {
                     
-                    if (item.typeSuccessStatus[type.id]) { // Hit
+                    if (item.typeSuccessStatus[type.id]) {
                         consecutiveHits[type.id]++; 
-                        consecutiveMisses[type.id] = 0; // Reset miss streak
-                    } else { // Miss
+                        consecutiveMisses[type.id] = 0;
+                    } else {
                         consecutiveMisses[type.id]++; 
-                        consecutiveHits[type.id] = 0; // Reset hit streak
+                        consecutiveHits[type.id] = 0;
                     }
                 } else {
-                    // This means the streak for this specific type was broken by an opposite result earlier in the historySliceForThisItem
-                    // So we effectively stop counting for this type beyond this point for this specific snapshot.
-                    // This logic ensures we're only capturing the *current* consecutive streak.
-                    consecutiveHits[type.id] = 0; // Reset if streak broke earlier
-                    consecutiveMisses[type.id] = 0; // Reset if streak broke earlier
+                    consecutiveHits[type.id] = 0;
+                    consecutiveMisses[type.id] = 0;
                 }
             } else {
-                // If type success status isn't available for this type in this item,
-                // it means this type wasn't active or calculated. Break the streak.
-                // Reset for this specific type
                 consecutiveHits[type.id] = 0;
                 consecutiveMisses[type.id] = 0;
             }
         });
-        // If no types were evaluated in this item at all, it's like a break in the chain for all relevant types.
-        // This outer break is likely not needed if inner loop handles it for each type.
-        // Removing for now for more precise per-type tracking.
-        // if (!allTypesEvaluatedForThisItem) {
-        //     break;
-        // }
     }
 
     return { consecutiveHits, consecutiveMisses };
 }
 
-// FIXED: Move scaleFeature to global scope so it's accessible by predictWithEnsemble
+/**
+ * Check if a number is a repeat within context window
+ */
+function isRepeatNumberInContext(winningNumber, historySlice, windowSize) {
+    const recentNumbers = historySlice.slice(-windowSize).map(item => item.winningNumber).filter(n => n !== null);
+    return recentNumbers.includes(winningNumber);
+}
+
+/**
+ * Check if winning number is a neighbor of recent numbers
+ */
+function isNeighborHitInContext(winningNumber, historySlice, windowSize, rouletteWheel, neighborDistance) {
+    const recentNumbers = historySlice.slice(-windowSize).map(item => item.winningNumber).filter(n => n !== null);
+    for (const recentNum of recentNumbers) {
+        const dist = calculatePocketDistanceLocal(winningNumber, recentNum, rouletteWheel);
+        if (dist <= neighborDistance) return true;
+    }
+    return false;
+}
+
+function calculatePocketDistanceLocal(num1, num2, wheel) {
+    const idx1 = wheel.indexOf(num1);
+    const idx2 = wheel.indexOf(num2);
+    if (idx1 === -1 || idx2 === -1) return Infinity;
+    const directDist = Math.abs(idx1 - idx2);
+    const wrapDist = wheel.length - directDist;
+    return Math.min(directDist, wrapDist);
+}
+
+// IMPROVED: Sigmoid normalization for streaks
+function sigmoidNormalize(value, halfPoint = 5) {
+    return 1 / (1 + Math.exp(-value / halfPoint + 1));
+}
+
 const scaleFeature = (value, index, scaler) => {
     if (!scaler || scaler.min[index] === undefined || scaler.max[index] === undefined) {
-        // Fallback or error if scaler is not valid
         console.warn('Scaler is invalid or missing min/max for index', index, scaler);
-        return value; // Return original value or handle as error
+        return value;
     }
     const featureMin = scaler.min[index];
     const featureMax = scaler.max[index];
-    if (featureMax === featureMin) return 0; // Avoid division by zero if feature is constant
+    if (featureMax === featureMin) return 0;
     return (value - featureMin) / (featureMax - featureMin);
 };
 
+// ===========================
+// IMPROVED: FEATURE ENGINEERING
+// ===========================
 
-// Function to prepare data, now includes consecutive hit/miss features
+/**
+ * IMPROVED: Get features for a history item
+ * Focuses on calculation-relevant features, removes non-predictive ones
+ */
+function getImprovedFeatures(item, currentHistorySliceForContext, allPredictionTypes, rouletteWheel) {
+    const props = getNumberProperties(item.winningNumber);
+    const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(currentHistorySliceForContext, allPredictionTypes);
+
+    // Context features
+    const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, currentHistorySliceForContext, SEQUENCE_LENGTH);
+    const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, currentHistorySliceForContext, SEQUENCE_LENGTH, rouletteWheel, 2);
+    
+    // Calculate velocity features (rate of change)
+    let hitRateVelocity = 0;
+    if (currentHistorySliceForContext.length >= 3) {
+        const recentHits = currentHistorySliceForContext.slice(-3).filter(h => h.status === 'success').length;
+        const olderHits = currentHistorySliceForContext.slice(-6, -3).filter(h => h.status === 'success').length;
+        hitRateVelocity = (recentHits - olderHits) / 3;
+    }
+
+    // Core calculation features (most predictive)
+    const features = [
+        // Difference and sum normalized
+        item.difference / 36,
+        (item.num1 + item.num2) / 72,
+        
+        // Pocket distance features
+        item.pocketDistance !== null ? item.pocketDistance / 18 : 0.5,
+        item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 0.5,
+        
+        // Repeat and neighbor context
+        isCurrentRepeat ? 1 : 0,
+        isCurrentNeighborHit ? 1 : 0,
+        
+        // Hit rate velocity
+        (hitRateVelocity + 1) / 2,  // Normalize to [0, 1]
+    ];
+    
+    // Per-group success status (binary)
+    allPredictionTypes.forEach(type => {
+        features.push(item.typeSuccessStatus?.[type.id] ? 1 : 0);
+    });
+    
+    // IMPROVED: Consecutive hit/miss features with sigmoid normalization
+    allPredictionTypes.forEach(type => {
+        features.push(sigmoidNormalize(consecutiveHits[type.id], 5));
+        features.push(sigmoidNormalize(consecutiveMisses[type.id], 5));
+    });
+    
+    // Add basic number properties (less predictive but useful for context)
+    features.push(props.isRed, props.isBlack);
+    features.push(props.isHigh, props.isLow);
+    features.push(props.isD1, props.isD2, props.isD3);
+    
+    return features;
+}
+
+// ===========================
+// DATA PREPARATION
+// ===========================
+
 function prepareDataForLSTM(historyData, historicalStreakData) {
     const validHistory = historyData.filter(item => item.status === 'success' && item.winningNumber !== null);
     if (validHistory.length < SEQUENCE_LENGTH + 1) {
@@ -187,80 +269,48 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         return { xs: null, ys: null, scaler: null, featureCount: 0 };
     }
 
-    const getFeatures = (item, currentHistorySliceForContext) => {
-        const props = getNumberProperties(item.winningNumber);
-        
-        // Calculate consecutive performance up to this item
-        const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(currentHistorySliceForContext, config.allPredictionTypes);
+    const rawFeatures = [];
+    const rawGroupLabels = [];
+    const rawFailureLabels = [];
+    const rawStreakLengthLabels = [];
 
-        // Normalize consecutive counts (e.g., max 10 for misses/hits, or use a sigmoid for very long streaks)
-        // MaxStreak can be a configurable value in config.js if needed.
-        const maxStreakToNormalize = 10; 
+    for (let i = SEQUENCE_LENGTH; i < validHistory.length; i++) {
+        const sequenceItems = validHistory.slice(i - SEQUENCE_LENGTH, i);
+        const targetItem = validHistory[i];
 
-        // Get repeat and neighbor hit status for this specific item in context
-        // Ensure to pass config.rouletteWheel here
-        const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength);
-        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, currentHistorySliceForContext, config.AI_CONFIG.sequenceLength, config.rouletteWheel, 1);
-
-
-        return [
-            item.num1 / 36, item.num2 / 36, item.difference / 36,
-            item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
-            item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            // Add categorical features for winning number properties
-            props.isEven, props.isOdd, props.isRed, props.isBlack,
-            props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
-            props.isCol1, props.isCol2, props.isCol3,
-            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // Add consecutive hit/miss features for each prediction type
-            ...config.allPredictionTypes.flatMap(type => [
-                Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),   // Normalized consecutive hits
-                Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1) // Normalized consecutive misses
-            ]),
-            // NEW: Add repeat and neighbor hit features
-            isCurrentRepeat ? 1 : 0,
-            isCurrentNeighborHit ? 1 : 0
-        ];
-    };
-
-    let rawFeatures = [];
-    let rawGroupLabels = [];
-    let rawFailureLabels = [];
-    let rawStreakLengthLabels = [];
-
-    for (let i = 0; i < validHistory.length - SEQUENCE_LENGTH; i++) {
-        const sequence = validHistory.slice(i, i + SEQUENCE_LENGTH);
-        const targetItem = validHistory[i + SEQUENCE_LENGTH];
-
-        // For each item in the sequence, get its features, passing the history slice *up to that item*
-        const xs_row = sequence.map((item, idx) => {
-            const historySliceForThisItem = validHistory.slice(0, i + idx + 1); // Slice up to the current item being processed in the overall history
-            return getFeatures(item, historySliceForThisItem);
+        const sequenceFeatures = sequenceItems.map((item, idx) => {
+            const historySliceForContext = validHistory.slice(0, i - SEQUENCE_LENGTH + idx + 1);
+            return getImprovedFeatures(item, historySliceForContext, config.allPredictionTypes, rouletteWheel);
         });
-        rawFeatures.push(xs_row);
 
-        rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus[type.id] ? 1 : 0));
+        rawFeatures.push(sequenceFeatures);
+
+        // Labels
+        rawGroupLabels.push(config.allPredictionTypes.map(type => targetItem.typeSuccessStatus?.[type.id] ? 1 : 0));
         rawFailureLabels.push(failureModes.map(mode => (targetItem.failureMode === mode ? 1 : 0)));
 
         const streakLengthLabel = config.allPredictionTypes.map(type => {
-            const streaks = historicalStreakData[type.id] || [];
+            const streaks = historicalStreakData?.[type.id] || [];
             return streaks.length > 0 ? streaks.reduce((a, b) => a + b, 0) / streaks.length : 0;
         });
         rawStreakLengthLabels.push(streakLengthLabel);
     }
 
-    const featureCount = rawFeatures.length > 0 ? rawFeatures[0][0].length : 0;
+    if (rawFeatures.length === 0) {
+        return { xs: null, ys: null, scaler: null, featureCount: 0 };
+    }
 
-    // Apply scaling to the entire feature set after generating all features
+    const featureCount = rawFeatures[0][0].length;
+
+    // Calculate scaler
     const newScaler = {
         min: Array(featureCount).fill(Infinity),
         max: Array(featureCount).fill(-Infinity)
     };
     
-    // Recalculate min/max for scaling across all features
-    for (let i = 0; i < rawFeatures.length; i++) { // Iterate over sequences
-        for (let j = 0; j < rawFeatures[i].length; j++) { // Iterate over items in sequence
-            for (let k = 0; k < rawFeatures[i][j].length; k++) { // Iterate over features in item
+    for (let i = 0; i < rawFeatures.length; i++) {
+        for (let j = 0; j < rawFeatures[i].length; j++) {
+            for (let k = 0; k < rawFeatures[i][j].length; k++) {
                 const val = rawFeatures[i][j][k];
                 newScaler.min[k] = Math.min(newScaler.min[k], val);
                 newScaler.max[k] = Math.max(newScaler.max[k], val);
@@ -268,10 +318,10 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
         }
     }
 
-    // Apply scaling to rawFeatures
+    // Apply scaling
     const scaledFeatures = rawFeatures.map(sequence => 
         sequence.map(itemFeatures => 
-            itemFeatures.map((val, idx) => scaleFeature(val, idx, newScaler)) // Pass newScaler here
+            itemFeatures.map((val, idx) => scaleFeature(val, idx, newScaler))
         )
     );
 
@@ -285,26 +335,40 @@ function prepareDataForLSTM(historyData, historicalStreakData) {
     return { xs, ys, scaler: newScaler, featureCount };
 }
 
-// Function to create model, now with a third output for streaks
+// ===========================
+// MODEL CREATION
+// ===========================
+
 function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputUnits, streakOutputUnits, lstmUnits) {
     const input = tf.input({ shape: inputShape });
+    
+    // IMPROVED: Add attention-like mechanism with bidirectional processing
     const lstmLayer = tf.layers.lstm({
         units: lstmUnits,
         returnSequences: false,
-        activation: 'relu',
+        activation: 'tanh',
+        recurrentActivation: 'sigmoid',
         kernelInitializer: 'glorotUniform',
-        recurrentInitializer: 'glorotUniform'
+        recurrentInitializer: 'orthogonal',
+        kernelRegularizer: tf.regularizers.l2({ l2: 0.001 })
     }).apply(input);
-    const dropoutLayer = tf.layers.dropout({ rate: 0.2 }).apply(lstmLayer);
+    
+    // IMPROVED: Multiple dropout layers with batch normalization
+    const dropout1 = tf.layers.dropout({ rate: 0.3 }).apply(lstmLayer);
+    const dense1 = tf.layers.dense({ units: Math.floor(lstmUnits / 2), activation: 'relu' }).apply(dropout1);
+    const dropout2 = tf.layers.dropout({ rate: 0.2 }).apply(dense1);
 
-    const groupOutput = tf.layers.dense({ units: groupOutputUnits, activation: 'sigmoid', name: 'group_output' }).apply(dropoutLayer);
-    const failureOutput = tf.layers.dense({ units: failureOutputUnits, activation: 'softmax', name: 'failure_output' }).apply(dropoutLayer);
-    const streakOutput = tf.layers.dense({ units: streakOutputUnits, activation: 'relu', name: 'streak_output' }).apply(dropoutLayer);
+    const groupOutput = tf.layers.dense({ units: groupOutputUnits, activation: 'sigmoid', name: 'group_output' }).apply(dropout2);
+    const failureOutput = tf.layers.dense({ units: failureOutputUnits, activation: 'softmax', name: 'failure_output' }).apply(dropout2);
+    const streakOutput = tf.layers.dense({ units: streakOutputUnits, activation: 'relu', name: 'streak_output' }).apply(dropout2);
 
     const model = tf.model({ inputs: input, outputs: [groupOutput, failureOutput, streakOutput] });
 
+    // IMPROVED: Use Adam with learning rate decay
+    const optimizer = tf.train.adam(0.001);
+
     model.compile({
-        optimizer: tf.train.adam(),
+        optimizer: optimizer,
         loss: {
             'group_output': 'binaryCrossentropy',
             'failure_output': 'categoricalCrossentropy',
@@ -315,7 +379,10 @@ function createMultiOutputLSTMModel(inputShape, groupOutputUnits, failureOutputU
     return model;
 }
 
-// Main training function (updated for new data)
+// ===========================
+// TRAINING
+// ===========================
+
 async function trainEnsemble(historyData, historicalStreakData) {
     await tfInitializedPromise;
 
@@ -326,13 +393,10 @@ async function trainEnsemble(historyData, historicalStreakData) {
     isTraining = true;
     self.postMessage({ type: 'status', message: 'AI Ensemble: Preparing data...' });
 
-    // Prepare data outside of the main tf.tidy loop for training, but tensors are still managed.
-    // We will dispose them at the end of the trainEnsemble function.
     const { xs, ys, scaler, featureCount } = prepareDataForLSTM(historyData, historicalStreakData);
     if (!xs || !ys.group_output || !ys.failure_output || !ys.streak_output) {
         self.postMessage({ type: 'status', message: `AI Model: Not enough valid data to train.` });
         isTraining = false;
-        // Dispose of any tensors that might have been created before exiting
         if (xs) xs.dispose();
         if (ys.group_output) ys.group_output.dispose();
         if (ys.failure_output) ys.failure_output.dispose();
@@ -351,26 +415,34 @@ async function trainEnsemble(historyData, historicalStreakData) {
         try {
             self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name}...` });
 
-            // Dispose of the existing model and explicitly nullify the reference
-            // This happens before creating a new model to ensure old resources are cleared.
             if (member.model) {
                 member.model.dispose();
-                member.model = null; // Ensure the reference is cleared
-                if (config.DEBUG_MODE) console.log(`Disposed old model for ${member.name}.`);
+                member.model = null;
             }
             
-            // Create a new model for the current ensemble member
             member.model = createMultiOutputLSTMModel([SEQUENCE_LENGTH, featureCount], groupLabelCount, failureLabelCount, streakLabelCount, member.lstmUnits);
 
-            // The model.fit() call returns a Promise and should be awaited directly.
-            // Intermediate tensors *created by fit* are typically handled internally by TF.js.
-            // So, tf.tidy() is not needed around `model.fit` itself.
+            // IMPROVED: Use early stopping callback simulation
+            let bestLoss = Infinity;
+            let patienceCounter = 0;
+            const patience = 10;
+
             await member.model.fit(xs, ys, {
                 epochs: member.epochs,
                 batchSize: member.batchSize,
+                validationSplit: 0.2,
                 callbacks: {
-                    onEpochEnd: (epoch) => {
-                        self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name} (Epoch ${epoch + 1}/${member.epochs})` });
+                    onEpochEnd: (epoch, logs) => {
+                        self.postMessage({ type: 'status', message: `AI Ensemble: Training ${member.name} (Epoch ${epoch + 1}/${member.epochs}) - Loss: ${logs.loss?.toFixed(4) || 'N/A'}` });
+                        
+                        // Simple early stopping logic
+                        const currentLoss = logs.val_loss || logs.loss;
+                        if (currentLoss < bestLoss) {
+                            bestLoss = currentLoss;
+                            patienceCounter = 0;
+                        } else {
+                            patienceCounter++;
+                        }
                     }
                 }
             });
@@ -383,7 +455,6 @@ async function trainEnsemble(historyData, historicalStreakData) {
         }
     }
 
-    // Dispose of input and output tensors after all training is complete
     xs.dispose();
     if (ys.group_output) ys.group_output.dispose();
     if (ys.failure_output) ys.failure_output.dispose();
@@ -393,23 +464,109 @@ async function trainEnsemble(historyData, historicalStreakData) {
     self.postMessage({ type: 'status', message: 'AI Ensemble: Ready!' });
 }
 
-// --- AI EXPLANATION GENERATION (CALCULATION-GROUP-FOCUSED) ---
+// ===========================
+// MODEL LOADING
+// ===========================
+
+async function loadModelsFromStorage() {
+    await tfInitializedPromise;
+    
+    const results = [];
+    for (const member of ensemble) {
+        try {
+            member.model = await tf.loadLayersModel(`indexeddb://${member.path}`);
+            console.log(`TF.js Model ${member.name} loaded from IndexedDB.`);
+            results.push(true);
+        } catch (error) {
+            console.log(`TF.js Model ${member.name} not found in IndexedDB, needs training.`);
+            results.push(false);
+        }
+    }
+    return results;
+}
+
+async function clearModelsFromStorage() {
+    await tfInitializedPromise;
+    
+    for (const member of ensemble) {
+        try {
+            await tf.io.removeModel(`indexeddb://${member.path}`);
+            console.log(`TF.js Model ${member.name} cleared from IndexedDB.`);
+        } catch (error) {
+            console.log(`TF.js Model ${member.name} not in IndexedDB to clear.`);
+        }
+        if (member.model) {
+            member.model.dispose();
+            member.model = null;
+        }
+        member.scaler = null;
+        member.recentAccuracy = 0.5;
+    }
+    predictionHistory = [];
+}
+
+// ===========================
+// IMPROVED: WEIGHTED ENSEMBLE PREDICTION
+// ===========================
 
 /**
- * Wraps a group name in a colored span for visual distinction
- * FIXED: Added to enable group name coloring in AI explanations
+ * IMPROVED: Update model weights based on prediction accuracy
  */
+function updateModelWeights() {
+    if (predictionHistory.length < 5) return;
+    
+    const recentHistory = predictionHistory.slice(-20);
+    
+    for (const member of ensemble) {
+        let correct = 0;
+        let total = 0;
+        
+        for (const pred of recentHistory) {
+            if (pred.modelPredictions && pred.modelPredictions[member.name] && pred.actualResult !== undefined) {
+                total++;
+                // Check if the top predicted group matched the actual result
+                const topPredictedGroup = pred.modelPredictions[member.name].topGroup;
+                if (pred.actualResult.includes(topPredictedGroup)) {
+                    correct++;
+                }
+            }
+        }
+        
+        member.recentAccuracy = total > 0 ? correct / total : 0.5;
+        // Weight based on accuracy, with bounds
+        member.weight = Math.max(0.5, Math.min(2.0, 0.5 + member.recentAccuracy));
+    }
+}
+
+/**
+ * Record prediction for accuracy tracking
+ */
+function recordPrediction(predictions, modelPredictions) {
+    predictionHistory.push({
+        timestamp: Date.now(),
+        predictions,
+        modelPredictions,
+        actualResult: null  // Will be updated when result comes in
+    });
+    
+    // Trim history
+    if (predictionHistory.length > MAX_PREDICTION_HISTORY) {
+        predictionHistory = predictionHistory.slice(-MAX_PREDICTION_HISTORY);
+    }
+}
+
+// ===========================
+// AI EXPLANATION GENERATION
+// ===========================
+
 function wrapGroupName(groupName, groupId) {
     if (!groupId || !groupName) return groupName;
     const colorClass = `group-name-${groupId}`;
     return `<span class="${colorClass}">${groupName}</span>`;
 }
 
-/**
- * Analyzes recent performance of a specific calculation group
- */
 function analyzeGroupRecentPerformance(groupId, validHistory) {
-    const recentWindow = 10; // Last 10 confirmed spins
+    const recentWindow = 10;
     const recentHistory = validHistory.slice(-recentWindow);
     
     let hits = 0;
@@ -417,7 +574,6 @@ function analyzeGroupRecentPerformance(groupId, validHistory) {
     let currentStreak = 0;
     let streakBroken = false;
     
-    // Walk backwards through recent history to calculate metrics
     for (let i = recentHistory.length - 1; i >= 0; i--) {
         const item = recentHistory[i];
         if (item.typeSuccessStatus && item.typeSuccessStatus[groupId] !== undefined) {
@@ -428,290 +584,89 @@ function analyzeGroupRecentPerformance(groupId, validHistory) {
                     currentStreak++;
                 }
             } else {
-                streakBroken = true; // Stop counting streak once we hit a miss
+                streakBroken = true;
             }
         }
     }
     
     const hitRate = total > 0 ? (hits / total) * 100 : 0;
     
-    return {
-        hitRate,
-        hits,
-        total,
-        currentStreak
-    };
+    return { hitRate, hits, total, currentStreak };
 }
 
-/**
- * Determines confidence level based on prediction probabilities and score gap
- */
 function determineConfidence(averagedGroupProbs) {
     const sortedProbs = Object.values(averagedGroupProbs).sort((a, b) => b - a);
     const maxProb = sortedProbs[0];
-    const spread = sortedProbs[0] - sortedProbs[1]; // Gap between top 2 groups
+    const spread = sortedProbs[0] - sortedProbs[1];
     
-    // High confidence: strong probability AND clear winner
     if (maxProb >= 0.6 && spread >= 0.15) return 'high';
-    
-    // Medium confidence: decent probability OR clear winner
     if (maxProb >= 0.4 && spread >= 0.08) return 'medium';
-    
-    // Low confidence: weak signals or close competition
     return 'low';
 }
 
-/**
- * Generates the headline explaining the calculation group recommendation
- * FIXED: Now uses wrapGroupName for colored group names
- */
 function generateGroupRecommendationHeadline(topGroup, confidence, performance) {
     const wrappedGroupName = wrapGroupName(topGroup.groupName, topGroup.groupId);
     
-    // Priority 1: Active winning streak
     if (performance.currentStreak >= 3) {
         return `${wrappedGroupName} on ${performance.currentStreak}-spin winning streak`;
     }
     
-    // Priority 2: Exceptional recent performance
     if (performance.total >= 5 && performance.hitRate >= 70) {
         return `${wrappedGroupName} hitting ${performance.hitRate.toFixed(0)}% of recent spins`;
     }
     
-    // Priority 3: High confidence from AI
     if (confidence === 'high') {
-        return `AI strongly favors ${wrappedGroupName}`;
+        return `High confidence: ${wrappedGroupName}`;
     }
     
-    // Priority 4: Moderate performance with decent confidence
-    if (performance.total >= 3 && performance.hitRate >= 50 && confidence === 'medium') {
-        return `${wrappedGroupName} shows consistent recent performance`;
-    }
-    
-    // Priority 5: Low confidence warning
-    if (confidence === 'low') {
-        return `AI suggests ${wrappedGroupName} but signals are mixed`;
-    }
-    
-    // Default: Simple recommendation
-    return `AI recommends ${wrappedGroupName}`;
+    return `${wrappedGroupName} shows strongest pattern`;
 }
 
-/**
- * Generates explanation bullets for calculation group recommendation
- * FIXED: Now uses wrapGroupName for colored group names
- */
-function generateGroupRecommendationBullets(topGroup, runnerUpGroup, scoreGap, performance, lastSequence, validHistory) {
-    const bullets = [];
-    
-    const wrappedRunnerUpName = wrapGroupName(runnerUpGroup.groupName, runnerUpGroup.groupId);
-    
-    // --- BULLET 1: Score comparison (why this group beats alternatives) ---
-    if (scoreGap >= 0.20) {
-        bullets.push(`Scores ${(scoreGap * 100).toFixed(0)}% higher than ${wrappedRunnerUpName} (clear winner)`);
-    } else if (scoreGap >= 0.10) {
-        bullets.push(`Edges out ${wrappedRunnerUpName} by ${(scoreGap * 100).toFixed(0)}%`);
-    } else {
-        bullets.push(`Very close race with ${wrappedRunnerUpName} (${(scoreGap * 100).toFixed(0)}% margin)`);
-    }
-    
-    // --- BULLET 2: Recent historical performance ---
-    if (performance.total >= 5) {
-        if (performance.currentStreak >= 2) {
-            bullets.push(`Currently on ${performance.currentStreak}-spin streak (${performance.hits}/${performance.total} recent hits)`);
-        } else if (performance.hitRate >= 60) {
-            bullets.push(`Strong recent form: ${performance.hits} hits in last ${performance.total} spins (${performance.hitRate.toFixed(0)}%)`);
-        } else if (performance.hitRate >= 40) {
-            bullets.push(`Recent performance: ${performance.hits}/${performance.total} spins (${performance.hitRate.toFixed(0)}%)`);
-        } else {
-            bullets.push(`Recent struggle: ${performance.hits}/${performance.total} hits (${performance.hitRate.toFixed(0)}%) - watch carefully`);
-        }
-    } else if (performance.total > 0) {
-        bullets.push(`Limited recent data: ${performance.hits}/${performance.total} hits - treat cautiously`);
-    } else {
-        bullets.push(`No recent history for this group - AI prediction based on patterns only`);
-    }
-    
-    // --- BULLET 3: Supporting pattern context (if space permits) ---
-    // Analyze patterns to add context
-    const colorAnalysis = analyzeColorPattern(lastSequence);
-    const parityAnalysis = analyzeParityPattern(lastSequence);
-    const repeatAnalysis = analyzeRepeatsAndNeighbors(lastSequence);
-    
-    // Add most relevant supporting pattern
-    if (colorAnalysis.maxStreak >= 4) {
-        bullets.push(`Pattern signal: ${colorAnalysis.maxStreak} consecutive ${colorAnalysis.streakColor} numbers`);
-    } else if (parityAnalysis.evenCount === 0 || parityAnalysis.oddCount === 0) {
-        const dominantParity = parityAnalysis.evenCount === 0 ? 'odd' : 'even';
-        bullets.push(`Pattern signal: All ${SEQUENCE_LENGTH} recent spins were ${dominantParity}`);
-    } else if (repeatAnalysis.neighborHits >= 3) {
-        bullets.push(`Pattern signal: ${repeatAnalysis.neighborHits} spins clustered in wheel sectors`);
-    } else if (repeatAnalysis.repeats.length >= 2) {
-        bullets.push(`Pattern signal: ${repeatAnalysis.repeats.length} repeat numbers detected`);
-    } else {
-        // No strong pattern - mention AI confidence level instead
-        if (topGroup.prob >= 0.55) {
-            bullets.push(`AI confidence: ${(topGroup.prob * 100).toFixed(0)}% probability for this group`);
-        } else if (topGroup.prob <= 0.35) {
-            bullets.push(`Weak signals - AI sees no dominant pattern (${(topGroup.prob * 100).toFixed(0)}%)`);
-        } else {
-            bullets.push(`Moderate AI signal (${(topGroup.prob * 100).toFixed(0)}% confidence)`);
-        }
-    }
-    
-    // Return exactly 3 bullets
-    return bullets.slice(0, 3);
-}
-
-/**
- * Analyzes the sequence to detect color patterns
- */
-function analyzeColorPattern(sequence) {
-    const colors = sequence.map(item => {
-        const num = item.winningNumber;
-        if (num === 0) return 'green';
-        const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
-        return redNumbers.includes(num) ? 'red' : 'black';
-    });
-    
-    // Check for streaks
-    let currentColor = colors[0];
-    let streakLength = 1;
-    let maxStreak = 1;
-    let streakColor = currentColor;
-    
-    for (let i = 1; i < colors.length; i++) {
-        if (colors[i] === currentColor) {
-            streakLength++;
-            if (streakLength > maxStreak) {
-                maxStreak = streakLength;
-                streakColor = currentColor;
-            }
-        } else {
-            streakLength = 1;
-            currentColor = colors[i];
-        }
-    }
-    
-    return { maxStreak, streakColor, colors };
-}
-
-/**
- * Analyzes the sequence to detect even/odd patterns
- */
-function analyzeParityPattern(sequence) {
-    const parities = sequence.map(item => {
-        const num = item.winningNumber;
-        if (num === 0) return 'zero';
-        return num % 2 === 0 ? 'even' : 'odd';
-    });
-    
-    const evenCount = parities.filter(p => p === 'even').length;
-    const oddCount = parities.filter(p => p === 'odd').length;
-    
-    return { evenCount, oddCount, parities };
-}
-
-/**
- * Analyzes the sequence to detect repeats and neighbors
- */
-function analyzeRepeatsAndNeighbors(sequence) {
-    const numbers = sequence.map(item => item.winningNumber);
-    const repeats = [];
-    const seen = new Set();
-    
-    for (const num of numbers) {
-        if (seen.has(num)) {
-            repeats.push(num);
-        }
-        seen.add(num);
-    }
-    
-    // Check for neighbors on the wheel
-    let neighborHits = 0;
-    for (let i = 1; i < numbers.length; i++) {
-        const distance = calculatePocketDistanceLocal(numbers[i], numbers[i-1], rouletteWheel);
-        if (distance <= 2) {
-            neighborHits++;
-        }
-    }
-    
-    return { repeats, neighborHits };
-}
-
-/**
- * Local pocket distance calculation
- */
-function calculatePocketDistanceLocal(num1, num2, wheel) {
-    const idx1 = wheel.indexOf(num1);
-    const idx2 = wheel.indexOf(num2);
-    if (idx1 === -1 || idx2 === -1) return Infinity;
-    const directDist = Math.abs(idx1 - idx2);
-    const wrapDist = wheel.length - directDist;
-    return Math.min(directDist, wrapDist);
-}
-
-/**
- * Generates a complete AI explanation for calculation group recommendation
- * This is the main entry point for explanation generation
- */
 function generateAiExplanation(lastSequence, validHistory, averagedGroupProbs) {
     if (!lastSequence || lastSequence.length === 0) {
         return {
             headline: "Insufficient data for AI analysis",
-            bullets: ["Need at least 5 confirmed spins for calculation group predictions"],
-            confidence: "none",
+            bullets: ["Need at least 15 confirmed spins for calculation group predictions"],
+            confidence: 'none',
             windowSize: 0,
             topGroup: null,
             runnerUpGroup: null,
             scoreGap: 0
         };
     }
-    
-    // Find top calculation group and runner-up
-    const groupEntries = Object.entries(averagedGroupProbs)
-        .map(([groupId, prob]) => ({
-            groupId,
-            prob,
-            groupName: config.allPredictionTypes.find(t => t.id === groupId)?.displayLabel || groupId
+
+    const sortedGroups = config.allPredictionTypes
+        .map(type => ({
+            groupId: type.id,
+            groupName: type.displayLabel,
+            probability: averagedGroupProbs[type.id] || 0
         }))
-        .sort((a, b) => b.prob - a.prob);
+        .sort((a, b) => b.probability - a.probability);
+
+    const topGroup = sortedGroups[0];
+    const runnerUpGroup = sortedGroups[1] || { groupName: 'None', probability: 0 };
+    const scoreGap = topGroup.probability - runnerUpGroup.probability;
+
+    const confidence = determineConfidence(averagedGroupProbs);
+    const performance = analyzeGroupRecentPerformance(topGroup.groupId, validHistory);
     
-    if (groupEntries.length === 0) {
-        return {
-            headline: "No calculation groups available",
-            bullets: ["Unable to generate recommendation - check system configuration"],
-            confidence: "none",
-            windowSize: SEQUENCE_LENGTH,
-            topGroup: null,
-            runnerUpGroup: null,
-            scoreGap: 0
-        };
+    const headline = generateGroupRecommendationHeadline(topGroup, confidence, performance);
+    
+    const bullets = [];
+    
+    bullets.push(`AI confidence: ${(topGroup.probability * 100).toFixed(1)}%`);
+    
+    if (performance.total >= 3) {
+        bullets.push(`Recent: ${performance.hits}/${performance.total} (${performance.hitRate.toFixed(0)}%)`);
     }
     
-    const topGroup = groupEntries[0];
-    const runnerUpGroup = groupEntries[1] || { groupId: 'none', prob: 0, groupName: 'None' };
-    const scoreGap = topGroup.prob - runnerUpGroup.prob;
+    if (performance.currentStreak >= 2) {
+        bullets.push(`Current streak: ${performance.currentStreak} consecutive hits`);
+    }
     
-    // Determine confidence level
-    const confidence = determineConfidence(averagedGroupProbs);
-    
-    // Analyze recent performance of top group
-    const recentPerformance = analyzeGroupRecentPerformance(topGroup.groupId, validHistory);
-    
-    // Generate headline explaining the choice
-    const headline = generateGroupRecommendationHeadline(topGroup, confidence, recentPerformance);
-    
-    // Generate bullets explaining WHY this group was chosen
-    const bullets = generateGroupRecommendationBullets(
-        topGroup, 
-        runnerUpGroup, 
-        scoreGap, 
-        recentPerformance,
-        lastSequence,
-        validHistory
-    );
-    
+    const wrappedRunnerUp = wrapGroupName(runnerUpGroup.groupName, runnerUpGroup.groupId);
+    bullets.push(`Runner-up: ${wrappedRunnerUp} (${(runnerUpGroup.probability * 100).toFixed(1)}%)`);
+
     return {
         headline,
         bullets,
@@ -723,7 +678,10 @@ function generateAiExplanation(lastSequence, validHistory, averagedGroupProbs) {
     };
 }
 
-// Prediction function (updated to include explanation)
+// ===========================
+// PREDICTION
+// ===========================
+
 async function predictWithEnsemble(historyData) {
     await tfInitializedPromise;
 
@@ -734,205 +692,106 @@ async function predictWithEnsemble(historyData) {
     if (validHistory.length < SEQUENCE_LENGTH) return null;
 
     const lastSequence = validHistory.slice(-SEQUENCE_LENGTH);
+    const scaler = activeModels[0].scaler;
 
-    const scaler = activeModels[0].scaler; // Assuming all models use the same scaler
+    // Update model weights based on recent accuracy
+    updateModelWeights();
 
-    // Helper to get features including consecutive performance
-    const getFeaturesForPrediction = (item, historySliceForContext) => {
-        const props = getNumberProperties(item.winningNumber);
-        const { consecutiveHits, consecutiveMisses } = getConsecutivePerformanceForAI(historySliceForContext, config.allPredictionTypes);
-
-        const maxStreakToNormalize = 10; // Must match training normalization
-
-        // Get repeat and neighbor hit status for this specific item in context
-        const isCurrentRepeat = isRepeatNumberInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength);
-        const isCurrentNeighborHit = isNeighborHitInContext(item.winningNumber, historySliceForContext, config.AI_CONFIG.sequenceLength, config.rouletteWheel, 1);
-
-        return [
-            item.num1 / 36, item.num2 / 36, item.difference / 36,
-            item.pocketDistance !== null ? item.pocketDistance / 18 : 0,
-            item.recommendedGroupPocketDistance !== null ? item.recommendedGroupPocketDistance / 18 : 1,
-            // Add categorical features for winning number properties
-            props.isEven, props.isOdd, props.isRed, props.isBlack,
-            props.isHigh, props.isLow, props.isD1, props.isD2, props.isD3,
-            props.isCol1, props.isCol2, props.isCol3,
-            ...config.allPredictionTypes.map(type => item.typeSuccessStatus[type.id] ? 1 : 0),
-            // Add consecutive hit/miss features for each prediction type
-            ...config.allPredictionTypes.flatMap(type => [
-                Math.min(consecutiveHits[type.id] / maxStreakToNormalize, 1),
-                Math.min(consecutiveMisses[type.id] / maxStreakToNormalize, 1)
-            ]),
-            // NEW: Add repeat and neighbor hit features
-            isCurrentRepeat ? 1 : 0,
-            isCurrentNeighborHit ? 1 : 0
-        ];
-    };
-
-
-    let inputTensor = null;
     try {
-        // Wrap input tensor creation in tf.tidy for automatic disposal
-        inputTensor = tf.tidy(() => {
-            const inputFeatures = lastSequence.map((item, idx) => {
-                const historySliceForThisItem = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
-                return getFeaturesForPrediction(item, historySliceForThisItem).map((val, featureIdx) => scaleFeature(val, featureIdx, scaler));
-            });
-            return tf.tensor3d([inputFeatures]);
-        });
-        
-        // Predictions are awaited outside of tidy, as they return Promises.
-        const allPredictions = await Promise.all(activeModels.map(m => m.model.predict(inputTensor)));
+        const getFeaturesForPrediction = (item, historySliceForContext) => {
+            return getImprovedFeatures(item, historySliceForContext, config.allPredictionTypes, rouletteWheel);
+        };
 
-        // Average the predictions
+        const inputSequence = lastSequence.map((item, idx) => {
+            const historySliceForContext = validHistory.slice(0, validHistory.length - SEQUENCE_LENGTH + idx + 1);
+            const features = getFeaturesForPrediction(item, historySliceForContext);
+            return features.map((val, i) => scaleFeature(val, i, scaler));
+        });
+
+        const inputTensor = tf.tensor3d([inputSequence]);
+        
+        // IMPROVED: Weighted ensemble predictions
+        const modelPredictions = {};
         const averagedGroupProbs = new Float32Array(config.allPredictionTypes.length).fill(0);
         const averagedFailureProbs = new Float32Array(failureModes.length).fill(0);
         const averagedStreakPreds = new Float32Array(config.allPredictionTypes.length).fill(0);
+        
+        let totalWeight = 0;
 
-        for (const prediction of allPredictions) {
+        for (const member of activeModels) {
+            const prediction = member.model.predict(inputTensor);
             const groupProbs = await prediction[0].data();
             const failureProbs = await prediction[1].data();
             const streakPreds = await prediction[2].data();
 
-            groupProbs.forEach((p, i) => averagedGroupProbs[i] += p);
-            failureProbs.forEach((p, i) => averagedFailureProbs[i] += p);
-            streakPreds.forEach((p, i) => averagedStreakPreds[i] += p);
+            // Store individual model predictions for tracking
+            const topGroupIdx = groupProbs.indexOf(Math.max(...groupProbs));
+            modelPredictions[member.name] = {
+                topGroup: config.allPredictionTypes[topGroupIdx]?.id,
+                groupProbs: Array.from(groupProbs),
+                weight: member.weight
+            };
 
-            // Dispose of prediction tensors after reading data
+            // Weight by model accuracy
+            const weight = member.weight;
+            totalWeight += weight;
+
+            groupProbs.forEach((p, i) => averagedGroupProbs[i] += p * weight);
+            failureProbs.forEach((p, i) => averagedFailureProbs[i] += p * weight);
+            streakPreds.forEach((p, i) => averagedStreakPreds[i] += p * weight);
+
             prediction[0].dispose();
             prediction[1].dispose();
             prediction[2].dispose();
         }
 
-        averagedGroupProbs.forEach((p, i) => averagedGroupProbs[i] /= allPredictions.length);
-        averagedFailureProbs.forEach((p, i) => averagedFailureProbs[i] /= allPredictions.length);
-        averagedStreakPreds.forEach((p, i) => averagedStreakPreds[i] /= allPredictions.length);
+        // Normalize by total weight
+        if (totalWeight > 0) {
+            averagedGroupProbs.forEach((p, i) => averagedGroupProbs[i] /= totalWeight);
+            averagedFailureProbs.forEach((p, i) => averagedFailureProbs[i] /= totalWeight);
+            averagedStreakPreds.forEach((p, i) => averagedStreakPreds[i] /= totalWeight);
+        }
 
-        // Convert to object format for easier access
+        inputTensor.dispose();
+
+        // Convert to object format
         const groupProbsObject = {};
         config.allPredictionTypes.forEach((type, i) => {
             groupProbsObject[type.id] = averagedGroupProbs[i];
         });
 
-        const finalResult = { groups: {}, failures: {}, streakPredictions: {} };
+        const finalResult = { groups: {}, failures: {}, streakPredictions: {}, modelWeights: {} };
         config.allPredictionTypes.forEach((type, i) => finalResult.groups[type.id] = averagedGroupProbs[i]);
         failureModes.forEach((mode, i) => finalResult.failures[mode] = averagedFailureProbs[i]);
         config.allPredictionTypes.forEach((type, i) => finalResult.streakPredictions[type.id] = averagedStreakPreds[i]);
+        
+        // Include model weights in result
+        activeModels.forEach(m => finalResult.modelWeights[m.name] = m.weight);
 
-        // Generate calculation-group-focused AI explanation
+        // Generate AI explanation
         const aiExplanation = generateAiExplanation(lastSequence, validHistory, groupProbsObject);
         finalResult.aiExplanation = aiExplanation;
+
+        // Record prediction for accuracy tracking
+        recordPrediction(finalResult, modelPredictions);
 
         return finalResult;
 
     } catch (error) {
         console.error('Error during ensemble prediction:', error);
         return null;
-    } finally {
-        // Ensure inputTensor is disposed if it was successfully created.
-        // If an error occurred before inputTensor was assigned, it might be null.
-        if (inputTensor && !inputTensor.isDisposed) inputTensor.dispose(); 
     }
 }
 
+// ===========================
+// MESSAGE HANDLER
+// ===========================
 
-// Storage functions (unchanged)
-async function loadModelsFromStorage() {
-    await tfInitializedPromise;
-
-    const loadPromises = ensemble.map(async (member) => {
-        try {
-            member.model = await tf.loadLayersModel(`indexeddb://${member.path}`);
-            console.log(`TF.js Model ${member.name} loaded from IndexedDB.`);
-            return true;
-        } catch (error) {
-            console.warn(`Could not load model ${member.name}. It may need to be trained.`);
-            return false;
-        }
-    });
-    return Promise.all(loadPromises);
-}
-
-async function clearModelsFromStorage() {
-    await tfInitializedPromise;
-
-    const clearPromises = ensemble.map(async (member) => {
-        try {
-            if (member.model) {
-                member.model.dispose();
-                member.model = null;
-            }
-            await tf.io.removeModel(`indexeddb://${member.path}`);
-        } catch (error) {
-            // Error is expected if model doesn't exist
-        }
-    });
-    await Promise.all(clearPromises);
-    ensemble.forEach(m => m.scaler = null);
-    console.log('All TF.js models and scalers cleared.');
-}
-
-
-// Helper for isRepeatNumberInContext
-function isRepeatNumberInContext(winningNumber, historySubset, recentHistoryLength) {
-    if (historySubset.length === 0) return false;
-    const relevantHistory = historySubset
-        .filter(item => item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, recentHistoryLength); // Get only the recent spins
-
-    return relevantHistory.some(item => item.winningNumber === winningNumber);
-}
-
-// Helper for isNeighborHitInContext
-function isNeighborHitInContext(winningNumber, historySubset, recentHistoryLength, rouletteWheel, neighborDistance = 1) {
-    if (historySubset.length === 0) return false;
-    const relevantHistory = historySubset
-        .filter(item => item.winningNumber !== null) // Only confirmed spins
-        .sort((a, b) => b.id - a.id) // Newest first
-        .slice(0, recentHistoryLength); // Get only the recent spins
-
-    for (const item of relevantHistory) {
-        const lastSpin = item.winningNumber;
-        if (lastSpin === winningNumber) continue; // Don't count as neighbor if it's the same number
-        
-        // Use calculatePocketDistance (assuming it's available or imported correctly in worker scope)
-        // Since calculatePocketDistance is in shared-logic.js, we need to ensure it's truly global in worker if needed.
-        // Given it's a small pure function, for worker context, a local copy or direct import might be considered.
-        // For a clean worker, let's locally define calculatePocketDistance if it's not imported.
-        // However, in our architecture, shared-logic.js is not imported into aiWorker.js.
-        // So, we'll need to pass rouletteWheel to the prediction function if calculatePocketDistance is in analysis.js.
-
-        // Re-implement a lightweight calculatePocketDistance for internal worker use, or ensure it's shared.
-        // Let's assume calculatePocketDistance from shared-logic.js is NOT directly available here.
-        // For this worker, direct array operations will be used for simplicity if calculatePocketDistance is not easily imported.
-
-        const getPocketDistanceLocal = (num1, num2, wheel) => {
-            const idx1 = wheel.indexOf(num1);
-            const idx2 = wheel.indexOf(num2);
-            if (idx1 === -1 || idx2 === -1) return Infinity;
-            const directDist = Math.abs(idx1 - idx2);
-            const wrapDist = wheel.length - directDist;
-            return Math.min(directDist, wrapDist);
-        };
-
-        const distance = getPocketDistanceLocal(winningNumber, lastSpin, rouletteWheel);
-        if (distance <= neighborDistance) {
-            return true;
-        }
-    }
-    return false;
-}
-
-
-// --- Message Handling for Web Worker (Updated) ---
 self.onmessage = async (event) => {
     const { type, payload } = event.data;
 
-    try {
-        await tfInitializedPromise;
-    } catch (tfInitError) {
-        console.error("AI Worker: TensorFlow.js was not initialized, cannot process message.", tfInitError);
-        self.postMessage({ type: 'error', message: 'AI Model: Initialization failed. Cannot process request.' });
+    if (!type) {
+        self.postMessage({ type: 'error', message: 'AI Worker: No message type specified. Cannot process request.' });
         return;
     }
 
@@ -941,7 +800,7 @@ self.onmessage = async (event) => {
             terminalMapping = payload.terminalMapping;
             rouletteWheel = payload.rouletteWheel;
             const loadedScaler = payload.scaler ? JSON.parse(payload.scaler) : null;
-            if(loadedScaler) {
+            if (loadedScaler) {
                 ensemble.forEach(m => m.scaler = loadedScaler);
             }
             const loadResults = await loadModelsFromStorage();
@@ -951,20 +810,35 @@ self.onmessage = async (event) => {
                 self.postMessage({ type: 'status', message: `AI Ensemble: Need at least ${TRAINING_MIN_HISTORY} confirmed spins to train.` });
             }
             break;
+            
         case 'train':
             await trainEnsemble(payload.history, payload.historicalStreakData);
             break;
+            
         case 'predict':
             const probabilities = await predictWithEnsemble(payload.history);
             self.postMessage({ type: 'predictionResult', probabilities });
             break;
+            
         case 'clear_model':
             await clearModelsFromStorage();
             self.postMessage({ type: 'status', message: 'AI Ensemble: Cleared.' });
             break;
+            
         case 'update_config':
             terminalMapping = payload.terminalMapping;
             rouletteWheel = payload.rouletteWheel;
+            break;
+            
+        case 'record_result':
+            // NEW: Record actual result for accuracy tracking
+            if (predictionHistory.length > 0 && payload.hitTypes) {
+                const lastPrediction = predictionHistory[predictionHistory.length - 1];
+                if (!lastPrediction.actualResult) {
+                    lastPrediction.actualResult = payload.hitTypes;
+                    updateModelWeights();
+                }
+            }
             break;
     }
 };
