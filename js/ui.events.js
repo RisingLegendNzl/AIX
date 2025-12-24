@@ -289,12 +289,21 @@ function runSimulationOnHistory(spinsToProcess) {
 }
 
 async function loadApiHistoryIntoApp(spins, tableName) {
-    if (spins.length < 3) {
+    if (!Array.isArray(spins) || spins.length < 3) {
         dom.apiStatusMessage.textContent = 'Not enough spins to process (need at least 3).';
         return;
     }
     
-    const simulatedHistory = runSimulationOnHistory(spins);
+    // Store spins in API context for consistency
+    apiContext.replaceContextSpins(spins);
+    
+    // API returns newest->oldest, reverse to get oldest->newest for simulation
+    const spinsOldestFirst = [...spins].reverse();
+    
+    // Ensure activePredictionTypes reflects current useAdvancedCalculations setting before simulation
+    analysis.updateActivePredictionTypes();
+    
+    const simulatedHistory = runSimulationOnHistory(spinsOldestFirst);
     
     if (simulatedHistory.length === 0) {
         dom.apiStatusMessage.textContent = 'Failed to simulate history from spins.';
@@ -304,18 +313,21 @@ async function loadApiHistoryIntoApp(spins, tableName) {
     state.history.length = 0;
     state.history.push(...simulatedHistory);
     
+    // confirmedWinsLog should be in chronological order (oldest->newest)
     state.confirmedWinsLog.length = 0;
-    spins.slice(2).forEach(spin => state.confirmedWinsLog.push(spin));
+    spinsOldestFirst.slice(2).forEach(spin => state.confirmedWinsLog.push(spin));
     
     state.setCurrentPendingCalculationId(null);
     
-    const latestSpins = spins.slice(0, 2);
-    if (latestSpins.length >= 2) {
-        dom.number1.value = latestSpins[1];
-        dom.number2.value = latestSpins[0];
+    // Auto-fill terminal with latest spins (newest first from original array)
+    if (spins.length >= 2) {
+        dom.number1.value = spins[1];
+        dom.number2.value = spins[0];
     }
     
-    analysis.runAllAnalyses();
+    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    
+    await analysis.runAllAnalyses();
     renderHistory();
     await updateMainRecommendationDisplay();
     updateWinLossCounter();
@@ -323,6 +335,7 @@ async function loadApiHistoryIntoApp(spins, tableName) {
     state.saveState();
     
     dom.apiStatusMessage.textContent = `Loaded ${simulatedHistory.length} items from ${tableName}.`;
+    addTrainingLogEntry('info', `API History loaded: ${spins.length} spins from ${tableName}`);
 }
 
 export function attachMainActionListeners() {
