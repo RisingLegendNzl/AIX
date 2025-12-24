@@ -377,9 +377,19 @@ export function attachMainActionListeners() {
             state.history.length = 0;
             state.confirmedWinsLog.length = 0;
             state.setCurrentPendingCalculationId(null);
-            state.resetAdaptiveFactorInfluences();
-            state.resetStrategyStates();
-            state.resetPatternMemory();
+            state.setPatternMemory({});
+            state.setAdaptiveFactorInfluences({
+                'Hit Rate': 1.0,
+                'Streak': 1.0,
+                'Proximity to Last Spin': 1.0,
+                'Hot Zone Weighting': 1.0,
+                'High AI Confidence': 1.0,
+                'Statistical Trends': 1.0
+            });
+            state.setStrategyStates({
+                weightedZone: { weight: 1.0, name: 'Neighbour Weighting' },
+                proximityBoost: { weight: 1.0, name: 'Proximity Boost' }
+            });
             analysis.runAllAnalyses();
             renderHistory();
             updateMainRecommendationDisplay();
