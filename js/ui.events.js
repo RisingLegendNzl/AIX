@@ -190,6 +190,18 @@ export async function handleSubmitResult(isAutoCall = false) {
     evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
     console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status}`);
 
+
+// NEW: Send result to AI worker for ensemble accuracy tracking
+if (aiWorker && lastPendingForSubmission.hitTypes) {
+    aiWorker.postMessage({
+        type: 'record_result',
+        payload: {
+            hitTypes: lastPendingForSubmission.hitTypes
+        }
+    });
+}
+
+
     state.setCurrentPendingCalculationId(null);
 
     // Update confirmed wins log (unified spin history)
