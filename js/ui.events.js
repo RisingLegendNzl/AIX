@@ -8,7 +8,7 @@ import { aiWorker, optimizationWorker } from './workers.js';
 import * as analysis from './analysis.js';
 import * as winspinApi from './api/winspin.js';
 import { apiContext } from './api/apiContextManager.js';
-import { dom, toggleGuide, hidePatternAlert, updateApiLiveButtonState, addTrainingLogEntry, clearTrainingLog, toggleTrainingLog } from './ui.helpers.js';
+import { dom, toggleGuide, hidePatternAlert, updateApiLiveButtonState, addTrainingLogEntry, clearTrainingLog, toggleTrainingLog, updateHistoricalDataIndicator } from './ui.helpers.js';
 import { 
     updateAllTogglesUI, 
     updateWinLossCounter, 
@@ -28,6 +28,24 @@ import {
     toggleParameterSliders,
     getRecommendationDataForDisplay
 } from './ui.cards.js';
+
+// --- HELPER FUNCTION ---
+/**
+ * Wraps a base number to valid roulette range (0-36)
+ * Numbers > 36 are wrapped using modulo 37
+ * Numbers < 0 are handled by taking absolute value first
+ * @param {number} baseNum - The calculated base number
+ * @returns {number} The wrapped number in range 0-36
+ */
+function wrapBaseNumber(baseNum) {
+    if (baseNum < 0) {
+        return ((baseNum % 37) + 37) % 37;
+    }
+    if (baseNum > 36) {
+        return baseNum % 37;
+    }
+    return baseNum;
+}
 
 // --- EVENT HANDLERS ---
 
@@ -79,645 +97,104 @@ export function handleNewCalculation(isAutoCall = false) {
         recommendationDetails: null
     };
     state.history.push(newHistoryItem);
-    console.log(`handleNewCalculation: New history item created with ID: ${newHistoryItem.id}. Total history items: ${state.history.length}`);
-
+    console.log(`handleNewCalculation: New history item created with ID: ${newHistoryItem.id}. Setting as currentPendingCalculationId.`);
     state.setCurrentPendingCalculationId(newHistoryItem.id);
 
-    getRecommendationDataForDisplay(num1Val, num2Val).then(recommendation => {
-        console.log(`handleNewCalculation: Got recommendation for ID ${newHistoryItem.id}.`);
-        const itemToUpdate = state.history.find(item =>
-            item.id === newHistoryItem.id && item.status === 'pending' && item.winningNumber === null
-        );
-        if (itemToUpdate) {
-            itemToUpdate.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
-            itemToUpdate.recommendationDetails = {
-                ...recommendation.details,
-                signal: recommendation.signal,
-                reason: recommendation.reason
-            };
-            console.log(`handleNewCalculation: Updated history item ID ${itemToUpdate.id} with recommendation details.`);
-        } else {
-            console.error(`handleNewCalculation: Failed to find newly created item (ID: ${newHistoryItem.id}) for detail update.`);
-        }
-        renderHistory();
-        updateMainRecommendationDisplay();
-        console.log("handleNewCalculation: UI updated and function finished.");
-    });
-}
-
-
-export function handleSubmitResult() {
-    console.log("handleSubmitResult: Function started.");
-    
-    if (apiContext.isAutoModeEnabled()) {
-        alert('Auto mode is enabled. Disable it to use manual input.');
-        return;
-    }
-    
-    console.log(`handleSubmitResult: state.currentPendingCalculationId at start: ${state.currentPendingCalculationId}`);
-
-    if (!state.currentPendingCalculationId) {
-        console.log("handleSubmitResult: No current pending calculation ID set.");
-        hidePatternAlert();
-        updateMainRecommendationDisplay();
-        return;
-    }
-
-    const winningNumberVal = dom.winningNumberInput.value;
-    let winningNumber = null;
-    if (winningNumberVal.trim() !== '') {
-        winningNumber = parseInt(winningNumberVal, 10);
-    }
-
-    if (winningNumber === null || isNaN(winningNumber) || winningNumber < 0 || winningNumber > 36) {
-        alert("Please enter a valid winning number (0-36).");
-        console.log("handleSubmitResult: Invalid winning number input. Alert shown.");
-        return;
-    }
-
-    const lastPendingForSubmission = state.history.find(
-        item => item.id === state.currentPendingCalculationId && item.status === 'pending' && item.winningNumber === null
-    );
-
-    if (!lastPendingForSubmission) {
-        console.error("handleSubmitResult: Could not find pending calculation by stored ID.");
-        state.setCurrentPendingCalculationId(null);
-        updateMainRecommendationDisplay();
-        return;
-    }
-    console.log(`handleSubmitResult: Found pending item by stored ID: ${lastPendingForSubmission.id}. Resolving this item.`);
-
-    evaluateCalculationStatus(lastPendingForSubmission, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    console.log(`handleSubmitResult: Item ID ${lastPendingForSubmission.id} resolved to status: ${lastPendingForSubmission.status}`);
-
-    state.setCurrentPendingCalculationId(null);
-
-    // Update confirmed wins log (unified spin history)
-    const newLog = state.history
-        .filter(item => item.winningNumber !== null)
-        .sort((a, b) => a.id - b.id)
-        .map(item => item.winningNumber);
-    state.setConfirmedWinsLog(newLog);
-    console.log("handleSubmitResult: confirmedWinsLog updated.");
-
-    // IMPORTANT: Also update apiContext spin history for consistency
-    // This ensures manual entries are added to the unified timeline
-    if (apiContext.getContextSpins().length > 0 || apiContext.getContextId() !== null) {
-        // Add the winning number to front of context spins (newest first)
-        const contextSpins = apiContext.getContextSpins();
-        if (contextSpins.length === 0 || contextSpins[0] !== winningNumber) {
-            apiContext.addSpin(winningNumber);
-            console.log("handleSubmitResult: Manual entry added to apiContext spin history.");
-        }
-    }
-
-    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
-
-    analysis.runAllAnalyses(winningNumber);
-    renderHistory();
-    console.log("handleSubmitResult: Analysis and history re-rendered.");
-
-    dom.winningNumberInput.value = '';
-    console.log("handleSubmitResult: Winning number input cleared.");
-
-    const prevNum2 = parseInt(lastPendingForSubmission.num2, 10);
-    if (!isNaN(prevNum2)) {
-        dom.number1.value = prevNum2;
-        dom.number2.value = winningNumber;
-        console.log(`handleSubmitResult: Auto-populating for next spin: num1=${dom.number1.value}, num2=${dom.number2.value}`);
-        setTimeout(() => {
-            console.log("handleSubmitResult: Triggering next handleNewCalculation via setTimeout.");
-            handleNewCalculation();
-        }, 50);
-    } else {
-        console.warn('handleSubmitResult: previous num2 was not a valid number for auto-calculation.');
-        updateMainRecommendationDisplay();
-    }
-    hidePatternAlert();
-    console.log("handleSubmitResult: Function finished.");
-}
-
-
-export function handleClearInputs() {
-    console.log("handleClearInputs: Function started.");
-    dom.number1.value = '';
-    dom.number2.value = '';
-    dom.winningNumberInput.value = '';
-    dom.resultDisplay.classList.add('hidden');
-    dom.number1.focus();
-    state.setCurrentPendingCalculationId(null);
-
-    if (apiContext.isLivePollingActive()) {
-        apiContext.stopLivePolling();
-        updateApiLiveButtonState(false);
-    }
-
-    drawRouletteWheel(null, state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null);
-    updateMainRecommendationDisplay();
-    hidePatternAlert();
-    console.log("handleClearInputs: Inputs cleared and UI updated.");
-}
-
-export function handleSwap() {
-    console.log("handleSwap: Function started.");
-    const v = dom.number1.value;
-    dom.number1.value = dom.number2.value;
-    dom.number2.value = v;
-    updateMainRecommendationDisplay();
-    console.log("handleSwap: Inputs swapped and UI updated.");
-}
-
-export function handleHistoryAction(event) {
-    console.log("handleHistoryAction: Function started.");
-    const button = event.target.closest('.delete-btn');
-    if (!button) return;
-
-    const deletedId = parseInt(button.dataset.id);
-    const newHistory = state.history.filter(item => item.id !== deletedId);
-    state.setHistory(newHistory);
-
-    if (state.currentPendingCalculationId === deletedId) {
-        state.setCurrentPendingCalculationId(null);
-        console.log(`handleHistoryAction: Cleared currentPendingCalculationId as deleted item (ID: ${deletedId}) was pending.`);
-    }
-
-    const newLog = state.history.filter(item => item.winningNumber !== null).map(item => item.winningNumber);
-    state.setConfirmedWinsLog(newLog);
-
-    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
-
     analysis.runAllAnalyses();
     renderHistory();
     updateMainRecommendationDisplay();
-    hidePatternAlert();
-    console.log("handleHistoryAction: History modified and UI updated.");
-}
-
-export function handleClearHistory() {
-    console.log("handleClearHistory: Function started.");
-    state.setHistory([]);
-    state.setConfirmedWinsLog([]);
-    state.setPatternMemory({});
-    state.setAdaptiveFactorInfluences({
-        'Hit Rate': 1.0, 'Streak': 1.0, 'Proximity to Last Spin': 1.0,
-        'Hot Zone Weighting': 1.0, 'High AI Confidence': 1.0, 'Statistical Trends': 1.0
-    });
-    state.setIsAiReady(false);
-    updateAiStatus(`AI Model: Need at least ${config.AI_CONFIG.trainingMinHistory} confirmed spins to train.`);
-    state.setCurrentPendingCalculationId(null);
-
-    apiContext.clearContext();
-
-    analysis.runAllAnalyses();
-    renderHistory();
-
-    drawRouletteWheel();
-
-    aiWorker.postMessage({ type: 'clear_model' });
-    hidePatternAlert();
-    updateMainRecommendationDisplay();
-    
-    addTrainingLogEntry('info', 'History cleared. AI model reset.');
-    
-    console.log("handleClearHistory: History cleared and UI updated.");
-}
-
-export function handlePresetSelection(presetName) {
-    console.log(`handlePresetSelection: Applying preset ${presetName}.`);
-    const preset = config.STRATEGY_PRESETS[presetName];
-    if (!preset) {
-        console.error(`Preset "${presetName}" not found.`);
-        return;
-    }
-
-    Object.assign(config.STRATEGY_CONFIG, preset.STRATEGY_CONFIG);
-    Object.assign(config.ADAPTIVE_LEARNING_RATES, preset.ADAPTIVE_LEARNING_RATES);
-    state.setToggles(preset.TOGGLES);
-
-    updateAllTogglesUI();
-    initializeAdvancedSettingsUI();
-    analysis.updateActivePredictionTypes();
-    analysis.handleStrategyChange();
-    hidePatternAlert();
-    updateMainRecommendationDisplay();
-    console.log(`handlePresetSelection: Preset ${presetName} applied and UI updated.`);
-}
-
-export function resetAllParameters() {
-    console.log("resetAllParameters: Function started.");
-    Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
-    Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
-    state.setToggles(config.DEFAULT_PARAMETERS.TOGGLES);
-    updateAllTogglesUI();
-    initializeAdvancedSettingsUI();
-    dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
-    analysis.handleStrategyChange();
-    hidePatternAlert();
-    updateMainRecommendationDisplay();
-    console.log("resetAllParameters: Parameters reset and UI updated.");
-}
-
-export function saveParametersToFile() {
-    console.log("saveParametersToFile: Function started.");
-    const parametersToSave = {
-        STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
-        TOGGLES: {
-            useTrendConfirmation: state.useTrendConfirmation, useWeightedZone: state.useWeightedZone,
-            useProximityBoost: state.useProximityBoost, usePocketDistance: state.usePocketDistance,
-            useLowestPocketDistance: state.useLowestPocketDistance, useAdvancedCalculations: state.useAdvancedCalculations,
-            useDynamicStrategy: state.useDynamicStrategy, useAdaptivePlay: state.useAdaptivePlay,
-            useTableChangeWarnings: state.useTableChangeWarnings, useDueForHit: state.useDueForHit,
-            useNeighbourFocus: state.useNeighbourFocus, useLessStrict: state.useLessStrict,
-            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount
-        }
-    };
-    const dataStr = JSON.stringify(parametersToSave, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'roulette_parameters.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
-    dom.parameterStatusMessage.textContent = 'Parameters saved.';
-    console.log("saveParametersToFile: Parameters saved.");
-}
-
-export function loadParametersFromFile(event) {
-    console.log("loadParametersFromFile: Function started.");
-    const file = event.target.files[0];
-    if (!file) {
-        console.log("loadParametersFromFile: No file selected.");
-        return;
-    }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const loaded = JSON.parse(e.target.result);
-            if (loaded.STRATEGY_CONFIG) Object.assign(config.STRATEGY_CONFIG, loaded.STRATEGY_CONFIG);
-            if (loaded.ADAPTIVE_LEARNING_RATES) Object.assign(config.ADAPTIVE_LEARNING_RATES, loaded.ADAPTIVE_LEARNING_RATES);
-            if (loaded.TOGGLES) state.setToggles(loaded.TOGGLES);
-            updateAllTogglesUI();
-            initializeAdvancedSettingsUI();
-            dom.parameterStatusMessage.textContent = 'Parameters loaded successfully!';
-            analysis.handleStrategyChange();
-        } catch (error) {
-            dom.parameterStatusMessage.textContent = `Error: ${error.message}`;
-            console.error("loadParametersFromFile: Error loading parameters:", error);
-        }
-    };
-    reader.readAsText(file);
-    event.target.value = '';
-    hidePatternAlert();
-    updateMainRecommendationDisplay();
-    console.log("loadParametersFromFile: File processed and UI updated.");
-}
-
-// --- API EVENT HANDLERS ---
-
-function autoFillTerminalCalculatorFromHistory(history) {
-    if (!history || history.length < 2) return;
-
-    // history[0] is the latest spin, history[1] is the previous spin
-    dom.number1.value = history[1];
-    dom.number2.value = history[0];
-
-    console.log(`Auto-filling terminal: num1=${dom.number1.value}, num2=${dom.number2.value}`);
-    handleNewCalculation(true);
+    state.saveState();
 }
 
 /**
- * Updates the historical data indicator UI element
- * @param {Object|null} status - Data source status object or null to reset
+ * Handles the "Submit Result" button click.
  */
-function updateHistoricalDataIndicator(status) {
-    const indicator = document.getElementById('historicalDataIndicator');
-    if (!indicator) return;
-    
-    if (!status || status.status === 'not_initialized' || status.status === 'defaults') {
-        indicator.innerHTML = `
-            <div class="flex items-center text-gray-400">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <span class="text-xs">Historical data: Not loaded</span>
-            </div>
-        `;
-        indicator.className = 'historical-data-indicator p-3 rounded-lg border bg-gray-50 border-gray-200';
-        return;
-    }
-    
-    let bgColor, borderColor, textColor, icon;
-    
-    if (status.isApiCalibrated && status.confidence === 'high') {
-        bgColor = 'bg-green-50';
-        borderColor = 'border-green-200';
-        textColor = 'text-green-700';
-        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>`;
-    } else if (status.isApiCalibrated) {
-        bgColor = 'bg-blue-50';
-        borderColor = 'border-blue-200';
-        textColor = 'text-blue-700';
-        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>`;
-    } else {
-        bgColor = 'bg-yellow-50';
-        borderColor = 'border-yellow-200';
-        textColor = 'text-yellow-700';
-        icon = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.001c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001c-.77 1.332.192 2.999 1.732 2.999z"></path>`;
-    }
-    
-    indicator.innerHTML = `
-        <div class="flex items-center ${textColor}">
-            <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                ${icon}
-            </svg>
-            <div>
-                <span class="text-xs font-semibold">${status.label}</span>
-                <span class="text-xs block">${status.description}</span>
-            </div>
-        </div>
-    `;
-    indicator.className = `historical-data-indicator p-3 rounded-lg border ${bgColor} ${borderColor}`;
-}
+export async function handleSubmitResult() {
+    console.log("handleSubmitResult: Function started.");
+    const winningNumberVal = parseInt(dom.winningNumberInput.value, 10);
 
-async function handleApiRefresh() {
-    const provider = dom.apiProviderSelect.value;
-    const tableName = dom.apiTableSelect.value;
-    
-    if (!provider || !tableName) {
-        dom.apiStatusMessage.textContent = 'Error: No provider or table selected.';
+    if (isNaN(winningNumberVal) || winningNumberVal < 0 || winningNumberVal > 36) {
+        alert("Please enter a valid winning number (0-36).");
         return;
     }
-    
-    try {
-        // Fetch with losses data for context
-        const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
-        apiContext.setLastApiResponse(apiResponse);
-        
-        // Update sector context
-        const sectorLosses = winspinApi.getSectorLosses(apiResponse, tableName);
-        if (sectorLosses) {
-            apiContext.updateSectorContext(sectorLosses);
-        }
-        
-        // Update number-level context if available
-        const numberLosses = winspinApi.getNumberLosses(apiResponse, tableName);
-        if (numberLosses) {
-            apiContext.updateNumberContext(numberLosses);
-            console.log('[API Refresh] Number context updated:', numberLosses.dataQuality);
-        }
-        
-        // Update historical data indicator
-        updateHistoricalDataIndicator(apiContext.getDataSourceStatus());
-        
-        const latestSpin = winspinApi.getLatestSpin(apiResponse, tableName);
-        
-        if (latestSpin === null) {
-            dom.apiStatusMessage.textContent = 'No spins available for this table.';
-            return;
-        }
-        
-        const wasAdded = apiContext.addSpin(latestSpin.winningNumber);
-        
-        if (wasAdded) {
-            await processApiSpin(latestSpin.winningNumber);
-            
-            // Auto-fill terminal with new data and trigger calculation
-            const contextSpins = apiContext.getContextSpins();
-            autoFillTerminalCalculatorFromHistory(contextSpins);
-            
-            let statusMsg = `New spin: ${latestSpin.winningNumber}`;
-            if (apiContext.hasNumberData()) {
-                statusMsg += ' (with number context)';
-            } else if (apiContext.hasSectorData()) {
-                statusMsg += ' (with sector context)';
-            }
-            dom.apiStatusMessage.textContent = statusMsg;
-        } else {
-            dom.apiStatusMessage.textContent = `Latest spin: ${latestSpin.winningNumber} (no change)`;
-        }
-    } catch (error) {
-        dom.apiStatusMessage.textContent = `Error: ${error.message}`;
-        console.error('Error refreshing API data:', error);
-    }
-}
 
-async function handleApiLoadHistory() {
-    const provider = dom.apiProviderSelect.value;
-    const tableName = dom.apiTableSelect.value;
-    
-    if (!provider || !tableName) {
-        dom.apiStatusMessage.textContent = 'Error: No provider or table selected.';
+    const pendingItemId = state.currentPendingCalculationId;
+    if (pendingItemId === null) {
+        alert("No pending calculation to submit a result for. Please enter numbers and click 'Calculate' first.");
         return;
     }
-    
-    const confirmed = confirm(
-        'This will replace your current history with the last 30 spins from the API. Continue?'
-    );
-    
-    if (!confirmed) {
-        return;
-    }
-    
-    try {
-        dom.apiStatusMessage.textContent = 'Loading history with context data...';
-        
-        // Fetch with losses data for context
-        const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
-        apiContext.setLastApiResponse(apiResponse);
-        
-        // Update sector context from losses data
-        const sectorLosses = winspinApi.getSectorLosses(apiResponse, tableName);
-        if (sectorLosses) {
-            const success = apiContext.updateSectorContext(sectorLosses);
-            if (success) {
-                addTrainingLogEntry('info', `Sector context loaded (${sectorLosses.dataQuality})`);
-                if (sectorLosses.hasHistoricalMax) {
-                    addTrainingLogEntry('success', 'Historical max data (5+ years) available for sector calibration');
-                } else {
-                    addTrainingLogEntry('warning', 'Sector historical max data not available - using session data only');
-                }
-            }
-        } else {
-            addTrainingLogEntry('warning', 'No sector losses data in API response');
-        }
-        
-        // Update number-level context from losses data
-        const numberLosses = winspinApi.getNumberLosses(apiResponse, tableName);
-        if (numberLosses) {
-            const success = apiContext.updateNumberContext(numberLosses);
-            if (success) {
-                addTrainingLogEntry('info', `Number context loaded (${numberLosses.dataQuality})`);
-                if (numberLosses.hasHistoricalMax) {
-                    addTrainingLogEntry('success', 'Historical max data (5+ years) available for number calibration');
-                } else {
-                    addTrainingLogEntry('warning', 'Number historical max data not available - using session data only');
-                }
-            }
-        } else {
-            addTrainingLogEntry('info', 'Number-level context not available from API');
-        }
-        
-        // Update historical data indicator
-        updateHistoricalDataIndicator(apiContext.getDataSourceStatus());
-        
-        const spins = winspinApi.getTableHistory(apiResponse, tableName);
-        
-        if (spins.length === 0) {
-            dom.apiStatusMessage.textContent = 'No spins available for this table.';
-            return;
-        }
-        
-        apiContext.replaceContextSpins(spins);
-        
-        await processApiHistoryLoad(spins);
-        
-        // Auto-fill terminal with the loaded history
-        autoFillTerminalCalculatorFromHistory(apiContext.getContextSpins());
-        
-        let statusMsg = `Loaded ${spins.length} spins from API`;
-        if (apiContext.hasNumberData()) {
-            statusMsg += ' with number-level context';
-        } else if (apiContext.hasSectorData()) {
-            statusMsg += ' with sector context';
-        }
-        dom.apiStatusMessage.textContent = statusMsg;
-        
-        // Log API history load
-        addTrainingLogEntry('info', `API History loaded: ${spins.length} spins from ${tableName}`);
-        addTrainingLogEntry('data', `First 5 (oldest): [${spins.slice(-5).reverse().join(', ')}]`);
-        addTrainingLogEntry('data', `Last 5 (newest): [${spins.slice(0, 5).join(', ')}]`);
-        
-        // Log context summary
-        if (apiContext.hasNumberData()) {
-            const summary = apiContext.getNumberSummary();
-            const elevatedNumbers = Object.entries(summary.numbers)
-                .filter(([, data]) => data.ratio >= 0.5)
-                .map(([num, data]) => `${num}: ${data.currentLoss}/${data.historicalMax}`);
-            
-            if (elevatedNumbers.length > 0) {
-                addTrainingLogEntry('data', `Extended numbers: ${elevatedNumbers.slice(0, 5).join(', ')}`);
-            } else {
-                addTrainingLogEntry('data', 'All numbers within typical historical range');
-            }
-        } else if (apiContext.hasSectorData()) {
-            const summary = apiContext.getSectorSummary();
-            const elevatedSectors = Object.entries(summary.sectors)
-                .filter(([, data]) => data.ratio >= 0.5)
-                .map(([id, data]) => `${data.sectorName}: ${data.currentLoss}/${data.historicalMax}`);
-            
-            if (elevatedSectors.length > 0) {
-                addTrainingLogEntry('data', `Elevated sectors: ${elevatedSectors.join(', ')}`);
-            } else {
-                addTrainingLogEntry('data', 'All sectors within typical historical range');
-            }
-        }
-        
-    } catch (error) {
-        dom.apiStatusMessage.textContent = `Error: ${error.message}`;
-        console.error('Error loading history:', error);
-        addTrainingLogEntry('error', `API history load failed: ${error.message}`);
-    }
-}
 
-async function processApiSpin(spin) {
-    const contextSpins = apiContext.getContextSpins();
-    
-    if (contextSpins.length < 3) {
-        console.log('Need at least 3 spins to process. Current count:', contextSpins.length);
-        return;
-    }
-    
-    const num1 = contextSpins[2];
-    const num2 = contextSpins[1];
-    const winningNumber = spin;
-    
-    const newHistoryItem = {
-        id: Date.now(),
-        num1,
-        num2,
-        difference: Math.abs(num2 - num1),
-        status: 'pending',
-        hitTypes: [],
-        typeSuccessStatus: {},
-        winningNumber: null,
-        pocketDistance: null,
-        recommendedGroupId: null,
-        recommendationDetails: null
-    };
-    
-    state.history.push(newHistoryItem);
-    state.setCurrentPendingCalculationId(newHistoryItem.id);
-    
-    const recommendation = await getRecommendationDataForDisplay(num1, num2);
-    
-    const itemToUpdate = state.history.find(item =>
-        item.id === newHistoryItem.id && item.status === 'pending' && item.winningNumber === null
-    );
-    
-    if (itemToUpdate) {
-        itemToUpdate.recommendedGroupId = recommendation.bestCandidate?.type.id || null;
-        itemToUpdate.recommendationDetails = {
-            ...recommendation.details,
-            signal: recommendation.signal,
-            reason: recommendation.reason
-        };
-    }
-    
-    evaluateCalculationStatus(itemToUpdate, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-    
-    state.setCurrentPendingCalculationId(null);
-    
-    const newLog = state.history
-        .filter(item => item.winningNumber !== null)
-        .sort((a, b) => a.id - b.id)
-        .map(item => item.winningNumber);
-    state.setConfirmedWinsLog(newLog);
-    
-    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
-    
-    await analysis.runAllAnalyses(winningNumber);
-    renderHistory();
-    
-    await updateMainRecommendationDisplay();
-}
+    const pendingItem = state.history.find(item => item.id === pendingItemId);
 
-async function processApiHistoryLoad(spins) {
-    let currentLivePendingItem = null;
-    if (state.currentPendingCalculationId) {
-        currentLivePendingItem = state.history.find(item => item.id === state.currentPendingCalculationId);
-        if (currentLivePendingItem && currentLivePendingItem.status === 'pending' && currentLivePendingItem.winningNumber === null) {
-            console.log(`API history load: Preserving current pending item ID: ${currentLivePendingItem.id}`);
-        } else {
-            currentLivePendingItem = null;
-            state.setCurrentPendingCalculationId(null);
-        }
-    }
-    
-    // API returns newest->oldest, reverse to get oldest->newest for simulation
-    const spinsOldestFirst = [...spins].reverse();
-    
-    // CRITICAL: Ensure activePredictionTypes reflects current useAdvancedCalculations setting before simulation
-    analysis.updateActivePredictionTypes();
-    
-    const simulatedHistory = runSimulationOnHistory(spinsOldestFirst);
-    
-    if (currentLivePendingItem) {
-        const newPendingCopy = { ...currentLivePendingItem };
-        simulatedHistory.push(newPendingCopy);
-        state.setCurrentPendingCalculationId(newPendingCopy.id);
-        console.log(`API history load: Re-added preserved pending item ID: ${newPendingCopy.id}`);
-    } else {
+    if (!pendingItem) {
+        console.error(`handleSubmitResult: No pending item found with ID: ${pendingItemId}. This indicates a state mismatch.`);
+        alert("Error: Could not find the pending calculation. Please try again.");
         state.setCurrentPendingCalculationId(null);
+        return;
     }
+
+    console.log(`handleSubmitResult: Evaluating pending item ID: ${pendingItem.id} with winning number: ${winningNumberVal}`);
+
+    // Get the current recommendation *before* updating the item's status
+    const recommendationBeforeResult = await getRecommendationDataForDisplay(pendingItem.num1, pendingItem.num2);
     
-    state.setHistory(simulatedHistory);
-    state.setConfirmedWinsLog(simulatedHistory.filter(item => item.winningNumber !== null).map(item => item.winningNumber));
-    analysis.labelHistoryFailures(state.history.slice().sort((a, b) => a.id - b.id));
+    // Store recommendation details on the item
+    if (recommendationBeforeResult.bestCandidate) {
+        pendingItem.recommendedGroupId = recommendationBeforeResult.bestCandidate.type.id;
+        pendingItem.recommendationDetails = recommendationBeforeResult.bestCandidate.details;
+    }
+    // FIX: Use wrapped base numbers for hit zone calculation
+    evaluateCalculationStatus(pendingItem, winningNumberVal, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
     
-    await analysis.runAllAnalyses();
+    // Update adaptive influences based on result
+    if (pendingItem.recommendedGroupId && pendingItem.recommendationDetails?.primaryDrivingFactor) {
+        const primaryFactor = pendingItem.recommendationDetails.primaryDrivingFactor;
+        const influenceChangeMagnitude = Math.max(0, pendingItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
+
+        if (state.adaptiveFactorInfluences[primaryFactor] === undefined) {
+            state.adaptiveFactorInfluences[primaryFactor] = 1.0;
+        }
+
+        if (pendingItem.recommendationDetails.finalScore > 0 && pendingItem.recommendationDetails.signal !== 'Avoid Play') {
+            if (pendingItem.hitTypes.includes(pendingItem.recommendedGroupId)) {
+                state.adaptiveFactorInfluences[primaryFactor] = Math.min(
+                    config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE,
+                    state.adaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)
+                );
+            } else {
+                state.adaptiveFactorInfluences[primaryFactor] = Math.max(
+                    config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
+                    state.adaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)
+                );
+            }
+        }
+    }
+
+    // Apply forget factor to all adaptive influences
+    for (const factorName in state.adaptiveFactorInfluences) {
+        state.adaptiveFactorInfluences[factorName] = Math.max(
+            config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
+            state.adaptiveFactorInfluences[factorName] * config.ADAPTIVE_LEARNING_RATES.FORGET_FACTOR
+        );
+    }
+
+    state.confirmedWinsLog.push(winningNumberVal);
+    state.setCurrentPendingCalculationId(null);
+    dom.winningNumberInput.value = '';
+
+    // AI training check
+    const confirmedCount = state.history.filter(item => item.winningNumber !== null && item.status !== 'pending').length;
+    if (confirmedCount >= config.AI_CONFIG.trainingMinHistory && !state.isAiReady) {
+        analysis.initializeAi();
+    }
+
+    console.log("handleSubmitResult: Result submitted. Running all analyses.");
+    analysis.runAllAnalyses();
     renderHistory();
     await updateMainRecommendationDisplay();
+    updateWinLossCounter();
+    renderStrategyWeights();
+    state.saveState();
 }
 
 function runSimulationOnHistory(spinsToProcess) {
@@ -755,81 +232,149 @@ function runSimulationOnHistory(spinsToProcess) {
             lastWinningNumber: localConfirmedWinsLog.length > 0 ? localConfirmedWinsLog[localConfirmedWinsLog.length - 1] : null,
             useProximityBoostBool: state.useProximityBoost, useWeightedZoneBool: state.useWeightedZone,
             useNeighbourFocusBool: state.useNeighbourFocus, isAiReadyBool: false,
-            useTrendConfirmationBool: state.useTrendConfirmation, useAdaptivePlayBool: state.useAdaptivePlay, useLessStrictBool: state.useLessStrict,
-            sectorContextProvider: contextProvider, // Context works without AI training
-            numberContextProvider: contextProvider, // Number context also available
+            useTrendConfirmationBool: state.useTrendConfirmation,
+            useAdaptivePlayBool: state.useAdaptivePlay,
+            useLessStrictBool: state.useLessStrict,
+            useTableChangeWarningsBool: state.useTableChangeWarnings,
+            rollingPerformance: null, factorShiftStatus: null,
+            useLowestPocketDistanceBool: state.useLowestPocketDistance,
+            isCurrentRepeat: false, isCurrentNeighborHit: false,
+            sectorContextProvider: contextProvider,
             current_STRATEGY_CONFIG: config.STRATEGY_CONFIG,
-            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES, currentHistoryForTrend: localHistory,
+            current_ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES,
             activePredictionTypes: state.activePredictionTypes,
-            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount, allPredictionTypes: config.allPredictionTypes,
-            terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
+            currentHistoryForTrend: localHistory,
+            useDynamicTerminalNeighbourCount: state.useDynamicTerminalNeighbourCount,
+            allPredictionTypes: config.allPredictionTypes, terminalMapping: config.terminalMapping, rouletteWheel: config.rouletteWheel
         });
         
         const newHistoryItem = {
             id: Date.now() + i,
-            num1,
-            num2,
-            difference: Math.abs(num2 - num1),
-            status: 'resolved',
-            hitTypes: [],
-            typeSuccessStatus: {},
-            winningNumber,
-            recommendedGroupId: recommendation.bestCandidate?.type.id || null,
-            recommendationDetails: recommendation.bestCandidate?.details || null
+            num1: num1, num2: num2, difference: Math.abs(num2 - num1),
+            status: 'pending', hitTypes: [], typeSuccessStatus: {}, winningNumber: null, pocketDistance: null,
+            recommendedGroupId: recommendation.bestCandidate ? recommendation.bestCandidate.type.id : null,
+            recommendationDetails: recommendation.bestCandidate ? recommendation.bestCandidate.details : null
         };
         
         evaluateCalculationStatus(newHistoryItem, winningNumber, state.useDynamicTerminalNeighbourCount, state.activePredictionTypes, config.terminalMapping, config.rouletteWheel);
-        localHistory.push(newHistoryItem);
         
         if (newHistoryItem.recommendedGroupId && newHistoryItem.recommendationDetails?.primaryDrivingFactor) {
             const primaryFactor = newHistoryItem.recommendationDetails.primaryDrivingFactor;
             const influenceChangeMagnitude = Math.max(0, newHistoryItem.recommendationDetails.finalScore - config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MIN_THRESHOLD) * config.ADAPTIVE_LEARNING_RATES.CONFIDENCE_WEIGHTING_MULTIPLIER;
             
-            if (localAdaptiveFactorInfluences[primaryFactor] === undefined) localAdaptiveFactorInfluences[primaryFactor] = 1.0;
+            if (localAdaptiveFactorInfluences[primaryFactor] === undefined) {
+                localAdaptiveFactorInfluences[primaryFactor] = 1.0;
+            }
             
-            if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.min(
-                    config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE,
-                    localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)
-                );
-            } else {
-                localAdaptiveFactorInfluences[primaryFactor] = Math.max(
-                    config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
-                    localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)
-                );
+            if (newHistoryItem.recommendationDetails.finalScore > 0 && newHistoryItem.recommendationDetails.signal !== 'Avoid Play') {
+                if (newHistoryItem.hitTypes.includes(newHistoryItem.recommendedGroupId)) {
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.min(
+                        config.ADAPTIVE_LEARNING_RATES.MAX_INFLUENCE,
+                        localAdaptiveFactorInfluences[primaryFactor] + (config.ADAPTIVE_LEARNING_RATES.SUCCESS + influenceChangeMagnitude)
+                    );
+                } else {
+                    localAdaptiveFactorInfluences[primaryFactor] = Math.max(
+                        config.ADAPTIVE_LEARNING_RATES.MIN_INFLUENCE,
+                        localAdaptiveFactorInfluences[primaryFactor] - (config.ADAPTIVE_LEARNING_RATES.FAILURE + influenceChangeMagnitude)
+                    );
+                }
             }
         }
         
-        if (winningNumber !== null) {
-            localConfirmedWinsLog.push(winningNumber);
-        }
+        localHistory.push(newHistoryItem);
+        localConfirmedWinsLog.push(winningNumber);
     }
     
     return localHistory;
 }
 
-function startLivePolling() {
-    apiContext.stopLivePolling();
+async function loadApiHistoryIntoApp(spins, tableName) {
+    if (spins.length < 3) {
+        dom.apiStatusMessage.textContent = 'Not enough spins to process (need at least 3).';
+        return;
+    }
     
-    handleApiRefresh();
+    const simulatedHistory = runSimulationOnHistory(spins);
     
-    const intervalId = setInterval(async () => {
-        await handleApiRefresh();
-    }, 2500);
+    if (simulatedHistory.length === 0) {
+        dom.apiStatusMessage.textContent = 'Failed to simulate history from spins.';
+        return;
+    }
     
-    apiContext.setLivePollingInterval(intervalId);
+    state.history.length = 0;
+    state.history.push(...simulatedHistory);
+    
+    state.confirmedWinsLog.length = 0;
+    spins.slice(2).forEach(spin => state.confirmedWinsLog.push(spin));
+    
+    state.setCurrentPendingCalculationId(null);
+    
+    const latestSpins = spins.slice(0, 2);
+    if (latestSpins.length >= 2) {
+        dom.number1.value = latestSpins[1];
+        dom.number2.value = latestSpins[0];
+    }
+    
+    analysis.runAllAnalyses();
+    renderHistory();
+    await updateMainRecommendationDisplay();
+    updateWinLossCounter();
+    renderStrategyWeights();
+    state.saveState();
+    
+    dom.apiStatusMessage.textContent = `Loaded ${simulatedHistory.length} items from ${tableName}.`;
 }
 
-// --- LISTENER ATTACHMENT FUNCTIONS ---
+export function attachInputListeners() {
+    dom.number1.addEventListener('input', () => {
+        const num1Val = parseInt(dom.number1.value, 10);
+        const num2Val = parseInt(dom.number2.value, 10);
+        const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+        // FIX: Use wrapped result number
+        const wrappedResult = (!isNaN(num1Val) && !isNaN(num2Val)) ? wrapBaseNumber(Math.abs(num2Val - num1Val)) : null;
+        drawRouletteWheel(wrappedResult, lastWinning);
+        updateMainRecommendationDisplay();
+    });
+    dom.number2.addEventListener('input', () => {
+        const num1Val = parseInt(dom.number1.value, 10);
+        const num2Val = parseInt(dom.number2.value, 10);
+        const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+        // FIX: Use wrapped result number
+        const wrappedResult = (!isNaN(num1Val) && !isNaN(num2Val)) ? wrapBaseNumber(Math.abs(num2Val - num1Val)) : null;
+        drawRouletteWheel(wrappedResult, lastWinning);
+        updateMainRecommendationDisplay();
+    });
 
-export function attachMainActionListeners() {
-    document.getElementById('calculateButton').addEventListener('click', handleNewCalculation);
-    document.getElementById('submitResultButton').addEventListener('click', handleSubmitResult);
-
-    document.getElementById('clearInputsButton').addEventListener('click', handleClearInputs);
-    document.getElementById('swapButton').addEventListener('click', handleSwap);
-    document.getElementById('clearHistoryButton').addEventListener('click', handleClearHistory);
-    dom.historyList.addEventListener('click', handleHistoryAction);
+    document.getElementById('calculateButton').addEventListener('click', () => handleNewCalculation());
+    dom.submitResultButton.addEventListener('click', handleSubmitResult);
+    document.getElementById('swapButton').addEventListener('click', () => {
+        const temp = dom.number1.value;
+        dom.number1.value = dom.number2.value;
+        dom.number2.value = temp;
+        const num1Val = parseInt(dom.number1.value, 10);
+        const num2Val = parseInt(dom.number2.value, 10);
+        const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length - 1] : null;
+        // FIX: Use wrapped result number
+        const wrappedResult = (!isNaN(num1Val) && !isNaN(num2Val)) ? wrapBaseNumber(Math.abs(num2Val - num1Val)) : null;
+        drawRouletteWheel(wrappedResult, lastWinning);
+        updateMainRecommendationDisplay();
+    });
+    document.getElementById('clearHistoryButton').addEventListener('click', () => {
+        if (confirm('Are you sure you want to clear all history?')) {
+            state.history.length = 0;
+            state.confirmedWinsLog.length = 0;
+            state.setCurrentPendingCalculationId(null);
+            state.resetAdaptiveFactorInfluences();
+            state.resetStrategyStates();
+            state.resetPatternMemory();
+            analysis.runAllAnalyses();
+            renderHistory();
+            updateMainRecommendationDisplay();
+            updateWinLossCounter();
+            renderStrategyWeights();
+            state.saveState();
+        }
+    });
 
     [dom.number1, dom.number2].forEach(input => input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -847,22 +392,50 @@ export function attachMainActionListeners() {
 }
 
 export function attachOptimizationButtonListeners() {
-    // Worker handler for optimization progress/completion
+    // FIX: Worker handler for optimization progress/completion/stopped/error
+    // Previously this was missing 'stopped' and 'error' handlers
     optimizationWorker.onmessage = function (e) {
         const { type, payload } = e.data;
-        if (type === 'progress') {
-            const progressHtml = payload.message || 'Optimizing...';
-            updateOptimizationStatus(progressHtml);
-            state.setBestFoundParams(payload);
-            if (payload.debugMetrics) {
-                updateOptimizerDebugPanel(payload.debugMetrics);
-            }
-        } else if (type === 'complete') {
-            showOptimizationComplete(payload);
-            state.setBestFoundParams(payload);
-            if (payload.debugMetrics) {
-                updateOptimizerDebugPanel(payload.debugMetrics);
-            }
+        
+        switch (type) {
+            case 'progress':
+                const totalVariations = payload.maxGenerations * payload.populationSize;
+                const progressHtml = `
+                    Evolving... Gen: <strong>${payload.generation}/${payload.maxGenerations}</strong>
+                    <br>Processed: <strong>${payload.processedCount} / ${totalVariations}</strong>
+                    <br>Best W/L Ratio: <strong>${payload.bestFitness}</strong>
+                `;
+                updateOptimizationStatus(progressHtml);
+                state.setBestFoundParams(payload);
+                if (payload.debugMetrics) {
+                    updateOptimizerDebugPanel(payload.debugMetrics);
+                }
+                break;
+                
+            case 'complete':
+                showOptimizationComplete(payload);
+                state.setBestFoundParams(payload);
+                if (payload.debugMetrics) {
+                    updateOptimizerDebugPanel(payload.debugMetrics);
+                }
+                break;
+                
+            case 'stopped':
+                // FIX: This case was missing - now properly handles stop
+                showOptimizationStopped();
+                console.log("Optimization stopped by worker.");
+                break;
+                
+            case 'error':
+                // FIX: This case was missing - now properly handles errors
+                const errorHtml = `<span style="color: #ef4444;"><strong>Error:</strong> ${payload.message}</span>`;
+                updateOptimizationStatus(errorHtml);
+                showOptimizationStopped();
+                console.error("Optimization error:", payload.message);
+                break;
+                
+            default:
+                console.warn("Unknown message type from optimization worker:", type);
         }
     };
 
@@ -916,6 +489,8 @@ export function attachOptimizationButtonListeners() {
         dom.stopOptimizationButton.addEventListener('click', () => {
             console.log("Stop Optimization button clicked.");
             optimizationWorker.postMessage({ type: 'stop' });
+            // Immediately update UI to show stopping state
+            updateOptimizationStatus('Stopping optimization...');
         });
     }
 
@@ -1055,7 +630,9 @@ export function attachToggleListeners() {
                 const num1Val = parseInt(dom.number1.value, 10);
                 const num2Val = parseInt(document.getElementById('number2').value, 10);
                 const lastWinning = state.confirmedWinsLog.length > 0 ? state.confirmedWinsLog[state.confirmedWinsLog.length-1] : null;
-                drawRouletteWheel(!isNaN(num1Val) && !isNaN(num2Val) ? Math.abs(num2Val-num1Val) : null, lastWinning);
+                // FIX: Use wrapped result number
+                const wrappedResult = (!isNaN(num1Val) && !isNaN(num2Val)) ? wrapBaseNumber(Math.abs(num2Val - num1Val)) : null;
+                drawRouletteWheel(wrappedResult, lastWinning);
             }
             hidePatternAlert();
             updateMainRecommendationDisplay();
@@ -1119,27 +696,30 @@ export function attachApiEventHandlers() {
         dom.apiProviderSelect.addEventListener('change', async () => {
             const provider = dom.apiProviderSelect.value;
             
-            dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
+            dom.apiTableSelect.innerHTML = '<option value="">Loading tables...</option>';
             dom.apiTableSelect.disabled = true;
             dom.apiAutoToggle.disabled = true;
             dom.apiLiveButton.disabled = true;
             dom.apiRefreshButton.disabled = true;
             dom.apiLoadHistoryButton.disabled = true;
-            apiContext.stopLivePolling();
-            updateApiLiveButtonState(false);
             updateHistoricalDataIndicator(null);
             
             if (!provider) {
-                dom.apiStatusMessage.textContent = '';
+                dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
+                dom.apiStatusMessage.textContent = 'Select a provider to begin';
                 return;
             }
             
-            dom.apiStatusMessage.textContent = 'Loading tables...';
             try {
-                const apiResponse = await winspinApi.fetchRouletteData(provider);
+                dom.apiStatusMessage.textContent = `Loading ${provider} tables...`;
+                
+                // Fetch with historical max data for context calibration
+                const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
                 apiContext.setLastApiResponse(apiResponse);
                 
                 const tables = winspinApi.extractTableNames(apiResponse);
+                
+                dom.apiTableSelect.innerHTML = '<option value="">Select Table</option>';
                 
                 if (tables.length === 0) {
                     dom.apiStatusMessage.textContent = 'No tables found for this provider.';
@@ -1217,22 +797,218 @@ export function attachApiEventHandlers() {
                 updateApiLiveButtonState(false);
                 dom.apiStatusMessage.textContent = 'Live polling stopped.';
             } else {
-                startLivePolling();
+                const provider = dom.apiProviderSelect.value;
+                const tableName = dom.apiTableSelect.value;
+                
+                if (!provider || !tableName) {
+                    dom.apiStatusMessage.textContent = 'Please select a provider and table first.';
+                    return;
+                }
+                
+                apiContext.startLivePolling(provider, tableName, async (newSpin) => {
+                    console.log('Live spin received:', newSpin);
+                    
+                    const num1Val = parseInt(dom.number1.value, 10);
+                    const num2Val = parseInt(dom.number2.value, 10);
+                    
+                    if (!isNaN(num1Val) && !isNaN(num2Val)) {
+                        const pendingItemId = state.currentPendingCalculationId;
+                        if (pendingItemId !== null) {
+                            dom.winningNumberInput.value = newSpin;
+                            await handleSubmitResult();
+                        }
+                    }
+                    
+                    const recentSpins = apiContext.getRecentSpins(2);
+                    if (recentSpins.length >= 2) {
+                        dom.number1.value = recentSpins[1];
+                        dom.number2.value = recentSpins[0];
+                        handleNewCalculation(true);
+                    }
+                });
+                
                 updateApiLiveButtonState(true);
-                dom.apiStatusMessage.textContent = 'Live polling started (every 2-3 seconds).';
+                dom.apiStatusMessage.textContent = 'Live polling started...';
             }
         });
     }
     
     if (dom.apiRefreshButton) {
         dom.apiRefreshButton.addEventListener('click', async () => {
-            await handleApiRefresh();
+            const provider = dom.apiProviderSelect.value;
+            const tableName = dom.apiTableSelect.value;
+            
+            if (!provider || !tableName) {
+                dom.apiStatusMessage.textContent = 'Please select a provider and table first.';
+                return;
+            }
+            
+            try {
+                dom.apiStatusMessage.textContent = 'Refreshing data...';
+                
+                // Fetch with historical max for context calibration
+                const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
+                apiContext.setLastApiResponse(apiResponse);
+                
+                // Update sector context
+                const sectorLosses = winspinApi.getSectorLosses(apiResponse, tableName);
+                if (sectorLosses) {
+                    apiContext.updateSectorContext(sectorLosses);
+                }
+                
+                // Update number context
+                const numberLosses = winspinApi.getNumberLosses(apiResponse, tableName);
+                if (numberLosses) {
+                    apiContext.updateNumberContext(numberLosses);
+                }
+                
+                // Update historical data indicator
+                updateHistoricalDataIndicator(apiContext.getDataSourceStatus());
+                
+                const spins = winspinApi.getTableHistory(apiResponse, tableName, 2);
+                
+                if (spins.length >= 2) {
+                    dom.number1.value = spins[1];
+                    dom.number2.value = spins[0];
+                    updateMainRecommendationDisplay();
+                }
+                
+                dom.apiStatusMessage.textContent = `Data refreshed. Latest numbers: ${spins.slice(0, 5).join(', ')}`;
+            } catch (error) {
+                dom.apiStatusMessage.textContent = `Error: ${error.message}`;
+                console.error('Error refreshing data:', error);
+            }
         });
     }
     
     if (dom.apiLoadHistoryButton) {
         dom.apiLoadHistoryButton.addEventListener('click', async () => {
-            await handleApiLoadHistory();
+            const provider = dom.apiProviderSelect.value;
+            const tableName = dom.apiTableSelect.value;
+            
+            if (!provider || !tableName) {
+                dom.apiStatusMessage.textContent = 'Please select a provider and table first.';
+                return;
+            }
+            
+            const confirmed = confirm(
+                'This will replace your current history with the last 30 spins from the API. Continue?'
+            );
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            try {
+                dom.apiStatusMessage.textContent = 'Loading history with context data...';
+                
+                // Fetch with losses data for context
+                const apiResponse = await winspinApi.fetchRouletteDataWithLosses(provider);
+                apiContext.setLastApiResponse(apiResponse);
+                
+                // Update sector context from losses data
+                const sectorLosses = winspinApi.getSectorLosses(apiResponse, tableName);
+                if (sectorLosses) {
+                    const success = apiContext.updateSectorContext(sectorLosses);
+                    if (success) {
+                        addTrainingLogEntry('info', `Sector context loaded (${sectorLosses.dataQuality})`);
+                        if (sectorLosses.hasHistoricalMax) {
+                            addTrainingLogEntry('success', 'Historical max data (5+ years) available for sector calibration');
+                        } else {
+                            addTrainingLogEntry('warning', 'Sector historical max data not available - using session data only');
+                        }
+                    }
+                } else {
+                    addTrainingLogEntry('warning', 'No sector losses data in API response');
+                }
+                
+                // Update number-level context from losses data
+                const numberLosses = winspinApi.getNumberLosses(apiResponse, tableName);
+                if (numberLosses) {
+                    const success = apiContext.updateNumberContext(numberLosses);
+                    if (success) {
+                        addTrainingLogEntry('info', `Number context loaded (${numberLosses.dataQuality})`);
+                        if (numberLosses.hasHistoricalMax) {
+                            addTrainingLogEntry('success', 'Historical max data (5+ years) available for number calibration');
+                        } else {
+                            addTrainingLogEntry('warning', 'Number historical max data not available - using session data only');
+                        }
+                    }
+                } else {
+                    addTrainingLogEntry('info', 'Number-level context not available from API');
+                }
+                
+                // Update historical data indicator
+                updateHistoricalDataIndicator(apiContext.getDataSourceStatus());
+                
+                const spins = winspinApi.getTableHistory(apiResponse, tableName);
+                
+                if (spins.length === 0) {
+                    dom.apiStatusMessage.textContent = 'No spins available for this table.';
+                    return;
+                }
+                
+                await loadApiHistoryIntoApp(spins, tableName);
+                
+            } catch (error) {
+                dom.apiStatusMessage.textContent = `Error: ${error.message}`;
+                console.error('Error loading history:', error);
+            }
         });
     }
+}
+
+function resetAllParameters() {
+    if (confirm('Are you sure you want to reset all parameters to defaults?')) {
+        Object.assign(config.STRATEGY_CONFIG, config.DEFAULT_PARAMETERS.STRATEGY_CONFIG);
+        Object.assign(config.ADAPTIVE_LEARNING_RATES, config.DEFAULT_PARAMETERS.ADAPTIVE_LEARNING_RATES);
+        initializeAdvancedSettingsUI();
+        dom.parameterStatusMessage.textContent = 'Parameters reset to defaults.';
+        analysis.handleStrategyChange();
+        updateMainRecommendationDisplay();
+        state.saveState();
+    }
+}
+
+function saveParametersToFile() {
+    const params = {
+        STRATEGY_CONFIG: config.STRATEGY_CONFIG,
+        ADAPTIVE_LEARNING_RATES: config.ADAPTIVE_LEARNING_RATES
+    };
+    const blob = new Blob([JSON.stringify(params, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'roulette-parameters.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    dom.parameterStatusMessage.textContent = 'Parameters saved to file.';
+}
+
+function loadParametersFromFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const params = JSON.parse(e.target.result);
+            if (params.STRATEGY_CONFIG) {
+                Object.assign(config.STRATEGY_CONFIG, params.STRATEGY_CONFIG);
+            }
+            if (params.ADAPTIVE_LEARNING_RATES) {
+                Object.assign(config.ADAPTIVE_LEARNING_RATES, params.ADAPTIVE_LEARNING_RATES);
+            }
+            initializeAdvancedSettingsUI();
+            dom.parameterStatusMessage.textContent = 'Parameters loaded from file.';
+            analysis.handleStrategyChange();
+            updateMainRecommendationDisplay();
+            state.saveState();
+        } catch (error) {
+            dom.parameterStatusMessage.textContent = 'Error loading parameters: Invalid file format.';
+            console.error('Error loading parameters:', error);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
 }
