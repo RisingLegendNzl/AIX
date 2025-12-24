@@ -697,6 +697,9 @@ async function processApiHistoryLoad(spins) {
     // API returns newest->oldest, reverse to get oldest->newest for simulation
     const spinsOldestFirst = [...spins].reverse();
     
+    // CRITICAL: Ensure activePredictionTypes reflects current useAdvancedCalculations setting before simulation
+    analysis.updateActivePredictionTypes();
+    
     const simulatedHistory = runSimulationOnHistory(spinsOldestFirst);
     
     if (currentLivePendingItem) {
@@ -920,18 +923,31 @@ export function attachOptimizationButtonListeners() {
         dom.applyBestParamsButton.addEventListener('click', () => {
             console.log("Apply Best Params button clicked.");
             const bestFoundParams = state.bestFoundParams;
-            if (bestFoundParams && bestFoundParams.params) {
-                const params = bestFoundParams.params;
-                const toggles = bestFoundParams.toggles;
+            // FIX: The payload uses 'bestIndividual' not 'params', and 'togglesUsed' not 'toggles'
+            if (bestFoundParams && bestFoundParams.bestIndividual) {
+                const params = bestFoundParams.bestIndividual;
+                const toggles = bestFoundParams.togglesUsed;
                 
                 Object.assign(config.STRATEGY_CONFIG, {
-                    decayFactor: params.decayFactor, hitRateThreshold: params.hitRateThreshold,
-                    hitRateMultiplier: params.hitRateMultiplier, streakMultiplier: params.streakMultiplier,
-                    maxStreakPoints: params.maxStreakPoints, proximityMaxDistance: params.proximityMaxDistance,
-                    proximityMultiplier: params.proximityMultiplier, neighbourMultiplier: params.neighbourMultiplier,
-                    maxNeighbourPoints: params.maxNeighbourPoints, aiConfidenceMultiplier: params.aiConfidenceMultiplier,
-                    minAiPointsForReason: params.minAiPointsForReason, conditionalProbMultiplier: params.conditionalProbMultiplier,
-                    minConditionalSampleSize: params.minConditionalSampleSize,
+                    learningRate_success: params.learningRate_success,
+                    learningRate_failure: params.learningRate_failure,
+                    maxWeight: params.maxWeight,
+                    minWeight: params.minWeight,
+                    decayFactor: params.decayFactor,
+                    patternMinAttempts: params.patternMinAttempts,
+                    patternSuccessThreshold: params.patternSuccessThreshold,
+                    triggerMinAttempts: params.triggerMinAttempts,
+                    triggerSuccessThreshold: params.triggerSuccessThreshold,
+                    hitRateThreshold: params.hitRateThreshold,
+                    hitRateMultiplier: params.hitRateMultiplier,
+                    streakMultiplier: params.streakMultiplier,
+                    maxStreakPoints: params.maxStreakPoints,
+                    proximityMaxDistance: params.proximityMaxDistance,
+                    proximityMultiplier: params.proximityMultiplier,
+                    neighbourMultiplier: params.neighbourMultiplier,
+                    maxNeighbourPoints: params.maxNeighbourPoints,
+                    aiConfidenceMultiplier: params.aiConfidenceMultiplier,
+                    minAiPointsForReason: params.minAiPointsForReason,
                     ADAPTIVE_STRONG_PLAY_THRESHOLD: params.ADAPTIVE_STRONG_PLAY_THRESHOLD,
                     ADAPTIVE_PLAY_THRESHOLD: params.ADAPTIVE_PLAY_THRESHOLD,
                     SIMPLE_PLAY_THRESHOLD: params.SIMPLE_PLAY_THRESHOLD,
@@ -939,6 +955,7 @@ export function attachOptimizationButtonListeners() {
                     LESS_STRICT_PLAY_THRESHOLD: params.LESS_STRICT_PLAY_THRESHOLD,
                     LESS_STRICT_HIGH_HIT_RATE_THRESHOLD: params.LESS_STRICT_HIGH_HIT_RATE_THRESHOLD,
                     LESS_STRICT_MIN_STREAK: params.LESS_STRICT_MIN_STREAK,
+                    MIN_TREND_HISTORY_FOR_CONFIRMATION: params.MIN_TREND_HISTORY_FOR_CONFIRMATION,
                     WARNING_ROLLING_WINDOW_SIZE: params.WARNING_ROLLING_WINDOW_SIZE,
                     WARNING_MIN_PLAYS_FOR_EVAL: params.WARNING_MIN_PLAYS_FOR_EVAL,
                     WARNING_LOSS_STREAK_THRESHOLD: params.WARNING_LOSS_STREAK_THRESHOLD,
@@ -951,8 +968,10 @@ export function attachOptimizationButtonListeners() {
                     WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT: params.WARNING_FACTOR_SHIFT_MIN_DOMINANCE_PERCENT
                 });
                 Object.assign(config.ADAPTIVE_LEARNING_RATES, {
-                    SUCCESS: params.adaptiveSuccessRate, FAILURE: params.adaptiveFailureRate,
-                    MIN_INFLUENCE: params.minAdaptiveInfluence, MAX_INFLUENCE: params.maxAdaptiveInfluence,
+                    SUCCESS: params.adaptiveSuccessRate,
+                    FAILURE: params.adaptiveFailureRate,
+                    MIN_INFLUENCE: params.minAdaptiveInfluence,
+                    MAX_INFLUENCE: params.maxAdaptiveInfluence,
                     FORGET_FACTOR: params.FORGET_FACTOR,
                     CONFIDENCE_WEIGHTING_MULTIPLIER: params.CONFIDENCE_WEIGHTING_MULTIPLIER,
                     CONFIDENCE_WEIGHTING_MIN_THRESHOLD: params.CONFIDENCE_WEIGHTING_MIN_THRESHOLD
@@ -969,6 +988,9 @@ export function attachOptimizationButtonListeners() {
                 analysis.handleStrategyChange();
                 hidePatternAlert();
                 updateMainRecommendationDisplay();
+            } else {
+                console.warn("Apply Best Params: No bestIndividual found in bestFoundParams.", bestFoundParams);
+                updateOptimizationStatus('Error: No optimization results to apply.');
             }
             console.log("Apply Best Params: Settings applied and UI updated.");
         });
