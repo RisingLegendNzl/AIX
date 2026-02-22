@@ -1,388 +1,807 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Element Landscaping Waikato - Professional landscaping and outdoor solutions in the Waikato region. Quality workmanship, reliable service.">
-    <meta name="keywords" content="landscaping, Waikato, lawn mowing, garden design, retaining walls, paving, hedge trimming">
-    <title>Element Landscaping Waikato | Professional Landscaping Services</title>
-    
-    <!-- Fonts -->
+    <title>Automated Terminal Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Styles -->
-    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .card {
+            background-color: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 35px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .form-input {
+            border: 2px solid #e2e8f0; border-radius: 8px; padding: 12px;
+            font-size: 1rem; width: 100%; transition: border-color 0.3s ease;
+        }
+        .form-input:focus { outline: none; border-color: #4f46e5; }
+        .btn {
+            font-weight: 600; padding: 12px 20px; border-radius: 8px;
+            transition: all 0.2s ease; border: 2px solid transparent; cursor: pointer;
+        }
+        .btn:disabled { background-color: #e5e7eb; color: #6b7280; cursor: not-allowed; }
+        .btn-primary { background-color: #4f46e5; color: #ffffff; }
+        .btn-primary:hover:not(:disabled) { background-color: #4338ca; transform: translateY(-1px); }
+        .btn-secondary { background-color: #eef2ff; color: #4f46e5; }
+        .btn-secondary:hover:not(:disabled) { background-color: #e0e7ff; }
+        .btn-danger { background-color: #fee2e2; color: #dc2626; }
+        .btn-danger:hover { background-color: #fecaca; }
+        
+        .history-list, .analysis-list { max-height: 350px; overflow-y: auto; padding-right: 8px; }
+        .history-item {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s ease;
+            padding: 12px 20px;
+            border-radius: 12px;
+            position: relative;
+            flex-wrap: wrap;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .history-item.is-success { background-color: #f0fdf4; border-color: #22c55e; }
+        .history-item.is-fail { background-color: #fef2f2; border-color: #ef4444; }
+
+        .state-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 6px;
+            color: white;
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            white-space: nowrap;
+        }
+
+        .calculation-info { width: 100%; }
+
+        .additional-details {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        .history-item .flex {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+        }
+
+        .bg-amber-500 { background-color: #f59e0b; }
+        .bg-blue-500 { background-color: #3b82f6; }
+        .bg-red-500 { background-color: #ef4444; }
+        .bg-sumMinus { background-color: #8b5cf6; }
+        .bg-sumResult { background-color: #10b981; }
+        .bg-sumPlus { background-color: #f43f5e; }
+
+        .status-box {
+            width: 24px; height: 24px; border-radius: 6px;
+            transition: all 0.2s ease;
+            flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+        }
+        .status-box svg { width: 16px; height: 16px; stroke-width: 2.5; color: #ffffff; }
+        
+        .success-box { border: 2px solid #dcfce7; background-color: #f0fdf4; }
+        .is-success .success-box { background-color: #22c55e; border-color: #16a34a; }
+
+        .fail-box { border: 2px solid #fee2e2; background-color: #fef2f2; }
+        .is-fail .fail-box { background-color: #ef4444; border-color: #dc2626; }
+
+        .delete-btn {
+            width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+            transition: all 0.2s ease; flex-shrink: 0; display: flex;
+            align-items: center; justify-content: center;
+            border: 2px solid #e5e7eb; background-color: #fff;
+        }
+        .delete-btn svg { color: #9ca3af; width: 20px; height: 20px; stroke-width: 2; }
+        .delete-btn:hover { background-color: #f3f4f6; border-color: #d1d5db;}
+        
+        .swap-btn {
+            height: 40px; width: 40px;
+            background-color: #fff;
+            border: 2px solid #e2e8f0;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.2s ease; color: #9ca3af;
+        }
+        .swap-btn:hover { color: #4f46e5; border-color: #c7d2fe; transform: rotate(180deg); }
+
+        .result-display { border-radius: 12px; background-color: #f8fafc; padding: 16px; }
+        
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            width: 100%;
+            padding: 0.5rem 0;
+        }
+        .toggle-checkbox {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+        .toggle-switch {
+            width: 52px;
+            height: 32px;
+            background-color: #e5e7eb;
+            border-radius: 9999px;
+            position: relative;
+            transition: background-color 0.2s ease-in-out;
+            flex-shrink: 0;
+        }
+        .toggle-knob {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 28px;
+            height: 28px;
+            background-color: white;
+            border-radius: 9999px;
+            transition: transform 0.2s ease-in-out;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .toggle-checkbox:checked + .toggle-switch {
+            background-color: #4f46e5;
+        }
+        .toggle-checkbox:checked + .toggle-switch .toggle-knob {
+            transform: translateX(20px);
+        }
+        
+        .strategy-guide-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out, padding-top 0.5s ease-in-out, margin-top 0.5s ease-in-out;
+            padding-top: 0;
+            padding-bottom: 0;
+            border-top: 1px solid transparent;
+        }
+        .strategy-guide-content.open {
+            max-height: 1000px;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-color: #e5e7eb;
+            overflow-y: auto;
+        }
+        .strategy-guide-content h4 { font-weight: 600; color: #374151; margin-top: 0.5rem; }
+        .strategy-guide-content p { color: #6b7280; font-size: 0.875rem; }
+
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .slider-group label {
+            flex-basis: 120px;
+            font-size: 0.875rem;
+            color: #4b5563;
+        }
+        .slider-group input[type="range"] {
+            flex-grow: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: #d1d5db;
+            outline: none;
+            opacity: 0.7;
+            -webkit-transition: .2s;
+            transition: opacity .2s;
+        }
+        .slider-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+        }
+        .slider-group input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+        }
+        .slider-group input[type="number"] {
+            width: 70px;
+            padding: 0.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            text-align: center;
+        }
+
+        .text-pink-400 { color: #f472b6; }
+
+        .text-purple-700 { color: #7e22ce; }
+
+        .pattern-alert {
+            background-color: #eef2ff;
+            border: 2px solid #c7d2fe;
+            color: #4338ca;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .ai-details-section {
+            background-color: #f0f4f8;
+            border-top: 1px solid transparent;
+            border-radius: 0 0 8px 8px;
+            padding: 0 16px;
+            margin-top: 0;
+            font-size: 0.8rem;
+            color: #4a5568;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            visibility: hidden;
+            display: block;
+            transition: max-height 0.5s ease-out, padding 0.5s ease-out, margin-top 0.5s ease-out, border-top-color 0.5s ease-out, opacity 0.3s ease-out, visibility 0.3s ease-out;
+        }
+        .ai-details-section.open {
+            max-height: 500px;
+            padding: 12px 16px;
+            margin-top: 8px;
+            border-top-color: #e2e8f0;
+            opacity: 1;
+            visibility: visible;
+            display: block;
+        }
+        .ai-details-toggle {
+            display: block;
+            width: fit-content;
+            margin-top: 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #4f46e5;
+            cursor: pointer;
+            text-decoration: underline;
+            transition: color 0.2s ease;
+        }
+        .ai-details-toggle:hover {
+            color: #4338ca;
+        }
+
+        /* Training Log Styles */
+        .training-log-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-in-out, padding 0.4s ease-in-out, margin-top 0.4s ease-in-out;
+            padding: 0;
+            margin-top: 0;
+            border-top: 1px solid transparent;
+        }
+        .training-log-content.open {
+            max-height: 300px;
+            padding: 12px;
+            margin-top: 12px;
+            border-top-color: #e5e7eb;
+            overflow-y: auto;
+        }
+        .training-log-list {
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            line-height: 1.4;
+        }
+        .training-log-entry {
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+        .training-log-entry.info { background-color: #f0f9ff; color: #0369a1; }
+        .training-log-entry.success { background-color: #f0fdf4; color: #15803d; }
+        .training-log-entry.warning { background-color: #fffbeb; color: #b45309; }
+        .training-log-entry.error { background-color: #fef2f2; color: #dc2626; }
+        .training-log-entry.data { background-color: #f5f3ff; color: #6d28d9; }
+        
+        /* Optimizer Debug Panel Styles */
+        .optimizer-debug-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s ease-in-out, padding 0.4s ease-in-out, margin-top 0.4s ease-in-out;
+            padding: 0;
+            margin-top: 0;
+            border-top: 1px solid transparent;
+        }
+        .optimizer-debug-content.open {
+            max-height: 400px;
+            padding: 12px;
+            margin-top: 12px;
+            border-top-color: #e5e7eb;
+            overflow-y: auto;
+        }
+        .debug-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+        .debug-stat-row:nth-child(odd) { background-color: #f9fafb; }
+        .debug-stat-label { font-weight: 600; color: #4b5563; }
+        .debug-stat-value { color: #1f2937; font-family: 'Courier New', monospace; }
+        
+        /* Group name coloring in recommendation */
+        .group-name-diffMinus { color: #f59e0b; font-weight: 600; }
+        .group-name-diffResult { color: #3b82f6; font-weight: 600; }
+        .group-name-diffPlus { color: #ef4444; font-weight: 600; }
+        .group-name-sumMinus { color: #8b5cf6; font-weight: 600; }
+        .group-name-sumResult { color: #10b981; font-weight: 600; }
+        .group-name-sumPlus { color: #f43f5e; font-weight: 600; }
+        
+        /* Recommended group indicator */
+        .recommended-indicator {
+            display: inline-block;
+            background-color: #22c55e;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        /* Historical Data Indicator Styles */
+        .historical-data-indicator {
+            transition: all 0.3s ease;
+        }
+        .historical-data-indicator.api-calibrated {
+            background-color: #f0fdf4;
+            border-color: #86efac;
+        }
+        .historical-data-indicator.session-only {
+            background-color: #fffbeb;
+            border-color: #fcd34d;
+        }
+    </style>
 </head>
-<body>
-    <!-- Loading Animation -->
-    <div class="loader" id="loader">
-        <div class="logo-animation" id="logoAnimation">
-            <span class="word word-element">
-                <span class="logo-main">E</span>
-                <span class="logo-rest">
-                    <span class="logo-char">l</span>
-                    <span class="logo-char">e</span>
-                    <span class="logo-char">m</span>
-                    <span class="logo-char">e</span>
-                    <span class="logo-char">n</span>
-                    <span class="logo-char">t</span>
-                </span>
-            </span>
-            <span class="word-gap"></span>
-            <span class="word word-landscaping">
-                <span class="logo-main">L</span>
-                <span class="logo-rest">
-                    <span class="logo-char">a</span>
-                    <span class="logo-char">n</span>
-                    <span class="logo-char">d</span>
-                    <span class="logo-char">s</span>
-                    <span class="logo-char">c</span>
-                    <span class="logo-char">a</span>
-                    <span class="logo-char">p</span>
-                    <span class="logo-char">i</span>
-                    <span class="logo-char">n</span>
-                    <span class="logo-char">g</span>
-                </span>
-            </span>
-            <span class="word-gap"></span>
-            <span class="word word-waikato">
-                <span class="logo-main">W</span>
-                <span class="logo-rest">
-                    <span class="logo-char">a</span>
-                    <span class="logo-char">i</span>
-                    <span class="logo-char">k</span>
-                    <span class="logo-char">a</span>
-                    <span class="logo-char">t</span>
-                    <span class="logo-char">o</span>
-                </span>
-            </span>
-        </div>
+<body class="text-gray-800 py-10 px-4">
+    <div class="w-full max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <main class="space-y-8">
+            <div class="card p-8 space-y-6">
+                <div class="text-center">
+                    <h1 class="text-3xl font-bold text-gray-800">Automated Terminal Calculator</h1>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <div class="flex-1 space-y-2">
+                        <label for="number1" class="text-sm font-medium text-gray-700">Number to Subtract</label>
+                        <input type="number" id="number1" class="form-input">
+                    </div>
+                    <button id="swapButton" class="swap-btn mt-8 flex-shrink-0" aria-label="Swap numbers">
+                        <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 12l-4-4m4 4l4-4m6 8v-12m0 12l-4-4m4 4l4-4" />
+                        </svg>
+                    </button>
+                    <div class="flex-1 space-y-2">
+                        <label for="number2" class="text-sm font-medium text-gray-700">Subtract From</label>
+                        <input type="number" id="number2" class="form-input">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <button id="clearInputsButton" class="w-full btn btn-secondary">Clear Inputs</button>
+                    <button id="calculateButton" class="w-full btn btn-primary">Calculate</button>
+                </div>
+
+                <div id="resultDisplay" class="hidden"></div>
+
+                <div id="patternAlert" class="pattern-alert hidden"></div>
+
+                <div id="winningNumberSection" class="pt-4 border-t border-gray-200 space-y-2">
+                    <label for="winningNumberInput" class="text-sm font-medium text-gray-700">Enter Winning Number</label>
+                    <div class="flex gap-4">
+                        <input type="number" id="winningNumberInput" class="form-input" placeholder="0-36">
+                        <button id="submitResultButton" class="btn btn-secondary">Submit Result</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Section -->
+            <div class="card p-8 space-y-4" id="historySection">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-4">
+                        <h2 class="text-xl font-bold text-gray-700">History</h2>
+                        <div class="text-sm font-medium">
+                            <span class="text-green-600 font-semibold">Wins: <span id="winCount">0</span></span> |
+                            <span class="text-red-600 font-semibold">Losses: <span id="lossCount">0</span></span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                         <button id="historyInfoToggle" class="bg-gray-100 text-gray-600 hover:bg-gray-200 px-3 py-1 rounded-md text-sm font-semibold transition-colors duration-200">
+                            Info
+                            <svg class="inline-block w-4 h-4 ml-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </button>
+                        <div id="historyInfoDropdown" class="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-4 text-sm text-gray-700 z-10 hidden">
+                            <p class="font-semibold mb-2">History Log Insights:</p>
+                            <ul class="list-disc pl-4 space-y-1">
+                                <li><strong class="text-gray-800">Reco: [Group] (Hit)</strong> <span class="text-xs text-gray-500">(Group Color Badge):</span> Your recommended group was successful.</li>
+                                <li><strong class="text-gray-800">Reco: [Group] (Missed), Hit: [Other Group(s)]</strong> <span class="text-xs text-gray-500">(Red Badge):</span> Your recommended group missed, but another group happened to hit.</li>
+                                <li><strong class="text-gray-800">Reco: [Group] (Missed)</strong> <span class="text-xs text-gray-500">(Group Color Badge/Red Cross):</span> Your recommended group and all other active groups missed.</li>
+                                <li><strong class="green-600">Green checkmark:</strong> Overall, at least one active group hit.</li>
+                                <li><strong class="red-600">Red cross:</strong> Overall, no active group hit.</li>
+                            </ul>
+                        </div>
+                        <button id="clearHistoryButton" class="btn btn-danger text-sm py-2 px-3">Clear History</button>
+                    </div>
+                </div>
+                <ul id="historyList" class="history-list space-y-3"></ul>
+            </div>
+
+            <!-- API Live Data Integration Card -->
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Live Data Integration</h2>
+                <p class="text-sm text-gray-500">Connect to live roulette tables via Winspin.bet API</p>
+                
+                <div class="space-y-4">
+                    <!-- Provider Selection -->
+                    <div>
+                        <label for="apiProviderSelect" class="text-sm font-medium text-gray-700 block mb-2">Provider</label>
+                        <select id="apiProviderSelect" class="form-input">
+                            <option value="">Select Provider</option>
+                            <option value="Evolution">Evolution</option>
+                            <option value="Pragmatic">Pragmatic Play</option>
+                            <option value="Ezugi">Ezugi</option>
+                            <option value="Playtech">Playtech</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Table Selection -->
+                    <div>
+                        <label for="apiTableSelect" class="text-sm font-medium text-gray-700 block mb-2">Table</label>
+                        <select id="apiTableSelect" class="form-input" disabled>
+                            <option value="">Select Table</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Auto Mode Toggle -->
+                    <div class="pt-2 border-t border-gray-200">
+                        <label class="toggle-label">
+                            <span class="font-medium text-gray-700">Auto Mode (API Input)</span>
+                            <input type="checkbox" id="apiAutoToggle" class="toggle-checkbox" disabled>
+                            <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                        </label>
+                        <p class="text-xs text-gray-500 mt-1">When enabled, API becomes the input source (disables manual entry)</p>
+                    </div>
+                    
+                    <!-- Control Buttons -->
+                    <div class="grid grid-cols-3 gap-3 pt-2">
+                        <button id="apiLiveButton" class="btn btn-primary" disabled>Live</button>
+                        <button id="apiRefreshButton" class="btn btn-secondary" disabled>Refresh</button>
+                        <button id="apiLoadHistoryButton" class="btn btn-secondary" disabled>Load History</button>
+                    </div>
+                    
+                    <!-- Status Message -->
+                    <div id="apiStatusMessage" class="text-sm text-center text-gray-600 min-h-[20px] p-2 bg-gray-50 rounded-md">
+                        Select a provider to begin
+                    </div>
+                    
+                    <!-- Historical Data Source Indicator -->
+                    <div id="historicalDataIndicator" class="historical-data-indicator p-3 rounded-lg border bg-gray-50 border-gray-200">
+                        <div class="flex items-center text-gray-400">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <span class="text-xs">Historical data: Not loaded</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Train AI Button + Training Log -->
+            <div class="card p-6 space-y-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-700">AI Training</h3>
+                        <p class="text-xs text-gray-500">Train AI model using stored spin history</p>
+                    </div>
+                    <button id="trainAiButton" class="btn btn-primary">Analyze & Train AI</button>
+                </div>
+                
+                <!-- AI Status Display -->
+                <div id="aiModelStatus" class="text-sm text-gray-700 text-center font-medium py-2 bg-gray-50 rounded-md"></div>
+                
+                <!-- Training Log Toggle -->
+                <div id="trainingLogHeader" class="flex items-center justify-between cursor-pointer pt-2">
+                    <span class="text-sm font-medium text-gray-600">Training Log</span>
+                    <button id="trainingLogToggle" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">
+                        Show Log ▼
+                    </button>
+                </div>
+                
+                <!-- Training Log Content (collapsed by default) -->
+                <div id="trainingLogContent" class="training-log-content bg-gray-50 rounded-lg">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-semibold text-gray-500">Log Entries (max 200)</span>
+                        <button id="clearTrainingLogButton" class="text-xs text-red-500 hover:text-red-700">Clear Log</button>
+                    </div>
+                    <div id="trainingLogList" class="training-log-list">
+                        <div class="text-gray-400 text-center py-4">No log entries yet</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <aside class="space-y-8">
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">AI Parameter Optimizer</h2>
+                <p class="text-sm text-gray-500">
+                    Use a genetic algorithm to evolve the best possible strategy parameters.
+                    The AI will run simulations to find the settings that produce the highest win/loss ratio.
+                    <strong>This is a computationally intensive process.</strong>
+                </p>
+            
+                <div class="grid grid-cols-2 gap-4">
+                    <button id="startOptimizationButton" class="w-full btn btn-primary">Start Optimization</button>
+                    <button id="stopOptimizationButton" class="w-full btn btn-danger" disabled>Stop Optimization</button>
+                </div>
+            
+                <div id="optimizationStatus" class="text-center text-sm font-medium text-gray-700 mt-2 min-h-[60px]">
+                </div>
+            
+                <div id="optimizationResult" class="hidden mt-4 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    <h4 class="font-bold text-indigo-800">Optimization Complete!</h4>
+                    <p class="text-sm text-indigo-700 mt-2">Result: <span id="bestFitnessResult" class="font-semibold"></span></p>
+                    <button id="applyBestParamsButton" class="w-full btn btn-secondary mt-3">Apply These Settings</button>
+                </div>
+                
+                <!-- Optimizer Debug Panel Toggle -->
+                <div id="optimizerDebugHeader" class="flex items-center justify-between cursor-pointer pt-2 border-t border-gray-200">
+                    <span class="text-sm font-medium text-gray-600">Debug Info</span>
+                    <button id="optimizerDebugToggle" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">
+                        Show Debug ▼
+                    </button>
+                </div>
+                
+                <!-- Optimizer Debug Panel Content (collapsed by default) -->
+                <div id="optimizerDebugContent" class="optimizer-debug-content bg-gray-50 rounded-lg">
+                    <div id="optimizerDebugData" class="space-y-2">
+                        <div class="text-gray-400 text-center py-4 text-sm">No debug data yet. Start optimization to see metrics.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card p-8">
+                <div id="baseStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
+                    <h2 class="text-xl font-bold text-gray-700">Base Strategies</h2>
+                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
+                </div>
+                <div id="baseStrategyGuideContent" class="strategy-guide-content">
+                    <div class="space-y-4">
+                            <div>
+                                <h4 class="font-bold text-gray-800">Wait for Trend Confirmation</h4>
+                                <p>When enabled, the app becomes more cautious. It will only issue a "Play" recommendation if its top-ranked state is the same as the state that won on the previous successful spin. Otherwise, it will advise you to wait for a stronger signal.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Use Neighbour Score Weighting</h4>
+                                <p>When enabled, this makes the recommendation smarter. It boosts the score of states whose "hit zones" contain numbers that are currently "hot" in the "Neighbour Analysis" panel.</p>
+                            </div>
+                                <div>
+                                <h4 class="font-bold text-gray-800">Use Proximity Boost</h4>
+                                <p>When enabled, this gives a score boost to the state whose hit zone is physically closest on the roulette wheel to the last number spun, based on the theory of wheel "gravity".</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Show Pocket Distance in History</h4>
+                                <p>When enabled, each successful history entry will display the shortest "pocket distance" from the winning number to the successful prediction's hit zone.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Prioritize Lowest Pocket Distance</h4>
+                                <p>When enabled, the recommendation will prioritize the group(s) whose hit zone is closest (pocket distance 0 or 1) to the last confirmed winning number. This overrides other strategy weightings if a very close distance is found.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Enable Advanced Calculation Methods</h4>
+                                <p>When enabled, the app will track and recommend based on additional calculation methods (Sum, Sum +/- 1) alongside the standard Difference-based methods. All active methods will compete for the primary recommendation and have their performance tracked.</p>
+                            </div>
+                        </div>
+                </div>
+                <div class="pt-2 divide-y divide-gray-200">
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Wait for Trend Confirmation</span>
+                        <input type="checkbox" id="trendConfirmationToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Use Neighbour Score Weighting</span>
+                        <input type="checkbox" id="weightedZoneToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Use Proximity Boost</span>
+                        <input type="checkbox" id="proximityBoostToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Show Pocket Distance</span>
+                        <input type="checkbox" id="pocketDistanceToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Prioritize Lowest Pocket Distance</span>
+                        <input type="checkbox" id="lowestPocketDistanceToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Enable Advanced Calculations</span>
+                        <input type="checkbox" id="advancedCalculationsToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                </div>
+            </div>
+            <div class="card p-8">
+                <div id="advancedStrategyGuideHeader" class="flex justify-between items-center cursor-pointer">
+                    <h2 class="text-xl font-bold text-gray-700">Advanced Strategies</h2>
+                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">What do these do?</button>
+                </div>
+                <div id="advancedStrategyGuideContent" class="strategy-guide-content">
+                    <div class="space-y-4">
+                            <div>
+                                <h4 class="font-bold text-gray-800">Dynamic Best Strategy</h4>
+                                <p>When enabled, the app will automatically analyze its recent history to identify which single prediction method is performing the best and advise playing it.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Adaptive Play Signals</h4>
+                                <p>Provides more nuanced betting advice ('Strong Play', 'Wait', 'Avoid Now') based on the quality and risk of the current signal.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Table Change Warnings</h4>
+                                <p>Provides warnings when a previously strong pattern seems to be breaking, helping you avoid potential losing streaks.</p>
+                            </div>
+                                <div>
+                                <h4 class="font-bold text-gray-800">Due for a Hit (Contrarian)</h4>
+                                <p>When enabled, this strategy looks for a state that has been performing well below its historical average and recommends it, betting on a return to the mean.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Neighbour Focus</h4>
+                                <p>When enabled, this strategy refines the main recommendation by highlighting the "hottest" numbers from the Neighbour Analysis that fall within the recommended group's hit zone.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Less Strict Mode</h4>
+                                <p>When enabled, this relaxes the conditions for a "(High Confidence)" recommendation. It will be shown if the top state has a very high hit rate (over 60%) or a long winning streak (3 or more), removing the need for trend confirmation.</p>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Dynamic Terminal Neighbour Count</h4>
+                                <p>When enabled, the "hit zone" for a prediction will dynamically adjust its terminal neighbour count based on whether the winning number is a direct hit or a neighbor. If the winning number is the base number or a direct terminal, the terminal neighbour count will be 0.</p>
+                            </div>
+                        </div>
+                </div>
+                <div class="pt-2 divide-y divide-gray-200">
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Use Dynamic Best Strategy</span>
+                        <input type="checkbox" id="dynamicStrategyToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Adaptive Play Signals</span>
+                        <input type="checkbox" id="adaptivePlayToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Table Change Warnings</span>
+                        <input type="checkbox" id="tableChangeWarningsToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Due for a Hit (Contrarian)</span>
+                        <input type="checkbox" id="dueForHitToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Neighbour Focus</span>
+                        <input type="checkbox" id="neighbourFocusToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Less Strict Mode</span>
+                        <input type="checkbox" id="lessStrictModeToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                    <label class="toggle-label">
+                        <span class="font-medium text-gray-700">Dynamic Terminal Neighbour Count</span>
+                        <input type="checkbox" id="dynamicTerminalNeighbourCountToggle" class="toggle-checkbox">
+                        <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="card p-8">
+                <div id="advancedSettingsHeader" class="flex justify-between items-center cursor-pointer">
+                    <h2 class="text-xl font-bold text-gray-700">Advanced Settings</h2>
+                    <button class="text-indigo-600 hover:text-indigo-800 font-semibold text-sm">Adjust Parameters</button>
+                </div>
+                <div id="advancedSettingsContent" class="strategy-guide-content space-y-6">
+                    <div class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-700">Optimization Categories</h3>
+                        <p class="text-sm text-gray-600 mb-4">Toggle which parameter categories the optimizer should consider.</p>
+                        <div class="divide-y divide-gray-200">
+                            <label class="toggle-label">
+                                <span class="font-medium text-gray-700">Core Strategy Parameters</span>
+                                <input type="checkbox" id="optimizeCoreStrategyToggle" class="toggle-checkbox" checked>
+                                <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                            </label>
+                            <label class="toggle-label">
+                                <span class="font-medium text-gray-700">Adaptive Influence Rates</span>
+                                <input type="checkbox" id="optimizeAdaptiveRatesToggle" class="toggle-checkbox" checked>
+                                <div class="toggle-switch"><div class="toggle-knob"></div></div>
+                            </label>
+                            </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-700">Strategy Learning Rates</h3>
+                        <div class="space-y-3" id="strategyLearningRatesSliders">
+                            </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <h3 class="lg font-semibold text-gray-700">Pattern & Trigger Thresholds</h3>
+                        <div class="space-y-3" id="patternThresholdsSliders">
+                            </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-700">Adaptive Influence Learning</h3>
+                        <div class="space-y-3" id="adaptiveInfluenceSliders">
+                            </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-700">Table Change Warning Parameters</h3>
+                        <div class="space-y-3" id="warningParametersSliders">
+                            </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+                        <button id="resetParametersButton" class="btn btn-secondary">Reset to Defaults</button>
+                        <button id="saveParametersButton" class="btn btn-secondary">Save Parameters to File</button>
+                        <input type="file" id="loadParametersInput" class="hidden" accept=".json">
+                        <label for="loadParametersInput" id="loadParametersLabel" class="w-full text-center btn btn-secondary cursor-pointer">Load Parameters from File</label>
+                    </div>
+
+                    <p id="parameterStatusMessage" class="text-sm text-center text-gray-600 mt-2 h-4"></p>
+                </div>
+            </div>
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Board State Analysis</h2>
+                <div id="boardStateAnalysis" class="space-y-2"></div>
+                <p id="boardStateConclusion" class="text-center font-bold pt-2"></p>
+            </div>
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Dynamic Strategy Weights</h2>
+                <div id="strategyWeightsDisplay" class="space-y-3">
+                    </div>
+            </div>
+            <div class="card p-8 space-y-4">
+                <h2 class="text-xl font-bold text-gray-700">Neighbour Analysis</h2>
+                <p class="text-sm text-gray-500">Analysis of neighboring numbers based on successes.</p>
+                <ul id="analysisList" class="analysis-list space-y-1"></ul>
+            </div>
+        </aside>
     </div>
 
-    <!-- Header -->
-    <header class="header" id="header">
-        <div class="header-inner">
-            <a href="#" class="header-logo">
-                <img src="images/logo_2026.jpg" alt="Element Landscape" class="header-logo-img" />
-            </a>
-            <nav class="header-nav">
-                <a href="#portfolio" class="nav-link">Our Work</a>
-                <a href="#about" class="nav-link">About</a>
-                <a href="#contact" class="nav-link">Contact</a>
-                <a href="https://www.instagram.com/elementlandscapewaikato?igsh=a3NnMGJpcjBxZTlw" target="_blank" rel="noopener noreferrer" class="instagram-link">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-                        <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-                        <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-                    </svg>
-                    <span>elementlandscapingwaikato</span>
-                </a>
-            </nav>
-            <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open menu">
-                <span></span>
-                <span></span>
-                <span></span>
-            </button>
-        </div>
-    </header>
-
-    <!-- Mobile Navigation -->
-    <div class="mobile-nav-overlay" id="mobileNavOverlay"></div>
-    <nav class="mobile-nav" id="mobileNav">
-        <button class="mobile-nav-close" id="mobileNavClose" aria-label="Close menu">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-        </button>
-        <div class="mobile-nav-links">
-            <a href="#portfolio">Our Work</a>
-            <a href="#about">About</a>
-            <a href="#contact">Contact</a>
-        </div>
-        <a href="https://www.instagram.com/elementlandscapewaikato?igsh=a3NnMGJpcjBxZTlw" target="_blank" rel="noopener noreferrer" class="mobile-nav-instagram">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-            </svg>
-            <span>elementlandscapingwaikato</span>
-        </a>
-    </nav>
-
-    <!-- Hero Section -->
-    <section class="hero" id="hero">
-        <div class="hero-content">
-            <div class="hero-brand-image-wrap">
-                <img src="images/logo_2026.jpg" alt="Element Landscape" class="hero-brand-image" />
-            </div>
-            <p class="hero-subtitle">Professional Landscaping &amp; Outdoor Solutions</p>
-            <a href="tel:+64221098684" class="hero-phone">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.19 16a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                </svg>
-                022 109 8684
-            </a>
-            <div class="services-list" id="servicesList">
-                <span class="service-tag">Lawn Mowing &amp; Maintenance</span>
-                <span class="service-tag">Garden Design &amp; Planting</span>
-                <span class="service-tag">Hedge Trimming</span>
-                <span class="service-tag">Section Clean-ups</span>
-                <span class="service-tag">Retaining Walls</span>
-                <span class="service-tag">Paving &amp; Hardscaping</span>
-                <span class="service-tag">General Outdoor Improvements</span>
-            </div>
-        </div>
-        <div class="hero-scroll-indicator">
-            <div class="scroll-mouse"></div>
-        </div>
-    </section>
-
-    <!-- Portfolio / Our Work Section -->
-    <section class="section portfolio" id="portfolio">
-        <div class="section-inner">
-            <div class="section-header">
-                <p class="section-label">Gallery</p>
-                <h2 class="section-title">Our Work</h2>
-            </div>
-            <div class="portfolio-grid" id="portfolioGrid">
-
-                <!-- Featured card — full-width hero image, loads eagerly -->
-                <div class="portfolio-item portfolio-item--featured">
-                    <img
-                        src="images/IMG_1284.jpeg"
-                        alt="Timber boundary fence with black-pebble garden bed — Element Landscaping Waikato"
-                        loading="eager"
-                    >
-                    <div class="portfolio-overlay">
-                        <h3>Fencing &amp; Paving</h3>
-                        <p>Timber boundary fence with black-pebble garden bed</p>
-                    </div>
-                </div>
-
-                <div class="portfolio-item">
-                    <img src="images/22A9081D-5EF7-41FA-8780-4420C970FBC7.jpeg" alt="Landscaping project - Element Landscaping Waikato" loading="lazy">
-                    <div class="portfolio-overlay">
-                        <h3>Professional Landscaping</h3>
-                        <p>Quality outdoor transformation</p>
-                    </div>
-                </div>
-                <div class="portfolio-item">
-                    <img src="images/33D18A1B-6541-43D8-B641-5344CD76F151.jpeg" alt="Fencing and outdoor project - Element Landscaping Waikato" loading="lazy">
-                    <div class="portfolio-overlay">
-                        <h3>Fencing Solutions</h3>
-                        <p>Durable and professional installation</p>
-                    </div>
-                </div>
-                <div class="portfolio-item">
-                    <img src="images/397FF4D9-F2DF-4B69-9C5F-A966E95879A7.jpeg" alt="Rural landscaping project - Element Landscaping Waikato" loading="lazy">
-                    <div class="portfolio-overlay">
-                        <h3>Rural Projects</h3>
-                        <p>Comprehensive outdoor solutions</p>
-                    </div>
-                </div>
-                <div class="portfolio-item">
-                    <img src="images/3A2E9DFD-D596-4A71-BE6B-548FF9393928.jpeg" alt="Boundary fencing - Element Landscaping Waikato" loading="lazy">
-                    <div class="portfolio-overlay">
-                        <h3>Boundary Work</h3>
-                        <p>Expert fencing and boundary solutions</p>
-                    </div>
-                </div>
-                <div class="portfolio-item">
-                    <img src="images/63F8E3C5-4B92-4CA5-B20D-3AD5D2366BA6.jpeg" alt="Detailed craftsmanship - Element Landscaping Waikato" loading="lazy">
-                    <div class="portfolio-overlay">
-                        <h3>Quality Craftsmanship</h3>
-                        <p>Attention to every detail</p>
-                    </div>
-                </div>
-                <div class="portfolio-item">
-                    <img src="images/E7520A8A-4145-4BEC-BFDB-6BAE7355A9F2.jpeg" alt="Large scale project - Element Landscaping Waikato" loading="lazy">
-                    <div class="portfolio-overlay">
-                        <h3>Large Scale Projects</h3>
-                        <p>Comprehensive landscaping solutions</p>
-                    </div>
-                </div>
-
-            </div>
-        </div>
-    </section>
-
-    <!-- About Section -->
-    <section class="section about" id="about">
-        <div class="section-inner">
-            <div class="about-content">
-                <div class="about-text">
-                    <p class="section-label">About Us</p>
-                    <h3>Transforming Outdoor Spaces Across the Waikato</h3>
-                    <p>Element Landscaping Waikato delivers professional landscaping services with an unwavering commitment to quality. From residential gardens to rural properties, we bring expertise, reliability, and attention to detail to every project.</p>
-                    <p>Our team takes pride in understanding your vision and bringing it to life. Whether it's a complete garden transformation, routine maintenance, or a challenging fencing project, we approach each job with the same dedication to excellence.</p>
-                    <div class="about-features">
-                        <div class="about-feature">
-                            <div class="about-feature-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                                </svg>
-                            </div>
-                            <div class="about-feature-text">
-                                <h4>Quality Workmanship</h4>
-                                <p>Built to last, every time</p>
-                            </div>
-                        </div>
-                        <div class="about-feature">
-                            <div class="about-feature-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                    <circle cx="12" cy="10" r="3"></circle>
-                                </svg>
-                            </div>
-                            <div class="about-feature-text">
-                                <h4>Local Service</h4>
-                                <p>Proudly serving Waikato</p>
-                            </div>
-                        </div>
-                        <div class="about-feature">
-                            <div class="about-feature-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <polyline points="12 6 12 12 16 14"></polyline>
-                                </svg>
-                            </div>
-                            <div class="about-feature-text">
-                                <h4>Reliable</h4>
-                                <p>On time, every time</p>
-                            </div>
-                        </div>
-                        <div class="about-feature">
-                            <div class="about-feature-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-                                </svg>
-                            </div>
-                            <div class="about-feature-text">
-                                <h4>Detail Focused</h4>
-                                <p>Nothing overlooked</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="about-image">
-                    <img src="images/22A9081D-5EF7-41FA-8780-4420C970FBC7.jpeg" alt="Element Landscaping quality work">
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Contact Section -->
-    <section class="section contact" id="contact">
-        <div class="section-inner">
-            <div class="section-header">
-                <p class="section-label">Get In Touch</p>
-                <h2 class="section-title">Let's Start Your Project</h2>
-            </div>
-            <div class="contact-content">
-                <div class="contact-info">
-                    <h3>Ready to Transform Your Outdoor Space?</h3>
-                    <p>Get in touch today for a free, no-obligation quote. We'll discuss your vision and provide expert advice on bringing your landscaping dreams to life.</p>
-                    <div class="contact-method">
-                        <div class="contact-method-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.19 16a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                            </svg>
-                        </div>
-                        <div class="contact-method-text">
-                            <span>Call us</span>
-                            <a href="tel:+64221098684">022 109 8684</a>
-                        </div>
-                    </div>
-                    <div class="contact-method">
-                        <div class="contact-method-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-                                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-                                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-                            </svg>
-                        </div>
-                        <div class="contact-method-text">
-                            <span>Follow us</span>
-                            <a href="https://www.instagram.com/elementlandscapewaikato?igsh=a3NnMGJpcjBxZTlw" target="_blank" rel="noopener noreferrer">@elementlandscapingwaikato</a>
-                        </div>
-                    </div>
-                    <div class="contact-method">
-                        <div class="contact-method-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                <circle cx="12" cy="10" r="3"></circle>
-                            </svg>
-                        </div>
-                        <div class="contact-method-text">
-                            <span>Service Area</span>
-                            <p>Waikato Region, New Zealand</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="contact-form">
-                    <h4>Get a Free Quote</h4>
-                    <form id="contactForm">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="name">Name</label>
-                                <input type="text" id="name" name="name" required placeholder="Your name">
-                            </div>
-                            <div class="form-group">
-                                <label for="phone">Phone</label>
-                                <input type="tel" id="phone" name="phone" required placeholder="Your phone number">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="email">Email</label>
-                            <input type="email" id="email" name="email" required placeholder="your@email.com">
-                        </div>
-                        <div class="form-group">
-                            <label for="message">Message</label>
-                            <textarea id="message" name="message" required placeholder="Tell us about your project..."></textarea>
-                        </div>
-                        <button type="submit" class="submit-btn">Send Message</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-inner">
-            <div class="footer-logo">Element Landscaping Waikato</div>
-            <p class="footer-text">© 2025 Element Landscaping Waikato. All rights reserved.</p>
-            <div class="footer-social">
-                <a href="https://www.instagram.com/elementlandscapewaikato?igsh=a3NnMGJpcjBxZTlw" target="_blank" rel="noopener noreferrer">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-                        <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-                        <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-                    </svg>
-                    <span>elementlandscapingwaikato</span>
-                </a>
-            </div>
-        </div>
-    </footer>
-
-    <!-- Lightbox -->
-    <div class="lightbox" id="lightbox">
-        <button class="lightbox-close" id="lightboxClose" aria-label="Close lightbox">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-        </button>
-        <div class="lightbox-content">
-            <img src="" alt="Project image" id="lightboxImg">
-        </div>
-    </div>
-
-    <script src="js/main.js"></script>
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>
